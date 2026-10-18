@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
@@ -164,6 +164,10 @@ public partial class MainWindow : Window
     private bool _forceExitRequested;
     private bool _changingFullScreen;
     private Action? _completeOverlayDismiss;
+    private int _overlayRenderGeneration;
+    private LauncherExitMode _requestedExitMode;
+    private TaskCompletionSource<bool>? _updateExitCompletion;
+    private Action? _authorizeUpdateOnClosed;
     private Windows11SnapLayoutService? _snapLayouts;
     /// <summary>同步区分从最小化恢复与普通尺寸切换。</summary>
     private WindowState _previousWindowStateForAnimation = WindowState.Normal;
@@ -264,14 +268,42 @@ public partial class MainWindow : Window
         };
         ContentRendered += firstFrameOnce;
 
-        // 启动器打开时的淡入+从下方归位动画：RootWindowGrid 的 Opacity/位移初始值已经在
-        // XAML 里通过 TransformGroup 挂好了挂载点，这里只在 Loaded(窗口即将首次显示)时
-        // 触发一次 FadeInMove。放在 Loaded 而不是 ContentRendered，是因为要让动画在
-        // 用户看到窗口的那一刻就开始播，不用等首帧渲染+后面一串 ContentRendered 收尾逻辑
-        // 都跑完；EnableUiAnimations 关闭时 UiAnimationHelper 内部直接同步定终值，不引入
-        // 任何延迟，不影响启动速度。
-        Loaded += (_, _) => UiAnimationHelper.FadeInMove(RootWindowGrid, RootWindowMoveTransform);
-        Loaded += (_, _) => InitializePluginUi();
+        // 先呈现可见起点，待 Loaded / 首次布局完成再启动时钟；复杂插件初始化延后到
+        // 过渡结束，避免首布局或图片加载消耗整段开窗动画。禁用动画时同步使用终态。
+        Loaded += (_, _) =>
+        {
+            var initializationFallback = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+            {
+                Interval = AnimationSettingsService.Duration(260, AnimationKind.WindowOpen) + TimeSpan.FromMilliseconds(150)
+            };
+            void StopOpeningFallback(object? sender, EventArgs e) => initializationFallback.Stop();
+            void InitializeAfterOpening()
+            {
+                initializationFallback.Stop();
+                Closed -= StopOpeningFallback;
+                if (IsLoaded && !_isWindowClosed) InitializePluginUi();
+            }
+            initializationFallback.Tick += (_, _) => InitializeAfterOpening();
+            Closed += StopOpeningFallback;
+            var strength = AnimationSettingsService.Intensity(AnimationKind.WindowOpen);
+            RootWindowGrid.SetCurrentValue(OpacityProperty, 1 - 0.8 * strength);
+            RootWindowMoveTransform.Y = 14 * strength;
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+            {
+                if (_isWindowClosed || !IsLoaded || !IsVisible || WindowState == WindowState.Minimized)
+                {
+                    UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform);
+                    InitializeAfterOpening();
+                    return;
+                }
+                // 兜底从真正开播时计时，不能让繁重首布局提前耗尽这段等待。
+                // 最大化、最小化或还原会重置旧动画；插件初始化仍须独立完成一次。
+                initializationFallback.Start();
+                UiAnimationHelper.FadeInMove(RootWindowGrid, RootWindowMoveTransform,
+                    onCompleted: () => Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                        new Action(InitializeAfterOpening)));
+            }));
+        };
 
         // 注意：这里**不能**调用 ApplyFeatureVisibility()/RefreshSimplifiedModeNavVisibility()。
         // 那两个方法读的是 ConfigService.Config，而 ConfigService.Load() 要到下面几十行之后
@@ -282,12 +314,6 @@ public partial class MainWindow : Window
         // 停在按默认值算出来的普通模式布局上，两边对不上；用户手动关一次再开一次简洁模式，
         // 会走 ApplySimplifiedModeChanged 重新按真实配置刷新，于是"又好了"。
         // 现在统一挪到 ConfigService.Load() 之后调用，见下面 ApplyConfigDrivenVisibility()。
-
-        // 愚人节彩蛋：只在 4 月 1 日、且没有被注册表 noyrj 关闭时才会真正抽中/生效，
-        // 其余 364 天这行调用直接是空操作。见 AprilFoolsService/AprilFoolsUi 类注释。
-        if (App.StartupArgs.DebugAprilFools) AprilFoolsService.EnableDebugAprilFools();
-        AprilFoolsService.EnsureTodaysStateLoaded();
-        AprilFoolsUi.Attach(this);
 
         // 最大化时"留出任务栏空间"：光挂 WindowChrome 不够可靠（见 WindowChromeService.
         // EnableWorkAreaAwareMaximize 顶部注释里关于 Per-Monitor-V2 DPI 下已知 bug 的说明），
@@ -306,6 +332,15 @@ public partial class MainWindow : Window
         Closed += (_, _) =>
         {
             _snapLayouts?.Dispose();
+            var authorized = false;
+            if (_updateExitCompletion != null && _requestedExitMode == LauncherExitMode.PreserveGamesForUpdate)
+            {
+                try { _authorizeUpdateOnClosed?.Invoke(); authorized = _authorizeUpdateOnClosed != null; }
+                catch (Exception ex) { ErrorPresenter.LogFallback("更新关闭授权失败，未允许替换当前版本", ex); }
+            }
+            _authorizeUpdateOnClosed = null;
+            _updateExitCompletion?.TrySetResult(authorized);
+            _updateExitCompletion = null;
             if (_shutdownAfterClose) Application.Current.Shutdown();
         };
 
@@ -333,6 +368,7 @@ public partial class MainWindow : Window
             UiZoomService.StepZoom(e.Delta > 0 ? 1 : -1);
             e.Handled = true;
         };
+        InitializeDebugControls();
         PreviewKeyDown += (_, e) =>
         {
             if (!UiZoomService.ShouldHandleKey(ConfigService.Config, e.Key)) return;
@@ -372,7 +408,7 @@ public partial class MainWindow : Window
             if (_closeAnimationPlayed) { e.Handled = true; return; }
             // 愚人节彩蛋 5 号手段生效期间："无法全屏，强制窗口模式"——直接吃掉这次 F11，
             // 不调用 ToggleFullScreen，也不改任何 Chrome/标题栏状态。
-            if (AprilFoolsService.Has(AprilFoolsService.Effect.WindowChaos)) { e.Handled = true; return; }
+            if (AprilFoolsUi.IsWindowMotionEnabled) { e.Handled = true; return; }
             _changingFullScreen = true;
             UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
             try
@@ -395,6 +431,7 @@ public partial class MainWindow : Window
         // F3 只切换当前运行会话的置顶状态，不写入配置；关闭并重新启动后恢复设置页中的默认值。
         PreviewKeyDown += (_, e) =>
         {
+            if (App.StartupArgs.DebugMode) return;
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
             if (key != Key.F3) return;
             Topmost = !Topmost;
@@ -409,7 +446,20 @@ public partial class MainWindow : Window
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;
-            if (!OverlayDialogService.HasActiveOverlay) return;
+            // Settings with a close guard must see Esc before input-level revert can discard edits.
+            if (OverlayDialogService.TopHandlesDismissal)
+            {
+                e.Handled = true;
+                OverlayDialogService.RequestDismissTopByEscape();
+                return;
+            }
+            if (InputExperienceService.TryHandleEscapeEdit(e)) return;
+            if (!OverlayDialogService.HasActiveOverlay)
+            {
+                if (ReminderPanel.Visibility == Visibility.Visible)
+                { ReminderPanel.Visibility = Visibility.Collapsed; e.Handled = true; }
+                return;
+            }
             OverlayDialogService.RequestDismissTopByEscape();
             e.Handled = true;
         };
@@ -462,6 +512,25 @@ public partial class MainWindow : Window
         ApplySidebarCollapsedState(collapsed: false);
 
         ConfigService.Load();
+        InputExperienceService.Initialize();
+        SearchListExperienceService.Initialize(() => ConfigService.Config, () => ConfigService.Save());
+        // 彩蛋在读取用户总开关后初始化，关闭偏好从首帧开始生效。
+        if (App.StartupArgs.DebugAprilFools) AprilFoolsService.EnableDebugAprilFools();
+        AprilFoolsService.EnsureTodaysStateLoaded();
+        AprilFoolsUi.Attach(this);
+        InitializeReminderCenter();
+        ApplyCommandLineWindowSize();
+        InitializeUxPresentation();
+        EventHandler? initializePerformanceOverlayOnce = null;
+        initializePerformanceOverlayOnce = (_, _) =>
+        {
+            ContentRendered -= initializePerformanceOverlayOnce;
+            PerformanceOverlayService.Initialize(this);
+            _ = InitializeDownloadRecoveryAsync();
+            InitializeSaveBackupSchedules();
+        };
+        ContentRendered += initializePerformanceOverlayOnce;
+        Closed += (_, _) => PerformanceOverlayService.Shutdown();
         InitializeFeatureSearch();
         var pluginHost = new Services.Plugins.PluginHostBridge(this);
         Plugins.BindHost(pluginHost);
@@ -593,6 +662,9 @@ public partial class MainWindow : Window
         // DownloadCenterPage 的"游戏版本"下载）调用 DownloadQueueService.Instance.StartNew(...)
         // 登记的条目都会自动出现在这里，不需要 MainWindow 手动感知每一次具体的下载调用。
         InitializeDownloadQueueUi();
+        InitializeDownloadUx();
+        InitializeLaunchSummary();
+        _taskResultsSubscription = TaskResultHistoryService.Initialize(() => ConfigService.Config.RememberTaskResults && !ConfigService.Config.GuestModeEnabled);
 
         // 修复"检测不到以前创建的服务器"：ServerInstanceService.Load() 现在会在主文件损坏时
         // 尝试从 .bak 备份恢复，但恢复与否用户都应该知情——之前这里完全没有任何提示，
@@ -851,7 +923,7 @@ public partial class MainWindow : Window
                 // 协议流程（如果本次启动需要）到这里已经真正走完并同意，才是触发后台更新检查
                 // 的安全时机——见 App.xaml.cs OnStartup 里对应那段注释：避免更新检查弹出的
                 // 确认框跟协议页的倒计时抢 Dispatcher，导致倒计时卡住点不了「同意」。
-                UpdateCheckService.CheckForUpdateInBackground();
+                UpdateCheckService.CheckForUpdateInBackground(() => ConfigService.Config);
             };
             ContentRendered += showFirstRunOnce;
         }
@@ -879,12 +951,8 @@ public partial class MainWindow : Window
     /// dismissOnBackgroundClick 特意不禁掉(默认允许点遮罩关闭)——公告不是法律性文本，
     /// 不需要强制阅读，点旁边空白等同于"这次先不点确定"，跟直接关闭是一回事。</summary>
     /// <summary>
-    /// "内存优化"触发时机选了「启动器打开时」（全局或当前选中实例单独设置）时，在这里
-    /// 一次性算好推荐的 -Xms/-Xmx 并直接写回配置——跟「游戏启动前」那条路径（见
-    /// LaunchInternalAsync 里对 memOptTiming 的判断）分工明确：那边只在
-    /// "BeforeGameLaunch" 时才临场重新计算，这里只在 "OnLauncherOpen" 时算一次。
-    /// 每次启动器打开各调用一次即可（挂在 ContentRendered 只触发一次的两个入口上），
-    /// 不需要额外的"是否已经算过"标记。
+    /// 选择「启动器打开时」会额外预览动态内存；实际启动游戏仍重新采样计算。
+    /// 计算结果不写回手动值，避免一次预览改变后续的手动配置或实例覆盖。
     /// 只针对当前选中的文件夹 + 版本；没有选中版本（比如全新安装、还没导入任何版本）时
     /// 直接跳过，不产生任何副作用。
     /// </summary>
@@ -903,23 +971,9 @@ public partial class MainWindow : Window
             var timing = instanceSettings?.ResolveMemoryOptimizationTiming(cfg) ?? cfg.MemoryOptimizationTiming;
             if (!enabled || timing != MemoryOptimizationTiming.OnLauncherOpen) return;
 
-            var recommendation = MemoryOptimizerService.Calculate(cfg.MemoryOptimizationReserveMb);
-            if (recommendation == null) return;
-
-            // 实例有自己的内存覆盖值（MinMemoryMb/MaxMemoryMb 非空）就写回实例设置，
-            // 保持"这个实例带着自己的配置走"的语义；否则写回全局设置。
-            if (instanceSettings != null && (instanceSettings.MinMemoryMb.HasValue || instanceSettings.MaxMemoryMb.HasValue))
-            {
-                instanceSettings.MinMemoryMb = recommendation.RecommendedMinMemoryMb;
-                instanceSettings.MaxMemoryMb = recommendation.RecommendedMaxMemoryMb;
-                InstanceConfigService.Save(versionDir, instanceSettings);
-            }
-            else
-            {
-                cfg.MinMemoryMb = recommendation.RecommendedMinMemoryMb;
-                cfg.MaxMemoryMb = recommendation.RecommendedMaxMemoryMb;
-                ConfigService.Save();
-            }
+            var preview = MemoryOptimizerService.ResolveLaunchMemory(cfg, instanceSettings);
+            if (preview.IsDynamic && !string.IsNullOrWhiteSpace(preview.Explanation))
+                LauncherLogService.AppendLine("[动态内存预览] " + preview.Explanation);
         }
         catch (Exception ex)
         {
@@ -1401,8 +1455,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 弹出内存不足警告窗口。同一时刻只保留一个警告窗口实例（避免多次触发时叠出一堆
-    /// 弹窗把屏幕糊住），先刷新包含其他启动器的游戏列表；没有游戏时才跳过。
+    /// 内存不足先进入角标，只有用户主动查看时才打开原有的进程选择界面。
     /// 内存紧张也可能不是游戏导致（可能是下载/解压占用，或者纯粹是用户其它程序占用的），此时弹一个"没有
     /// 可关闭游戏进程"的提示意义不大，直接跳过，避免无谓打扰。
     /// </summary>
@@ -1415,9 +1468,23 @@ public partial class MainWindow : Window
             // 必须先发现外部实例，再判断有无可关闭的游戏。
             await ProcessManager.RefreshAsync();
             if (_isWindowClosed || _activeMemoryWarningWindow != null || ProcessManager.Running.Count == 0) return;
-            _activeMemoryWarningWindow = new MemoryWarningWindow(ProcessManager, _memoryWatchdog, args);
-            _activeMemoryWarningWindow.RequestClose += (_, _) => _activeMemoryWarningWindow = null;
-            _activeMemoryWarningWindow.Show();
+            ReminderCenterService.Publish("low-memory", "系统可用内存偏低",
+                $"检测时可用 {args.AvailPhysMb:N0} MB / 总共 {args.TotalPhysMb:N0} MB。可以查看游戏占用后自行决定是否关闭游戏。",
+                "查看当前内存", async () =>
+                {
+                    if (_isWindowClosed || _activeMemoryWarningWindow != null) return;
+                    await ProcessManager.RefreshAsync();
+                    var memory = MemoryOptimizerService.ReadPhysicalMemory();
+                    if (_isWindowClosed || _activeMemoryWarningWindow != null || memory == null || memory.TotalMb == 0) return;
+                    var load = (uint)Math.Clamp(100d * (1 - (double)memory.AvailableMb / memory.TotalMb), 0, 100);
+                    if (load < 100 - _memoryWatchdog.LowMemoryThresholdPercent && memory.AvailableMb > (ulong)_memoryWatchdog.LowMemoryThresholdMb)
+                    { ToastService.ShowInfo("当前可用内存已恢复，无需根据旧提醒关闭游戏。"); return; }
+                    if (ProcessManager.Running.Count == 0) { ToastService.ShowInfo("目前没有可管理的游戏进程。"); return; }
+                    _activeMemoryWarningWindow = new MemoryWarningWindow(ProcessManager, _memoryWatchdog,
+                        new MemoryWatchdogService.LowMemoryEventArgs(memory.AvailableMb, memory.TotalMb, load));
+                    _activeMemoryWarningWindow.OverlayClosed += (_, _) => _activeMemoryWarningWindow = null;
+                    _activeMemoryWarningWindow.Show();
+                });
         }
         finally { _memoryWarningPending = false; }
     }
@@ -1443,6 +1510,8 @@ public partial class MainWindow : Window
             CurrentVersionText.Text = string.IsNullOrEmpty(ConfigService.Config.SelectedVersionId)
                 ? "未选择版本"
                 : $"当前版本: {ConfigService.Config.SelectedVersionId}";
+            CurrentAccountText.ToolTip = acc?.DisplayLabel ?? "未选择账户";
+            CurrentVersionText.ToolTip = ConfigService.Config.SelectedVersionId ?? "未选择版本";
         }
         catch
         {
@@ -1679,6 +1748,11 @@ public partial class MainWindow : Window
                         break;
                     case XclMessageResult.Yes: // 保存设置
                         leavingSettingsPage.SaveNow();
+                        if (leavingSettingsPage.HasUnsavedChanges)
+                        {
+                            leavingSettingsPage.ShowPendingEditPromptIfNeeded();
+                            return false;
+                        }
                         break;
                 }
             }
@@ -2039,6 +2113,7 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (args.ShowDebugPanel) SetDebugPanelVisible(true);
             if (args.ListInstances || args.ListAccounts) { _ = ExecuteStructuredStartupAsync(args); return; }
             // 更新完成自动重启回来的这一次：弹一次"这次更新了什么"，跟下面 EnterGuestMode/
             // LaunchGame 等命令行动作互不冲突，所以不 return，走完继续往下判断其它参数。
@@ -2061,7 +2136,8 @@ public partial class MainWindow : Window
 
             if (!string.IsNullOrWhiteSpace(args.GuiPage))
             {
-                ApplyStartupGuiNavigation(args.GuiPage);
+                if (args.GuiPage == "性能悬浮窗") OpenPerformanceOverlaySettings();
+                else ApplyStartupGuiNavigation(args.GuiPage);
                 return;
             }
 
@@ -2107,20 +2183,25 @@ public partial class MainWindow : Window
     /// 任意一个没找到都只弹提示、不启动，避免"名字打错了却启动了别的账户/版本"这种
     /// 更危险的静默兜底行为。
     /// </summary>
-    private void ApplyStartupLaunch(string? accountName, string? instanceName, TaskCompletionSource<LauncherCommandResult>? result = null)
+    private void ApplyStartupLaunch(string? accountName, string? instanceName,
+        TaskCompletionSource<LauncherCommandResult>? result = null, bool useSelectedAccount = false)
     {
-        if (string.IsNullOrWhiteSpace(accountName) || string.IsNullOrWhiteSpace(instanceName))
+        if ((!useSelectedAccount && string.IsNullOrWhiteSpace(accountName)) || string.IsNullOrWhiteSpace(instanceName))
         {
             ToastService.ShowWarning("命令行 -r 启动需要同时指定 --账户名 和 --实例名称，本次启动已跳过。");
             result?.TrySetResult(new(1, "launch", "NotStarted", "MissingArguments"));
             return;
         }
 
-        var account = ConfigService.Accounts.FirstOrDefault(a =>
-            string.Equals(a.Username, accountName, StringComparison.OrdinalIgnoreCase));
+        var account = useSelectedAccount && string.IsNullOrWhiteSpace(accountName)
+            ? ConfigService.GetSelectedAccount()
+            : ConfigService.Accounts.FirstOrDefault(a =>
+                string.Equals(a.Username, accountName, StringComparison.OrdinalIgnoreCase));
         if (account == null)
         {
-            ToastService.ShowWarning($"未找到账户「{accountName}」，命令行启动已取消。");
+            ToastService.ShowWarning(string.IsNullOrWhiteSpace(accountName)
+                ? "尚未设置可用账户，请先添加并选择一个账户后再使用 --play。"
+                : $"未找到账户「{accountName}」，命令行启动已取消。");
             result?.TrySetResult(new(1, "launch", "NotStarted", "AccountNotFound"));
             return;
         }
@@ -2616,7 +2697,7 @@ public partial class MainWindow : Window
     {
         _sidebarCollapsed = collapsed;
 
-        SidebarColumn.Width = new GridLength(collapsed ? SidebarCollapsedWidth : IsNativePreviewOpen ? 236 : SidebarExpandedWidth);
+        SidebarColumn.Width = new GridLength(collapsed ? SidebarCollapsedWidth : IsNativePreviewOpen ? Math.Max(192, SidebarExpandedWidth) : SidebarExpandedWidth);
 
         // ===== 修复「收起后图标只剩 1 像素」=====
         // 旧版只改了列宽，没有同步收掉内边距，于是留给图标的净宽被一路吃到只剩 10px：
@@ -2625,7 +2706,7 @@ public partial class MainWindow : Window
         // 而图标至少需要 20px（NavIconBox 固定尺寸）。收起态必须把 Margin/Padding 一起收掉，
         // 否则不管图标换成 emoji 还是矢量，都一样会被裁掉。
         //     56 − 8(Margin 左右各 4) − 0(Padding 归零) − 2(左描边) = 46px ≥ 20px，宽裕。
-        SidebarPanel.Margin = collapsed ? new Thickness(4, 12, 4, 12) : new Thickness(IsNativePreviewOpen ? 16 : 12);
+        SidebarPanel.Margin = collapsed ? new Thickness(4, 12, 4, 12) : new Thickness(12);
 
         // 折叠切换按钮的图标：三横杠 ↔ 一个圆点。现在是 Path 不是 TextBlock，改的是 Data。
         SidebarToggleIcon.Data = (Geometry)FindResource(collapsed ? "IconDot" : "IconMenu");
@@ -2843,10 +2924,6 @@ public partial class MainWindow : Window
     /// </summary>
     public async void Launch_Click(object sender, RoutedEventArgs e, bool skipAccountConfirm)
     {
-        // 愚人节彩蛋钩子：RickRoll1/RickRoll2/FakeWin32Error/LauncherRefuses 任意一种生效时，
-        // 这次点击被"劫持"，不执行真正的启动逻辑（对应需求 1/2/4/7 号手段）。
-        if (AprilFoolsUi.TryInterceptLaunchOrDownload(this)) return;
-
         // 需求："从点击'启动游戏'到等待游戏窗口出现的间隙，按钮变成'取消启动'；
         // 点击'取消启动'时不再弹出选择账户的界面（也不弹任何其它确认框），直接中止本次启动"。
         // 这里复用同一个 Click 处理器：当前处于"取消启动"状态时，这次点击是"取消"动作，
@@ -2855,6 +2932,14 @@ public partial class MainWindow : Window
         if (_isCancelLaunchState)
         {
             HandleCancelLaunchClick();
+            return;
+        }
+
+        // 实际启动意图优先结束移动彩蛋；取消动作绝不参与挑战。
+        if (AprilFoolsUi.NotifyLaunchRequested(this))
+        {
+            _startupLaunchResult?.TrySetResult(new(1, "launch", "Canceled", "EasterEggIntercepted"));
+            _startupLaunchResult = null;
             return;
         }
 
@@ -2990,39 +3075,15 @@ public partial class MainWindow : Window
     /// 两处场景的下载逻辑完全一样，只是触发时机不同，没必要维护两份几乎相同的代码。
     /// </summary>
     private async Task RepairMissingLibrariesAsync(string minecraftDir, string versionId, AppConfig cfg, IProgress<ProgressInfo> progress,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? architecture = null)
     {
-        var versionDir = Path.Combine(minecraftDir, "versions", versionId);
-        var versionJsonPath = File.Exists(Path.Combine(versionDir, $"{versionId}.json"))
-            ? Path.Combine(versionDir, $"{versionId}.json")
-            : Directory.GetFiles(versionDir, "*.json").FirstOrDefault();
-        if (versionJsonPath == null)
-            throw new InvalidOperationException("找不到该版本的 version json，无法确定需要补全哪些库。");
-
-        var detail = System.Text.Json.JsonSerializer.Deserialize<VersionDetail>(
-            File.ReadAllText(versionJsonPath)) ?? new VersionDetail();
-        detail.Id = versionId;
-
+        var inheritance = VersionInheritanceResolver.Load(minecraftDir, versionId, FolderService.ResolveVersionJson, architecture);
+        var item = DownloadQueueService.Instance.FindActiveForVersion(minecraftDir, versionId);
+        foreach (var layer in inheritance.Layers) item?.RegisterInstallationTarget(layer.VersionId);
+        item?.RegisterInstallationTarget(inheritance.ClientLayer.VersionId);
+        var plan = VersionRepairPlan.Create(inheritance);
         using var repairDownloader = DownloadService.CreateFromConfig(cfg);
-        // 有 inheritsFrom 时(Fabric/Forge 等)，缺库也可能来自父版本(原版)的库列表，
-        // 两份都要补，跟 BuildArguments 里 AddLibs 对父子两份 json 都扫描的逻辑一致。
-        if (!string.IsNullOrEmpty(detail.InheritsFrom))
-        {
-            DownloadQueueService.Instance.FindActiveForVersion(minecraftDir, versionId)
-                ?.RegisterInstallationTarget(detail.InheritsFrom);
-            var parentDir = Path.Combine(minecraftDir, "versions", detail.InheritsFrom);
-            var parentJsonPath = File.Exists(Path.Combine(parentDir, $"{detail.InheritsFrom}.json"))
-                ? Path.Combine(parentDir, $"{detail.InheritsFrom}.json")
-                : (Directory.Exists(parentDir) ? Directory.GetFiles(parentDir, "*.json").FirstOrDefault() : null);
-            if (parentJsonPath != null)
-            {
-                var parentDetail = System.Text.Json.JsonSerializer.Deserialize<VersionDetail>(
-                    File.ReadAllText(parentJsonPath)) ?? new VersionDetail();
-                parentDetail.Id = detail.InheritsFrom;
-                await repairDownloader.DownloadLibrariesOnlyAsync(minecraftDir, parentDetail, progress, ct);
-            }
-        }
-        await repairDownloader.DownloadLibrariesOnlyAsync(minecraftDir, detail, progress, ct);
+        await repairDownloader.DownloadLibrariesOnlyAsync(minecraftDir, plan.Libraries, progress, ct, architecture);
     }
 
     /// <summary>
@@ -3030,26 +3091,26 @@ public partial class MainWindow : Window
     /// 再补上 client jar（缺失/0 字节时重新下载）和 assets（缺失的资源对象重新下载）。
     /// 这两块原来完全没有补全入口——用户以前遇到这种问题只能去「版本选择」页整个重装。
     /// </summary>
-    private async Task RepairInstanceIntegrityAsync(string minecraftDir, VersionDetail detail,
+    private async Task RepairInstanceIntegrityAsync(string minecraftDir, string versionId,
         InstanceIntegrityService.IntegrityCheckResult check, AppConfig cfg, IProgress<ProgressInfo> progress,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? architecture = null)
     {
+        if (check.VersionJsonMissing || check.EffectiveDetail == null || check.ClientDetail == null || string.IsNullOrWhiteSpace(check.ClientVersionId))
+            throw new InvalidDataException("版本描述或继承链尚未完整，无法安全确定修复目标。请先补全父版本信息。");
+        var plan = VersionRepairPlan.Create(check.EffectiveDetail, check.ClientDetail, check.ClientVersionId);
+        DownloadQueueService.Instance.FindActiveForVersion(minecraftDir, versionId)?.RegisterInstallationTarget(plan.ClientVersionId);
         using var repairDownloader = DownloadService.CreateFromConfig(cfg);
-
         if (check.ClientJarMissing)
         {
-            await repairDownloader.DownloadClientJarOnlyAsync(minecraftDir, detail, progress, ct);
+            if (plan.Client.Downloads == null || !plan.Client.Downloads.TryGetValue("client", out var client) || string.IsNullOrWhiteSpace(client.Url))
+                throw new InvalidDataException($"实际客户端「{plan.ClientVersionId}」缺少主程序下载地址，无法自动补全；请重新安装对应的原版或客户端。");
+            await repairDownloader.DownloadClientJarOnlyAsync(minecraftDir, plan.Client, progress, ct,
+                targetVersionId: plan.ClientVersionId, targetJarBaseName: plan.ClientJarBaseName);
         }
-
         if (check.MissingLibraries.Count > 0)
-        {
-            await RepairMissingLibrariesAsync(minecraftDir, detail.Id, cfg, progress, ct);
-        }
-
+            await RepairMissingLibrariesAsync(minecraftDir, versionId, cfg, progress, ct, architecture);
         if (check.MissingAssets.Count > 0)
-        {
-            await repairDownloader.DownloadAssetsOnlyAsync(minecraftDir, detail, progress, ct);
-        }
+            await repairDownloader.DownloadAssetsOnlyAsync(minecraftDir, plan.Assets, progress, ct);
     }
 
     /// <summary>
@@ -3058,67 +3119,70 @@ public partial class MainWindow : Window
     /// 流程：严格检查 → 缺 json 且文件夹名是官方版本号时重新下载原版 → 继承类实例先补父版本
     /// （父版本缺失则按清单重装）→ 补本实例的库/jar/资源 → 再检查一次确认。
     /// </summary>
-    public async Task<string?> RepairInstanceWithoutLaunchAsync(GameFolder folder, string versionId,
+    public Task<string?> RepairInstanceWithoutLaunchAsync(GameFolder folder, string versionId,
         IProgress<ProgressInfo> progress, CancellationToken ct = default)
+        => RepairInstanceWithoutLaunchAsync(folder, versionId, progress, ct, null);
+
+    public async Task<string?> RepairInstanceWithoutLaunchAsync(GameFolder folder, string versionId,
+        IProgress<ProgressInfo> progress, CancellationToken ct, string? architecture)
     {
         try
         {
             var cfg = ConfigService.Config;
             var integrity = new InstanceIntegrityService(new LauncherService());
-            var check = await Task.Run(() => integrity.Check(folder.Path, versionId, IntegrityCheckMode.Strict));
-            if (!check.HasProblems) return null;
+            using var metadataDownloader = DownloadService.CreateFromConfig(cfg);
+            VersionManifestRoot? manifest = null;
+            var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var completed = new Dictionary<string, VersionDetail>(StringComparer.OrdinalIgnoreCase);
+            var item = DownloadQueueService.Instance.FindActiveForVersion(folder.Path, versionId);
 
-            if (check.Detail == null)
+            async Task<VersionDetail> EnsureMetadataAsync(string id, int depth)
             {
-                // json 缺失/损坏：只有文件夹名恰好是官方版本号时才能凭清单重新下载。
-                using var dl = DownloadService.CreateFromConfig(cfg);
-                var manifest = await dl.GetVersionManifestAsync();
-                var entry = manifest.Versions.FirstOrDefault(v =>
-                    string.Equals(v.Id, versionId, StringComparison.OrdinalIgnoreCase));
-                if (entry == null)
-                    return "版本描述文件(json)缺失或已损坏，且这不是官方原版版本号，无法自动补全。请重新安装该版本。";
-                await dl.InstallVersionAsync(folder.Path, entry, progress, ct);
-            }
-            else
-            {
-                var detail = check.Detail;
-                if (!string.IsNullOrEmpty(detail.InheritsFrom))
+                ct.ThrowIfCancellationRequested();
+                VersionInheritanceResolver.ValidateId(id);
+                if (completed.TryGetValue(id, out var previous)) return previous;
+                if (depth >= 64 || !active.Add(id)) throw new InvalidDataException("版本继承超过 64 层或出现循环，无法自动修复。");
+                try
                 {
-                    var parentId = detail.InheritsFrom;
-                    DownloadQueueService.Instance.FindActiveForVersion(folder.Path, versionId)
-                        ?.RegisterInstallationTarget(parentId);
-                    var parentDir = Path.Combine(folder.Path, "versions", parentId);
-                    var parentCheck = Directory.Exists(parentDir)
-                        ? await Task.Run(() => integrity.Check(folder.Path, parentId, IntegrityCheckMode.Strict))
-                        : null;
-                    if (parentCheck?.Detail != null)
+                    item?.RegisterInstallationTarget(id);
+                    var directory = Path.Combine(folder.Path, "versions", id);
+                    var jsonPath = FolderService.ResolveVersionJson(directory, id);
+                    VersionDetail? own = null;
+                    if (jsonPath != null)
                     {
-                        if (parentCheck.HasProblems)
-                            await RepairInstanceIntegrityAsync(folder.Path, parentCheck.Detail, parentCheck, cfg, progress, ct);
+                        try { own = System.Text.Json.JsonSerializer.Deserialize<VersionDetail>(await File.ReadAllTextAsync(jsonPath, ct)); }
+                        catch (Exception error) when (error is System.Text.Json.JsonException or IOException or UnauthorizedAccessException) { }
                     }
-                    else
+                    if (own == null || (string.IsNullOrWhiteSpace(own.MainClass) && string.IsNullOrWhiteSpace(own.InheritsFrom)))
                     {
-                        using var dl = DownloadService.CreateFromConfig(cfg);
-                        var manifest = await dl.GetVersionManifestAsync();
-                        var entry = manifest.Versions.FirstOrDefault(v =>
-                            string.Equals(v.Id, parentId, StringComparison.OrdinalIgnoreCase));
-                        if (entry == null)
-                            return $"找不到父版本「{parentId}」，且它不是官方原版版本号，无法自动补全。请先安装该父版本。";
-                        await dl.InstallVersionAsync(folder.Path, entry, progress, ct);
+                        manifest ??= await metadataDownloader.GetVersionManifestAsync(ct);
+                        var entry = manifest.Versions.FirstOrDefault(candidate => string.Equals(candidate.Id, id, StringComparison.OrdinalIgnoreCase));
+                        if (entry == null) throw new InvalidDataException($"版本「{id}」的描述文件缺失或损坏，且它不是可从官方清单恢复的原版；请先重新安装该版本。");
+                        await metadataDownloader.InstallVersionAsync(folder.Path, entry, progress, ct);
+                        jsonPath = FolderService.ResolveVersionJson(directory, id);
+                        if (jsonPath == null) throw new InvalidDataException($"补全后仍找不到版本「{id}」的描述文件。");
+                        own = System.Text.Json.JsonSerializer.Deserialize<VersionDetail>(await File.ReadAllTextAsync(jsonPath, ct))
+                            ?? throw new InvalidDataException($"版本「{id}」返回了空的描述文件。");
                     }
+                    if (!string.IsNullOrWhiteSpace(own.InheritsFrom)) await EnsureMetadataAsync(own.InheritsFrom, depth + 1);
+                    // jar=self names the already-read client, rather than another metadata dependency.
+                    if (!string.IsNullOrWhiteSpace(own.Jar) && !string.Equals(own.Jar, id, StringComparison.OrdinalIgnoreCase))
+                        await EnsureMetadataAsync(own.Jar, depth + 1);
+                    completed[id] = own;
+                    return own;
                 }
-                await RepairInstanceIntegrityAsync(folder.Path, detail, check, cfg, progress, ct);
+                finally { active.Remove(id); }
             }
 
-            var after = await Task.Run(() => integrity.Check(folder.Path, versionId, IntegrityCheckMode.Strict));
-            if (after.HasProblems)
-                return "补全后仍有文件缺失，请检查网络后重试，或重新安装该版本。";
-            return null;
+            await EnsureMetadataAsync(versionId, 0);
+            var check = await Task.Run(() => integrity.Check(folder.Path, versionId, IntegrityCheckMode.Strict, ct, architecture), ct);
+            if (check.VersionJsonMissing)
+                return "版本描述文件或继承关系仍然无效，请检查循环继承、缺少主类等问题，或重新安装该版本。";
+            if (check.HasProblems) await RepairInstanceIntegrityAsync(folder.Path, versionId, check, cfg, progress, ct, architecture);
+            var after = await Task.Run(() => integrity.Check(folder.Path, versionId, IntegrityCheckMode.Strict, ct, architecture), ct);
+            return after.HasProblems ? "补全后仍有文件缺失，请检查网络后重试，或重新安装该版本。" : null;
         }
-        catch (OperationCanceledException)
-        {
-            throw; // 暂停/取消：交给下载队列处理，不要当成"补全失败"
-        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             ErrorPresenter.LogTechnicalDetail($"[未完成的安装·补全失败] {versionId}\n{ex}");
@@ -3140,27 +3204,25 @@ public partial class MainWindow : Window
             return;
         }
 
+        var cfg = ConfigService.Config;
+        var javaId = cfg.VersionJavaIdOverrides.TryGetValue(versionId, out var configuredJavaId) ? configuredJavaId : cfg.SelectedJavaId;
+        var javaPath = App.StartupArgs.JavaPathOverride ?? ConfigService.ResolveJavaPath(javaId) ?? cfg.JavaPath;
+        var architecture = JavaExecutableArchitecture.TryReadArchitecture(javaPath);
         DownloadQueueService.Instance.StartNew($"补全文件 {versionId}", async (item, ct) =>
         {
-            var error = await RepairInstanceWithoutLaunchAsync(folder, versionId, item.CreateProgress(), ct);
+            var error = await RepairInstanceWithoutLaunchAsync(folder, versionId, item.CreateProgress(), ct, architecture);
             if (error != null) throw new InvalidOperationException(error);
             await Dispatcher.InvokeAsync(() => onSuccess?.Invoke());
         }, targetVersionId: versionId, targetFolderPath: folder.Path);
     }
 
     /// <summary>
-    /// 启动前完整性检查用的严格程度：cfg.IntegrityCheckMode 还没选过时弹一次
-    /// IntegrityCheckModeChoiceDialog（10 秒不选自动 Simple），选完写回配置，以后不再问。
+    /// 启动前完整性检查使用已保存的模式；未选择时默认轻量检查。
     /// </summary>
     private IntegrityCheckMode GetOrPromptIntegrityCheckMode(AppConfig cfg)
     {
-        if (cfg.IntegrityCheckMode is { } mode) return mode;
-
-        var dlg = new IntegrityCheckModeChoiceDialog();
-        dlg.ShowDialog();
-        cfg.IntegrityCheckMode = dlg.Result;
-        ConfigService.Save();
-        return dlg.Result;
+        // 保留用户原有的严格/简单模式。旧配置未选择时默认轻量检查，不阻塞启动询问。
+        return cfg.IntegrityCheckMode ?? IntegrityCheckMode.Simple;
     }
 
     /// <summary>
@@ -3168,10 +3230,10 @@ public partial class MainWindow : Window
     /// 返回 true 表示可以继续走后面的启动流程；返回 false 表示这次不应该启动
     /// （比如用户选了"删除"、或强行启动的二级确认没通过）。
     /// </summary>
-    private async Task<bool> RunInstanceIntegrityCheckAsync(GameFolder folder, AppConfig cfg, CancellationToken cancelToken)
+    private async Task<bool> RunInstanceIntegrityCheckAsync(GameFolder folder, AppConfig cfg, CancellationToken cancelToken, string? architecture = null)
     {
         var versionId = cfg.SelectedVersionId;
-        if (string.IsNullOrEmpty(versionId)) return true;
+        if (!cfg.EnableLaunchHealthCheck || string.IsNullOrEmpty(versionId)) return true;
 
         var mode = GetOrPromptIntegrityCheckMode(cfg);
         var integrityService = new InstanceIntegrityService(new LauncherService());
@@ -3179,8 +3241,9 @@ public partial class MainWindow : Window
         InstanceIntegrityService.IntegrityCheckResult check;
         try
         {
-            check = integrityService.Check(folder.Path, versionId, mode);
+            check = await Task.Run(() => integrityService.Check(folder.Path, versionId, mode, cancelToken, architecture), cancelToken);
         }
+        catch (OperationCanceledException) when (cancelToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             // 检查本身失败不应该阻止启动，跟原有 CheckMissingLibraries 的兜底策略一致。
@@ -3235,7 +3298,7 @@ public partial class MainWindow : Window
                 {
                     await DownloadQueueService.Instance.RunAndWaitAsync($"启动前补全文件 {versionId}", async (item, ct) =>
                     {
-                        var error = await RepairInstanceWithoutLaunchAsync(folder, versionId, item.CreateProgress(), ct);
+                        var error = await RepairInstanceWithoutLaunchAsync(folder, versionId, item.CreateProgress(), ct, architecture);
                         if (error != null) throw new InvalidOperationException(error);
                         return true;
                     }, cancelToken, targetVersionId: versionId, targetFolderPath: folder.Path);
@@ -3477,8 +3540,18 @@ public partial class MainWindow : Window
             // 不再走下面的"按主版本号搜索"逻辑——这是用户明确的选择，不需要再猜。
             // 记录的文件如果已经被移动/删除(ResolveJavaPath 返回 null)，则安全回退到旧的搜索逻辑。
             var javaIdOverride = cfg.VersionJavaIdOverrides.TryGetValue(cfg.SelectedVersionId, out var vjid) ? vjid : cfg.SelectedJavaId;
-            var javaPath = ConfigService.ResolveJavaPath(javaIdOverride)
-                ?? javaService.FindJava(cfg.JavaPath, preferMajor, ConfigService);
+            // Snapshot UI-owned configuration before probing executables on a worker.
+            var registeredJavaPaths = ConfigService.GetJavaListInPriorityOrder().Select(entry => entry.JavawPath).ToArray();
+            var javaPath = ConfigService.ResolveJavaPath(javaIdOverride);
+            var explicitCliJava = !string.IsNullOrWhiteSpace(App.StartupArgs.JavaPathOverride);
+            if (explicitCliJava)
+            {
+                javaPath = Path.GetFullPath(App.StartupArgs.JavaPathOverride!);
+                if (!File.Exists(javaPath)) throw new FileNotFoundException("命令行指定的 Java 文件不存在：" + javaPath, javaPath);
+            }
+            else if (javaPath == null)
+                javaPath = await Task.Run(() => javaService.FindJava(cfg.JavaPath, preferMajor,
+                    configService: null, cancellationToken: cancelToken, registeredJavaPaths: registeredJavaPaths), cancelToken);
             var justDownloaded = false;
 
             // 启动前 Java 版本匹配检查：javaIdOverride 这条路径(用户在设置里指定了某个具体 Java，
@@ -3496,21 +3569,18 @@ public partial class MainWindow : Window
             // 就不应该每次启动都被重新问一遍。跟 EnforceJavaVersionMatch（全局强制切换）是
             // 两码事：那个是"不问、但自动换掉"，这个是"不问、但保留用户选的不换"。
             var skipMismatchPrompt = cfg.VersionSkipJavaMismatchPrompt.Contains(cfg.SelectedVersionId);
-            if (javaIdOverride != null && javaPath != null && preferMajor is > 0 && !skipMismatchPrompt)
+            // --java is an explicit session override; automatic matching must not replace that file.
+            if (!explicitCliJava && javaIdOverride != null && javaPath != null && preferMajor is > 0 && !skipMismatchPrompt)
             {
-                // TryGetJavaMajorVersionSync 内部会起进程等待退出(最多阻塞 5 秒)，用 Task.Run
-                // 丢到线程池执行，避免这几秒内卡住 UI 线程(LaunchInternalAsync 本身是 async 方法)。
-                var actualMajor = await Task.Run(() => JavaService.TryGetJavaMajorVersionSync(javaPath));
+                // 探测与管道排空均有截止；在后台等待并传递取消，避免阻塞窗口。
+                var actualMajor = await Task.Run(() => JavaService.TryGetJavaMajorVersionSync(javaPath, cancelToken), cancelToken);
 
                 // 用 IsJavaMajorCompatible 而不是精确 == ：1.17 官方 version json 写的是要求
                 // Java 16，但 Java 16 早停止发行，实际用 Java 17 启动完全没问题（见该方法注释），
                 // 不应该被这里当成"版本不匹配"弹窗提示用户切换。
                 if (actualMajor is > 0 && preferMajor is > 0 && !JavaService.IsJavaMajorCompatible(actualMajor.Value, preferMajor.Value))
                 {
-                    var matchedInList = cfg.InstalledJavas.FirstOrDefault(j => j.MajorVersion == preferMajor);
-                    var suggestion = matchedInList != null
-                        ? $"列表里已经有登记的 Java {preferMajor}（{matchedInList.Name}），可以直接切换使用。"
-                        : $"列表里还没有登记 Java {preferMajor}，选择切换的话会自动下载一个便携版。";
+                    var suggestion = $"选择切换后会重新探测列表中的 Java {preferMajor}；没有实际匹配项时会下载便携版。";
 
                     bool shouldSwitch;
                     if (cfg.EnforceJavaVersionMatch)
@@ -3539,8 +3609,8 @@ public partial class MainWindow : Window
                     {
                         // 改用匹配版本：优先用列表里已登记的匹配项，没有就清空覆盖走回下面的
                         // 自动探测/下载逻辑（preferMajor 已经算好了，FindJava/下载都会用它）。
-                        javaPath = matchedInList != null ? ConfigService.ResolveJavaPath(matchedInList.Id) : null;
-                        javaPath ??= javaService.FindJava(null, preferMajor, ConfigService);
+                        javaPath = await Task.Run(() => javaService.FindJava(null, preferMajor,
+                            configService: null, cancellationToken: cancelToken, registeredJavaPaths: registeredJavaPaths), cancelToken);
                     }
                     // 非强制模式选"否"：保留原 javaPath 不变，尊重用户的明确选择。
                 }
@@ -3608,12 +3678,14 @@ public partial class MainWindow : Window
 
                     if (shouldDownload)
                     {
-                        var skinProgressWin = new ProgressDialog("正在下载万能皮肤补丁...");
-                        // 同上：ProgressDialog 现在是 Overlay 弹窗，没有 Owner 属性了。
-                        skinProgressWin.Show();
                         try
                         {
-                            await skinService.EnsureAuthlibInjectorAsync(skinProgressWin.Progress);
+                            await DownloadQueueService.Instance.RunAndWaitAsync("下载万能皮肤补丁",
+                                (item, ct) => skinService.EnsureAuthlibInjectorAsync(item.CreateProgress(), ct), cancelToken);
+                        }
+                        catch (OperationCanceledException) when (cancelToken.IsCancellationRequested)
+                        {
+                            throw;
                         }
                         catch (Exception skinEx)
                         {
@@ -3622,7 +3694,6 @@ public partial class MainWindow : Window
                                 : "下载万能皮肤补丁失败，本次可能无法正常使用多人游戏（部分版本会因此禁用多人游戏按钮）、自定义皮肤也不会生效：\n";
                             MessageBoxDialog.ShowWarning(hint + skinEx.Message, Loc.T("Str_Cs_Failed_To_Download_The_Skin_Patch", "皮肤补丁下载失败"));
                         }
-                        finally { skinProgressWin.Close(); }
                     }
                 }
                 skinJvmArgs = skinService.BuildSkinJvmArgs(account, cfg.SkinApiRoot);
@@ -3637,34 +3708,24 @@ public partial class MainWindow : Window
             {
                 autoJoinServer = configuredServer.Trim();
             }
+            if (!string.IsNullOrWhiteSpace(App.StartupArgs.AutoJoinServer)) autoJoinServer = App.StartupArgs.AutoJoinServer.Trim();
 
-            // 「百宝箱」-「内存优化」：开关开启时，启动前用 MemoryOptimizerService 按当前
-            // 系统实际可用内存重新计算一遍 -Xms/-Xmx，覆盖设置页里用户手动填写的固定值。
-            // 计算失败（非 Windows/API 异常等）时静默回退到用户原有配置，不阻断启动流程。
-            var effectiveMinMemoryMb = cfg.MinMemoryMb;
-            var effectiveMaxMemoryMb = cfg.MaxMemoryMb;
+            // 每次实际启动重新计算动态内存；实例手动覆盖和全局手动值由同一服务解析。
+            // 显示总量/剩余量的选择不改变百分比计算的总物理内存基准。
             var instanceSettings = InstanceConfigService.TryLoad(Path.Combine(folder.Path, "versions", cfg.SelectedVersionId));
-            if (instanceSettings?.MinMemoryMb is > 0) effectiveMinMemoryMb = instanceSettings.MinMemoryMb.Value;
-            if (instanceSettings?.MaxMemoryMb is > 0) effectiveMaxMemoryMb = instanceSettings.MaxMemoryMb.Value;
-
-            // 内存优化：是否开启、以及"游戏启动前"还是"启动器打开时"生效，都按
-            // "实例单独设置 > 全局设置，实例未配置则跟随全局"的优先级解析（见
-            // InstanceSettings.ResolveEnableMemoryOptimization/ResolveMemoryOptimizationTiming）。
-            // 只有解析结果是"启动前"才在这里临场重新计算——如果是"启动器打开时"，
-            // 推荐值已经在 ApplyLauncherOpenMemoryOptimizationIfNeeded 里算好并写回
-            // MinMemoryMb/MaxMemoryMb 了，这里沿用上面已经取到的 effectiveMin/MaxMemoryMb 即可，
-            // 不需要也不应该在临启动这一刻再算一遍。
-            var memOptEnabled = instanceSettings?.ResolveEnableMemoryOptimization(cfg) ?? cfg.EnableMemoryOptimization;
-            var memOptTiming = instanceSettings?.ResolveMemoryOptimizationTiming(cfg) ?? cfg.MemoryOptimizationTiming;
-            if (memOptEnabled && memOptTiming == Models.MemoryOptimizationTiming.BeforeGameLaunch)
+            var javaBitness = JavaService.TryGetJavaBitness(javaPath);
+            var launchArchitecture = JavaExecutableArchitecture.TryReadArchitecture(javaPath);
+            var launchMemory = MemoryOptimizerService.ConstrainForJava(cfg,
+                MemoryOptimizerService.ResolveLaunchMemory(cfg, instanceSettings), javaBitness);
+            if (App.StartupArgs.MinMemoryMb.HasValue || App.StartupArgs.MaxMemoryMb.HasValue)
             {
-                var recommendation = MemoryOptimizerService.Calculate(cfg.MemoryOptimizationReserveMb);
-                if (recommendation != null)
-                {
-                    effectiveMinMemoryMb = recommendation.RecommendedMinMemoryMb;
-                    effectiveMaxMemoryMb = recommendation.RecommendedMaxMemoryMb;
-                }
+                var memory = CommandLineSessionPolicy.ResolveMemory(launchMemory.MinMemoryMb,
+                    launchMemory.MaxMemoryMb, App.StartupArgs.MinMemoryMb, App.StartupArgs.MaxMemoryMb);
+                launchMemory = new MemoryOptimizerService.LaunchMemory(memory.MinMb, memory.MaxMb,
+                    false, $"本次命令行内存：最小 {memory.MinMb}MB，最大 {memory.MaxMb}MB。");
             }
+            if (!string.IsNullOrWhiteSpace(launchMemory.Explanation))
+                LauncherLogService.AppendLine("[动态内存] " + launchMemory.Explanation);
 
             var launcher = new LauncherService();
             var options = new LauncherService.LaunchOptions
@@ -3673,8 +3734,8 @@ public partial class MainWindow : Window
                 VersionId = cfg.SelectedVersionId,
                 JavaPath = javaPath,
                 Account = account,
-                MinMemoryMb = effectiveMinMemoryMb,
-                MaxMemoryMb = effectiveMaxMemoryMb,
+                MinMemoryMb = launchMemory.MinMemoryMb,
+                MaxMemoryMb = launchMemory.MaxMemoryMb,
                 WindowWidth = cfg.WindowWidth,
                 WindowHeight = cfg.WindowHeight,
                 ShowConsoleWindow = cfg.EnableGameConsoleWindow,
@@ -3686,9 +3747,13 @@ public partial class MainWindow : Window
                 SkinJvmArgs = skinJvmArgs,
                 // 自定义 JVM 参数仅在高手模式下生效：普通模式下即使配置里残留了历史值，
                 // 也不应该被悄悄应用，避免用户切回普通模式后出现"不知道为什么还生效"的困惑。
-                CustomJvmArgs = instanceSettings?.CustomJvmArgs ?? (cfg.AdvancedMode ? cfg.CustomJvmArgs : null),
+                CustomJvmArgs = CommandLineSessionPolicy.CombineJvmArguments(cfg.AdvancedMode,
+                    instanceSettings?.CustomJvmArgs, cfg.CustomJvmArgs, App.StartupArgs.ExtraJvmArgs),
                 PreLaunchCommand = cfg.PreLaunchCommand,
-                AutoJoinServerAddress = autoJoinServer
+                AutoJoinServerAddress = autoJoinServer,
+                RequireAutoJoinServerSupport = !string.IsNullOrWhiteSpace(App.StartupArgs.AutoJoinServer),
+                ExtraGameArgs = App.StartupArgs.ExtraGameArgs,
+                LaunchFullscreen = App.StartupArgs.LaunchFullscreen
             };
 
             // JVM 参数预检：设置里的内存 + 自定义 JVM 参数。必然会让 JVM 起不来的写法
@@ -3699,9 +3764,9 @@ public partial class MainWindow : Window
             {
                 int? jvmLintMajor = null;
                 if (!string.IsNullOrWhiteSpace(options.CustomJvmArgs))
-                    jvmLintMajor = await Task.Run(() => JavaService.TryGetJavaMajorVersionSync(javaPath));
+                    jvmLintMajor = await Task.Run(() => JavaService.TryGetJavaMajorVersionSync(javaPath, cancelToken), cancelToken);
                 var jvmLintIssues = JvmArgumentDiagnostics.Lint(options.CustomJvmArgs,
-                    options.MinMemoryMb, options.MaxMemoryMb, jvmLintMajor);
+                    options.MinMemoryMb, options.MaxMemoryMb, jvmLintMajor, javaBitness);
                 foreach (var issue in jvmLintIssues)
                     LauncherLogService.AppendLine(
                         $"[JVM参数检查] {(issue.Severity == JvmIssueSeverity.Fatal ? "错误" : "提示")}：{issue.Text}");
@@ -3714,6 +3779,7 @@ public partial class MainWindow : Window
                         "JVM 参数有误"))
                     return;
             }
+            catch (OperationCanceledException) when (cancelToken.IsCancellationRequested) { throw; }
             catch (Exception jvmLintEx)
             {
                 ErrorPresenter.LogFallback("JVM 参数预检失败(不影响启动)", jvmLintEx);
@@ -3726,7 +3792,7 @@ public partial class MainWindow : Window
             // 而不是像原来那样只有一个"是否自动下载补全"的简单确认框。
             try
             {
-                var shouldContinueLaunch = await RunInstanceIntegrityCheckAsync(folder, cfg, cancelToken);
+                var shouldContinueLaunch = await RunInstanceIntegrityCheckAsync(folder, cfg, cancelToken, launchArchitecture);
                 if (!shouldContinueLaunch) return;
             }
             catch (OperationCanceledException) { return; }
@@ -3770,12 +3836,11 @@ public partial class MainWindow : Window
             var useTouchMode = cfg.TouchModeEnabled;
             if (cfg.AskInputModeBeforeLaunch)
             {
-                // 内嵌 Overlay 弹窗：ShowDialog() 是 OverlayDialogControl 上的兼容成员
-                // （见 IOverlayDialog.cs 里的 "Window 兼容层" 注释），写法跟原来的独立
-                // Window 一样是同步阻塞等结果，但弹出来的是主窗口内部的遮罩层弹窗，
-                // 不再是带系统标题栏、在任务栏里单独占一格的 Win32 窗口，也不需要 Owner。
-                var modeWindow = new InputModeSelectDialog(cfg.TouchModeEnabled, cfg.InputModeAskCountdownSeconds);
-                modeWindow.ShowDialog();
+                // 保留原内嵌选择框与倒计时；本提示等待时若主窗口在后台/最小化/托盘，
+                // 额外提供通知中心的本次选择按钮，关闭或取消时同步撤销通知。
+                var modeWindow = InputModePromptService.Show(this, cfg.TouchModeEnabled,
+                    cfg.InputModeAskCountdownSeconds, RestoreFromTray, cancelToken);
+                cancelToken.ThrowIfCancellationRequested();
                 // 直接关掉窗口(UseTouchMode 为 null)按"键鼠"处理——不确定的时候选不会改变
                 // 原有体验的那一边，而不是给用户扣上一层他没要的悬浮层。
                 useTouchMode = modeWindow.UseTouchMode == true;
@@ -3844,7 +3909,7 @@ public partial class MainWindow : Window
                 {
                     await DownloadQueueService.Instance.RunAndWaitAsync($"补全缺失依赖 {mle.VersionId}", async (item, ct) =>
                     {
-                        await RepairMissingLibrariesAsync(folder.Path, mle.VersionId, cfg, item.CreateProgress(), ct);
+                        await RepairMissingLibrariesAsync(folder.Path, mle.VersionId, cfg, item.CreateProgress(), ct, launchArchitecture);
                         return true;
                     }, cancelToken, targetVersionId: mle.VersionId, targetFolderPath: folder.Path);
                 }
@@ -3882,6 +3947,12 @@ public partial class MainWindow : Window
                 }
             }
             ProcessManager.Register(processInfo);
+            try
+            {
+                if (!cfg.GuestModeEnabled && InstanceUxService.RecordSuccessfulLaunch(cfg, options.MinecraftDir, options.VersionId))
+                    ConfigService.Save();
+            }
+            catch (Exception recentEx) { ErrorPresenter.LogFallback("记录最近使用实例失败", recentEx); }
             commandResult?.TrySetResult(new(1, "launch", "Started", "ProcessCreated", processInfo.Process.Id,
                 Services.Plugins.PluginHostBridge.InstanceId(options.MinecraftDir, options.VersionId), account.Id));
 
@@ -3998,17 +4069,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            // 修复"启动成功/启动异常弹窗出现时启动器窗口会自动最小化"：上面等待最多 3 秒观察
-            // 游戏进程是否提前退出的这段时间里，刚拉起的 Java/游戏窗口很容易抢到前台焦点，
-            // 之前这里的系统原生 MessageBox.Show 没有显式传 Owner，弹窗触发时启动器主窗口
-            // 已经不是前台窗口，Windows 有时会把这个已经失去前台焦点、又刚好被系统认为
-            // "不活跃"的窗口直接最小化。现在改用进程内 Overlay 弹窗（MessageBoxDialog）后，
-            // 弹窗本身就是挂在 MainWindow 可视化树里的一部分，天然跟随主窗口，不存在"独立
-            // Win32 窗口跟主窗口分离"这个问题了；但主窗口自己被最小化的情况依然可能发生
-            // （见上面的原因），所以这里仍然需要在弹窗前调用 EnsureVisibleForDialog()
-            // 主动把主窗口从 Minimized 恢复。
-            EnsureVisibleForDialog();
-
+            // 异常退出先进入角标，不为后台诊断抢回焦点或恢复主窗口。
             if (exitedEarly)
             {
                 // 统一走同一套退出分类：正常退出/用户主动关闭绝不能写成崩溃；
@@ -4093,8 +4154,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>统一处理游戏进程退出。正常退出与用户主动关闭只记普通退出日志，不显示崩溃弹窗。
-    /// 对疑似“外部强制关闭导致 latest.log 停在半行”的情况，正文严格只显示一行
-    /// “可能是用户手动关闭了游戏”，也不会再跑 OpenGL/崩溃自动分析。</summary>
+    /// 对疑似“外部强制关闭导致 latest.log 停在半行”的情况，不误报崩溃。
+    /// 异常退出先进入右下角提醒，点击后查看已有的详细诊断。</summary>
     private async Task HandleGameProcessExitAsync(GameProcessInfo processInfo, bool exitedDuringStartup)
     {
         if (!processInfo.TryClaimExitNotification()) return;
@@ -4122,8 +4183,8 @@ public partial class MainWindow : Window
                 LauncherLogService.AppendLine($"[游戏退出] {processInfo.AccountLabel} - {processInfo.VersionId}，退出码 {exitCode}；日志疑似被强行截断，可能是用户手动关闭");
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    EnsureVisibleForDialog();
-                    CrashReportDialog.ShowPossibleManualClose(this, processInfo);
+                    PublishGameDiagnostic(processInfo, "游戏已退出", "可能是用户手动关闭了游戏。",
+                        () => CrashReportDialog.ShowPossibleManualClose(this, processInfo));
                 });
                 return;
 
@@ -4137,8 +4198,9 @@ public partial class MainWindow : Window
                     LauncherLogService.AppendLine("[JVM参数错误] " + string.Join(" | ", jvmIssues.Select(jx => jx.Title)));
                     await Dispatcher.InvokeAsync(() =>
                     {
-                        EnsureVisibleForDialog();
-                        CrashReportDialog.ShowJvmArgumentError(this, processInfo, exitCode, jvmIssues);
+                        PublishGameDiagnostic(processInfo, "游戏未能启动：JVM 参数有误",
+                            string.Join("；", jvmIssues.Select(issue => issue.Title)),
+                            () => CrashReportDialog.ShowJvmArgumentError(this, processInfo, exitCode, jvmIssues));
                     });
                     return;
                 }
@@ -4153,8 +4215,9 @@ public partial class MainWindow : Window
 
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    EnsureVisibleForDialog();
-                    CrashReportDialog.Show(this, message, processInfo);
+                    PublishGameDiagnostic(processInfo, exitedDuringStartup ? "游戏未能启动" : "游戏异常退出",
+                        $"实例：{processInfo.VersionId}，退出码 {exitCode}。可以查看本次日志与诊断建议。",
+                        () => CrashReportDialog.Show(this, message, processInfo));
                 });
                 return;
         }
@@ -4238,36 +4301,44 @@ public partial class MainWindow : Window
     /// animateIn=false 用于"弹窗里弹出的子弹窗关闭后，恢复显示上一层"的场景——那种情况
     /// 更接近"揭开覆盖层露出原来就在那的内容"，用更快、更轻的过渡即可，不需要完整的
     /// 进场动画，避免用户以为又打开了一个全新的弹窗。</summary>
-    internal void OverlayRenderEntry(object content, bool animateIn)
+    internal void OverlayRenderEntry(object content, bool animateIn, Action? onShown = null)
     {
         // 新层覆盖关闭中的旧层时，先完成旧层结果，避免丢失模态等待者。
+        var generation = ++_overlayRenderGeneration;
         var completePrevious = _completeOverlayDismiss;
         _completeOverlayDismiss = null;
         completePrevious?.Invoke();
+        if (generation != _overlayRenderGeneration || _isWindowClosed) return;
         UiAnimationHelper.Reset(OverlayScrim);
         UiAnimationHelper.Reset(OverlayCard, scale: OverlayCardScale);
         OverlayRoot.Visibility = Visibility.Visible;
         OverlayContentHost.Content = content;
-        if (!animateIn) return;
+        if (!animateIn) { onShown?.Invoke(); return; }
         UiAnimationHelper.PopupFadeIn(OverlayScrim);
-        UiAnimationHelper.PopupFadeIn(OverlayCard);
+        UiAnimationHelper.PopupFadeIn(OverlayCard, onShown, OverlayCardScale);
     }
 
     /// <summary>退场回调只执行一次；取消动画、关闭设置和新层覆盖也能完成模态等待。</summary>
     internal void OverlayDismissEntry(object content, Action onComplete)
     {
+        var generation = ++_overlayRenderGeneration;
         var completed = false;
+        Action? completion = null;
         void Complete()
         {
             if (completed) return;
             completed = true;
-            _completeOverlayDismiss = null;
+            if (ReferenceEquals(_completeOverlayDismiss, completion)) _completeOverlayDismiss = null;
             if (ReferenceEquals(OverlayContentHost.Content, content)) OverlayContentHost.Content = null;
             onComplete();
         }
-        _completeOverlayDismiss?.Invoke();
-        _completeOverlayDismiss = Complete;
-        // 先挂背景退场，卡片禁用动画时的同步回调可安全恢复上层。
+        completion = Complete;
+        var previous = _completeOverlayDismiss;
+        _completeOverlayDismiss = null;
+        previous?.Invoke();
+        // 旧回调可打开另一层；它拥有新的代次，旧退场只能结算自己的结果。
+        if (generation != _overlayRenderGeneration || _isWindowClosed) { Complete(); return; }
+        _completeOverlayDismiss = completion;
         UiAnimationHelper.FadeOut(OverlayScrim, from: OverlayScrim.Opacity);
         UiAnimationHelper.FadeOut(OverlayCard, Complete, OverlayCard.Opacity);
     }
@@ -4555,6 +4626,39 @@ public partial class MainWindow : Window
             onCompleted: Hide, kind: AnimationKind.WindowMinimize);
     }
 
+    /// <summary>更新器专用：保留游戏并走完整关闭流程；用户取消时返回false，真正Closed才返回true。</summary>
+    public Task<bool> RequestExitForUpdateAsync(Action authorizeOnClosed)
+    {
+        Dispatcher.VerifyAccess();
+        ArgumentNullException.ThrowIfNull(authorizeOnClosed);
+        if (_updateExitCompletion is { } existing) return existing.Task;
+        if (_isWindowClosed || _forceExitRequested || _closeRequestAccepted || _pluginExitPreparing || _closeLifecycleBackupRunning)
+            return Task.FromResult(false);
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _updateExitCompletion = completion;
+        _authorizeUpdateOnClosed = authorizeOnClosed;
+        _requestedExitMode = LauncherExitMode.PreserveGamesForUpdate;
+        _closeRequestAccepted = true;
+        _touchCloseDecisionHandled = true;
+        try { Close(); }
+        catch (Exception ex)
+        {
+            _closeRequestAccepted = false;
+            CancelAutomaticExitRequest();
+            ErrorPresenter.LogFallback("更新前关闭启动器失败", ex);
+        }
+        return completion.Task;
+    }
+
+    private void CancelAutomaticExitRequest()
+    {
+        if (_requestedExitMode != LauncherExitMode.Normal) _touchCloseDecisionHandled = false;
+        _requestedExitMode = LauncherExitMode.Normal;
+        _updateExitCompletion?.TrySetResult(false);
+        _updateExitCompletion = null;
+        _authorizeUpdateOnClosed = null;
+    }
+
     /// <summary>游戏窗口成功出现后，按设置页「游戏启动后」选项处理启动器主窗口——跟
     /// CloseButtonAction 共用 Minimize/MinimizeToTray/直接关闭这几种已有实现，见
     /// PostGameLaunchAction 枚举注释。默认 KeepAsIs 什么都不做，直接返回，不产生任何额外开销。
@@ -4570,10 +4674,11 @@ public partial class MainWindow : Window
                 MinimizeToTray();
                 break;
             case Models.PostGameLaunchAction.Close:
-                // 跟托盘"退出"同理：这是用户自己在设置里明确选定的行为，不需要再走
-                // "下载/启动进行中"那套关闭确认——游戏已经启动成功，启动器这边没有正在
-                // 进行、会被打断的任务，直接退出即可；游戏是独立进程，不会被一起关掉。
-                System.Windows.Application.Current.Shutdown();
+                // 明确保留游戏，并用 Close 走完备份、插件和关闭动画，不能让 Shutdown 跳过取消关闭。
+                _requestedExitMode = LauncherExitMode.PreserveGamesAfterLaunch;
+                _closeRequestAccepted = true;
+                _touchCloseDecisionHandled = true;
+                Close();
                 break;
             case Models.PostGameLaunchAction.KeepAsIs:
             default:
@@ -4843,6 +4948,7 @@ public partial class MainWindow : Window
                 {
                     e.Cancel = true;
                     _closeRequestAccepted = false;
+                    CancelAutomaticExitRequest();
                     closingSettingsPage.ShowPendingEditPromptIfNeeded();
                     return;
                 }
@@ -4850,7 +4956,17 @@ public partial class MainWindow : Window
                 if (settingsChoice == XclMessageResult.No)
                     closingSettingsPage.DiscardUnsavedChangesWithoutNavigating();
                 else if (settingsChoice == XclMessageResult.Yes)
+                {
                     closingSettingsPage.SaveNow();
+                    if (closingSettingsPage.HasUnsavedChanges)
+                    {
+                        e.Cancel = true;
+                        _closeRequestAccepted = false;
+                        CancelAutomaticExitRequest();
+                        closingSettingsPage.ShowPendingEditPromptIfNeeded();
+                        return;
+                    }
+                }
             }
         }
 
@@ -4872,6 +4988,7 @@ public partial class MainWindow : Window
             {
                 e.Cancel = true;
                 _closeRequestAccepted = false;
+                CancelAutomaticExitRequest();
                 return;
             }
 
@@ -4882,6 +4999,7 @@ public partial class MainWindow : Window
                 e.Cancel = true;
                 _closeRequestAccepted = false;
                 _touchCloseDecisionHandled = false;
+                CancelAutomaticExitRequest();
                 MinimizeToTray();
                 return;
             }
@@ -4915,6 +5033,7 @@ public partial class MainWindow : Window
             {
                 e.Cancel = true;
                 _closeRequestAccepted = false;
+                CancelAutomaticExitRequest();
                 return;
             }
 
@@ -4930,6 +5049,7 @@ public partial class MainWindow : Window
                 _closeRequestAccepted = false;
                 _stickyNoteCloseDecisionHandled = false;
                 _touchCloseDecisionHandled = false;
+                CancelAutomaticExitRequest();
                 MinimizeToTray();
                 return;
             }
@@ -4987,7 +5107,7 @@ public partial class MainWindow : Window
         _shutdownAfterClose = true;
         _trayIcon?.Hide();
         TouchOverlayService.CloseAll();
-        if (!_touchCloseKeepGameRunning) KillAllGameAndServerProcesses();
+        if (LauncherExitPolicy.ShouldCloseGames(_requestedExitMode, _touchCloseKeepGameRunning)) KillAllGameAndServerProcesses();
         ScheduleSelfKillFailSafe();
     }
 
@@ -5194,6 +5314,9 @@ public partial class MainWindow : Window
             if (OverlayDialogService.ShowModal(nameDialog) != true) return;
 
             var instanceName = nameDialog.InstanceName;
+            if (!await ImportPreviewDialog.ConfirmAsync(modpackPath,
+                InstanceUxService.GetVersionDirectory(folder.Path, instanceName), instanceName,
+                ImportPreviewKind.ModpackArchive)) return;
 
             // Forge/NeoForge 的安装器必须用本地 Java 跑；Fabric/Quilt 不需要。
             // 这里提前解析一次，解析不到就传 null，由 InstallToNewInstanceAsync 在
@@ -5252,6 +5375,8 @@ public partial class MainWindow : Window
         if (OverlayDialogService.ShowModal(dialog) != true) return;
 
         var targetDir = Path.Combine(folder.Path, "versions", dialog.TargetVersionId);
+        if (!await ImportPreviewDialog.ConfirmAsync(modpackPath, targetDir,
+            dialog.TargetVersionId, ImportPreviewKind.ModpackArchive)) return;
 
         var pd = new ProgressDialog($"正在导入整合包 {Path.GetFileName(modpackPath)} ...");
         pd.Show();

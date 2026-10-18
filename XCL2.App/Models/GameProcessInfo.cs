@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Threading;
+using XCL2.App.Services;
 
 namespace XCL2.App.Models;
 
@@ -34,6 +35,7 @@ public class GameProcessInfo
     public StringBuilder OutputBuffer { get; } = new();
 
     public event Action<string>? OutputReceived;
+    internal LegacyTouchWorldEvidence TouchWorldEvidence { get; } = new();
 
     private readonly TaskCompletionSource<bool> _stdoutClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<bool> _stderrClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -95,6 +97,7 @@ public class GameProcessInfo
         if (line == null) return;
         lock (OutputBuffer)
         {
+            TouchWorldEvidence.Observe(line);
             OutputBuffer.AppendLine(line);
             // 简单的滚动裁剪，避免长时间运行内存无限增长
             if (OutputBuffer.Length > 500_000)

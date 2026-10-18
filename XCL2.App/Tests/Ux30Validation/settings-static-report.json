@@ -1,0 +1,6 @@
+{
+  "scope": "source-only settings UX contracts",
+  "checks": 305,
+  "reset_bindings": 135,
+  "status": "passed"
+}

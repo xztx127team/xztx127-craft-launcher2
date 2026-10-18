@@ -32,7 +32,7 @@ public partial class ExperimentalGateWindow : OverlayDialogControl
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _timer.Tick += Timer_Tick;
         _timer.Start();
-        RequestClose += OnRequestClose;
+        OverlayClosed += OnOverlayClosed;
 
         UpdateCountdownText();
     }
@@ -77,9 +77,9 @@ public partial class ExperimentalGateWindow : OverlayDialogControl
     }
 
     // 同 MicrosoftLoginWindow：OverlayDialogControl 继承 UserControl，没有 Window.OnClosed
-    // 可以重写。改用 IOverlayDialog.RequestClose，逻辑跟原来完全一致——弹窗关闭时把倒计时
+    // 可以重写。改用 OverlayDialogControl.OverlayClosed，逻辑跟原来完全一致——弹窗关闭时把倒计时
     // 计时器停掉，避免它在弹窗已经摘除之后还继续触发 Tick。
-    private void OnRequestClose(object? sender, bool? result)
+    private void OnOverlayClosed(object? sender, bool? result)
     {
         _timer.Stop();
     }

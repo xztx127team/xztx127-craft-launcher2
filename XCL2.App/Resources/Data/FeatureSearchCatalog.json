@@ -7,51 +7,14 @@
     "PageTitle": "主页"
   },
   {
-    "Id": "home.PreviewToggle",
+    "Id": "home.GuestModeToggle",
     "PageKey": "home",
-    "Title": "新界面预览",
-    "Keywords": "将完整启动器切换为 WinUI 3 风格，所有页面继续使用现有功能 Preview Toggle 首页 磁贴 主页面 home",
+    "Title": "访客模式",
+    "Keywords": "开启后启动游戏使用一个只存在于本次运行的临时账户，不使用已保存的账户；关闭时清理本次会话产生的日志/临时下载文件 Guest Mode Toggle 首页 磁贴 主页面 home",
     "PageTitle": "主页",
-    "TargetName": "PreviewToggle",
-    "TargetText": "新界面预览"
-  },
-  {
-    "Id": "home.SimplifiedModeToggle",
-    "PageKey": "home",
-    "Title": "简洁模式",
-    "Keywords": "开启后侧边栏只保留最常用的几个入口，其余功能收进「更多」 Simplified Mode Toggle 首页 磁贴 主页面 home",
-    "PageTitle": "主页",
-    "TargetName": "SimplifiedModeToggle",
-    "TargetText": "简洁模式"
-  },
-  {
-    "Id": "home.DarkModeToggle",
-    "PageKey": "home",
-    "Title": "浅色模式",
-    "Keywords": "切换深色/浅色模式，只影响明暗，不影响「配色皮肤」选的色系。开启「自动循环」时，这里的选择只是临时覆盖，到下一个自动切换时间点会被自动循环重新接管。 Dark Mode Toggle 首页 磁贴 主页面 home",
-    "PageTitle": "主页",
-    "TargetName": "DarkModeToggle",
-    "TargetText": "浅色模式",
-    "ResourceKey": "Str_Home_Toggle_LightMode"
-  },
-  {
-    "Id": "home.AutoThemeCycleToggle",
-    "PageKey": "home",
-    "Title": "自动循环",
-    "Keywords": "开启后按系统时间自动切换深浅色模式（默认早 8:00 到晚 19:00 为浅色，其余为深色），切换时间点可在「设置」页自行调整。 Auto Theme Cycle Toggle 首页 磁贴 主页面 home",
-    "PageTitle": "主页",
-    "TargetName": "AutoThemeCycleToggle",
-    "TargetText": "自动循环",
-    "ResourceKey": "Str_Home_Toggle_AutoCycle"
-  },
-  {
-    "Id": "home.FollowSystemThemeToggle",
-    "PageKey": "home",
-    "Title": "跟随系统",
-    "Keywords": "开启后深浅色跟随 Windows 系统当前的应用主题设置，系统主题变化时自动切换 Follow System Theme Toggle 首页 磁贴 主页面 home",
-    "PageTitle": "主页",
-    "TargetName": "FollowSystemThemeToggle",
-    "TargetText": "跟随系统"
+    "TargetName": "GuestModeToggle",
+    "TargetText": "访客模式",
+    "ResourceKey": "Str_Home_Toggle_GuestMode"
   },
   {
     "Id": "home.ModeToggle",
@@ -64,14 +27,61 @@
     "ResourceKey": "Str_Home_Toggle_NormalMode"
   },
   {
-    "Id": "home.GuestModeToggle",
+    "Id": "home.FollowSystemThemeToggle",
     "PageKey": "home",
-    "Title": "访客模式",
-    "Keywords": "开启后启动游戏使用一个只存在于本次运行的临时账户，不使用已保存的账户；关闭时清理本次会话产生的日志/临时下载文件 Guest Mode Toggle 首页 磁贴 主页面 home",
+    "Title": "跟随系统",
+    "Keywords": "开启后深浅色跟随 Windows 系统当前的应用主题设置，系统主题变化时自动切换 Follow System Theme Toggle 首页 磁贴 主页面 home",
     "PageTitle": "主页",
-    "TargetName": "GuestModeToggle",
-    "TargetText": "访客模式",
-    "ResourceKey": "Str_Home_Toggle_GuestMode"
+    "TargetName": "FollowSystemThemeToggle",
+    "TargetText": "跟随系统"
+  },
+  {
+    "Id": "home.AutoThemeCycleToggle",
+    "PageKey": "home",
+    "Title": "自动循环",
+    "Keywords": "开启后按系统时间自动切换深浅色模式（默认早 8:00 到晚 19:00 为浅色，其余为深色），切换时间点可在「设置」页自行调整。 Auto Theme Cycle Toggle 首页 磁贴 主页面 home",
+    "PageTitle": "主页",
+    "TargetName": "AutoThemeCycleToggle",
+    "TargetText": "自动循环",
+    "ResourceKey": "Str_Home_Toggle_AutoCycle"
+  },
+  {
+    "Id": "home.DarkModeToggle",
+    "PageKey": "home",
+    "Title": "浅色模式",
+    "Keywords": "切换深色/浅色模式，只影响明暗，不影响「配色皮肤」选的色系。开启「自动循环」时，这里的选择只是临时覆盖，到下一个自动切换时间点会被自动循环重新接管。 Dark Mode Toggle 首页 磁贴 主页面 home",
+    "PageTitle": "主页",
+    "TargetName": "DarkModeToggle",
+    "TargetText": "浅色模式",
+    "ResourceKey": "Str_Home_Toggle_LightMode"
+  },
+  {
+    "Id": "home.SimplifiedModeToggle",
+    "PageKey": "home",
+    "Title": "简洁模式",
+    "Keywords": "开启后侧边栏只保留最常用的几个入口，其余功能收进「更多」 Simplified Mode Toggle 首页 磁贴 主页面 home",
+    "PageTitle": "主页",
+    "TargetName": "SimplifiedModeToggle",
+    "TargetText": "简洁模式"
+  },
+  {
+    "Id": "home.PreviewToggle",
+    "PageKey": "home",
+    "Title": "新界面预览",
+    "Keywords": "将完整启动器切换为 WinUI 3 风格，所有页面继续使用现有功能 Preview Toggle 首页 磁贴 主页面 home",
+    "PageTitle": "主页",
+    "TargetName": "PreviewToggle",
+    "TargetText": "新界面预览"
+  },
+  {
+    "Id": "home.HomeContextHint_Click",
+    "PageKey": "home",
+    "Title": "选择实例",
+    "Keywords": "打开实例选择页面；不会自动下载或启动游戏 欢迎使用 XCL2 首页 磁贴 主页面 home",
+    "PageTitle": "主页",
+    "TargetText": "选择实例",
+    "SectionTitle": "欢迎使用 XCL2",
+    "SectionResourceKey": "Str_Home_Welcome"
   },
   {
     "Id": "home.LaunchTile",
@@ -204,6 +214,16 @@
     "TargetText": "未完成的安装..."
   },
   {
+    "Id": "versions.ToggleInstanceFilter_Click",
+    "PageKey": "versions",
+    "Title": "筛选",
+    "Keywords": "按名称、备注、标签或收藏筛选实例 已安装版本 版本管理 加载器 选择游戏 version",
+    "PageTitle": "版本选择",
+    "TargetText": "筛选",
+    "SectionTitle": "已安装版本",
+    "SectionResourceKey": "Str_Ui_Installed_Versions"
+  },
+  {
     "Id": "versions.InstallNewVersion_Click",
     "PageKey": "versions",
     "Title": "➕ 安装新版本",
@@ -211,6 +231,16 @@
     "PageTitle": "版本选择",
     "TargetText": "➕ 安装新版本",
     "ResourceKey": "Str_Ui_Install_New_Version",
+    "SectionTitle": "已安装版本",
+    "SectionResourceKey": "Str_Ui_Installed_Versions"
+  },
+  {
+    "Id": "versions.ClearInstanceFilter_Click",
+    "PageKey": "versions",
+    "Title": "清除",
+    "Keywords": "清除筛选条件 已安装版本 版本管理 加载器 选择游戏 version",
+    "PageTitle": "版本选择",
+    "TargetText": "清除",
     "SectionTitle": "已安装版本",
     "SectionResourceKey": "Str_Ui_Installed_Versions"
   },
@@ -620,6 +650,18 @@
     "SectionResourceKey": "Str_Ui_Map_Downloads_Need_A_Curseforge_Api_Key_"
   },
   {
+    "Id": "downloads.ModWikiReferenceButton",
+    "PageKey": "downloads",
+    "Title": "百科参考",
+    "Keywords": "当前关键词的 MC 百科参考链接，仅在点击后展开 Mod Wiki Reference Button 下载中心 download install",
+    "PageTitle": "下载",
+    "TargetName": "ModWikiReferenceButton",
+    "TargetText": "百科参考",
+    "SectionTitle": "Mod",
+    "SectionResourceKey": "Str_Ui_Mod_Downloads",
+    "SectionKey": "ModPanel"
+  },
+  {
     "Id": "downloads.ModSearchBox",
     "PageKey": "downloads",
     "Title": "名称",
@@ -771,45 +813,22 @@
     "PageTitle": "Mod 管理"
   },
   {
-    "Id": "mods.ExportModpack_Click",
+    "Id": "mods.PreviewCompatibility_Click",
     "PageKey": "mods",
-    "Title": "导出整合包",
+    "Title": "兼容性预览",
     "Keywords": "Mod 管理 本地模组 插件 mods",
     "PageTitle": "Mod 管理",
-    "TargetText": "导出整合包",
-    "ResourceKey": "Str_Ui_Export_Modpack",
+    "TargetText": "兼容性预览",
     "SectionTitle": "Mod 管理",
     "SectionResourceKey": "Str_Nav_ModManager"
   },
   {
-    "Id": "mods.ImportModpack_Click",
+    "Id": "mods.MoreActions_Click",
     "PageKey": "mods",
-    "Title": "导入整合包",
+    "Title": "更多",
     "Keywords": "Mod 管理 本地模组 插件 mods",
     "PageTitle": "Mod 管理",
-    "TargetText": "导入整合包",
-    "ResourceKey": "Str_Ui_Import_Modpack",
-    "SectionTitle": "Mod 管理",
-    "SectionResourceKey": "Str_Nav_ModManager"
-  },
-  {
-    "Id": "mods.AnalyzeDependencies_Click",
-    "PageKey": "mods",
-    "Title": "检查前置模组",
-    "Keywords": "Mod 管理 本地模组 插件 mods",
-    "PageTitle": "Mod 管理",
-    "TargetText": "检查前置模组",
-    "ResourceKey": "Str_Ui_Check_Dependencies",
-    "SectionTitle": "Mod 管理",
-    "SectionResourceKey": "Str_Nav_ModManager"
-  },
-  {
-    "Id": "mods.BatchUpdateMods_Click",
-    "PageKey": "mods",
-    "Title": "一键升级",
-    "Keywords": "Mod 管理 本地模组 插件 mods",
-    "PageTitle": "Mod 管理",
-    "TargetText": "一键升级",
+    "TargetText": "更多",
     "SectionTitle": "Mod 管理",
     "SectionResourceKey": "Str_Nav_ModManager"
   },
@@ -821,6 +840,26 @@
     "PageTitle": "Mod 管理",
     "TargetText": "刷新",
     "ResourceKey": "Str_Common_Refresh",
+    "SectionTitle": "Mod 管理",
+    "SectionResourceKey": "Str_Nav_ModManager"
+  },
+  {
+    "Id": "mods.SelectVisibleMods_Click",
+    "PageKey": "mods",
+    "Title": "选择显示项",
+    "Keywords": "Mod 管理 本地模组 插件 mods",
+    "PageTitle": "Mod 管理",
+    "TargetText": "选择显示项",
+    "SectionTitle": "Mod 管理",
+    "SectionResourceKey": "Str_Nav_ModManager"
+  },
+  {
+    "Id": "mods.MoreActions_Click.2",
+    "PageKey": "mods",
+    "Title": "批量操作",
+    "Keywords": "Mod 管理 本地模组 插件 mods",
+    "PageTitle": "Mod 管理",
+    "TargetText": "批量操作",
     "SectionTitle": "Mod 管理",
     "SectionResourceKey": "Str_Nav_ModManager"
   },
@@ -1116,13 +1155,13 @@
     "SectionTitle": "自动安装/编译未完成，可手动重试"
   },
   {
-    "Id": "servers.OpenNetworkGuide_Click",
+    "Id": "servers.ServerListMenuButton",
     "PageKey": "servers",
-    "Title": "🌐 如何联机/内网穿透教程",
-    "Keywords": "教你怎么让好友从外网连进你的服务器：内网穿透 / 路由器端口映射 云服务器中转 服务器列表 开服 服务器 server",
+    "Title": "筛选与更多 ▾",
+    "Keywords": "Server List Menu Button 服务器列表 开服 服务器 server",
     "PageTitle": "服务端管理",
-    "TargetText": "🌐 如何联机/内网穿透教程",
-    "ResourceKey": "Str_Ui_Multiplayer_Port_Forwarding_Guide",
+    "TargetName": "ServerListMenuButton",
+    "TargetText": "筛选与更多 ▾",
     "SectionTitle": "服务器列表",
     "SectionResourceKey": "Str_Ui_Server_List"
   },
@@ -1360,12 +1399,11 @@
   {
     "Id": "accounts.OfflineNameBox",
     "PageKey": "accounts",
-    "Title": "账户管理",
-    "Keywords": "Offline Name Box 账户管理 帐号 登录 正版 离线 account login",
+    "Title": "离线账户",
+    "Keywords": "游戏内用户名 Offline Name Box 账户管理 帐号 登录 正版 离线 account login",
     "PageTitle": "账户管理",
     "TargetName": "OfflineNameBox",
-    "TargetText": "账户管理",
-    "ResourceKey": "Str_Nav_Accounts",
+    "TargetText": "离线账户",
     "SectionTitle": "账户管理",
     "SectionResourceKey": "Str_Nav_Accounts"
   },
@@ -1383,59 +1421,66 @@
   {
     "Id": "accounts.AddMicrosoft_Click",
     "PageKey": "accounts",
-    "Title": "添加微软账户 (浏览器登录)",
-    "Keywords": "账户管理 帐号 登录 正版 离线 account login",
+    "Title": "微软账户登录",
+    "Keywords": "通过系统默认浏览器登录微软账户 账户管理 帐号 登录 正版 离线 account login",
     "PageTitle": "账户管理",
-    "TargetText": "添加微软账户 (浏览器登录)",
-    "ResourceKey": "Str_Ui_Add_Microsoft_Account_Browser_Sign_In_2",
+    "TargetText": "微软账户登录",
     "SectionTitle": "账户管理",
     "SectionResourceKey": "Str_Nav_Accounts"
   },
   {
-    "Id": "accounts.AddMicrosoftEmbedded_Click",
+    "Id": "accounts.AccountActions_Click",
     "PageKey": "accounts",
-    "Title": "添加微软账户 (内嵌登录，免复制验证码)",
+    "Title": "其他方式",
+    "Keywords": "更多微软账户登录方式 账户管理 帐号 登录 正版 离线 account login",
+    "PageTitle": "账户管理",
+    "TargetText": "其他方式",
+    "SectionTitle": "账户管理",
+    "SectionResourceKey": "Str_Nav_Accounts"
+  },
+  {
+    "Id": "accounts.control131",
+    "PageKey": "accounts",
+    "Title": "第三方认证服务器登录",
     "Keywords": "账户管理 帐号 登录 正版 离线 account login",
     "PageTitle": "账户管理",
-    "TargetText": "添加微软账户 (内嵌登录，免复制验证码)",
-    "ResourceKey": "Str_Ui_Add_Microsoft_Account_Embedded_Sign_In_N",
+    "TargetText": "第三方认证服务器登录",
     "SectionTitle": "账户管理",
     "SectionResourceKey": "Str_Nav_Accounts"
   },
   {
     "Id": "accounts.AuthServerRootBox",
     "PageKey": "accounts",
-    "Title": "用第三方认证服务器（统一通行证/blessing-skin 等，需支持 Yggdrasil 协议）账号登录，登录后会自动使用该服务器上的皮肤。",
-    "Keywords": "认证服务器 API 根地址，例如 https://example.com/api/yggdrasil Auth Server Root Box 认证服务器（皮肤站）登录 帐号 登录 正版 离线 account login",
+    "Title": "认证服务器地址（API 根地址）",
+    "Keywords": "认证服务器 API 根地址，例如 https://example.com/api/yggdrasil Auth Server Root Box 账户管理 帐号 登录 正版 离线 account login",
     "PageTitle": "账户管理",
     "TargetName": "AuthServerRootBox",
-    "TargetText": "用第三方认证服务器（统一通行证/blessing-skin 等，需支持 Yggdrasil 协议）账号登录，登录后会自动使用该服务器上的皮肤。",
-    "ResourceKey": "Str_Ui_Sign_In_With_A_Third_Party_Auth_Server_A",
-    "SectionTitle": "认证服务器（皮肤站）登录",
-    "SectionResourceKey": "Str_Ui_Authlib_Skin_Server_Sign_In"
+    "TargetText": "认证服务器地址（API 根地址）",
+    "ResourceKey": "Str_Ui_Auth_Server_Address_Api_Root",
+    "SectionTitle": "账户管理",
+    "SectionResourceKey": "Str_Nav_Accounts"
   },
   {
     "Id": "accounts.AuthServerUsernameBox",
     "PageKey": "accounts",
-    "Title": "认证服务器地址（API 根地址）",
-    "Keywords": "皮肤站账号的邮箱/用户名 Auth Server Username Box 认证服务器（皮肤站）登录 帐号 登录 正版 离线 account login",
+    "Title": "密码",
+    "Keywords": "皮肤站账号的邮箱/用户名 Auth Server Username Box 账户管理 帐号 登录 正版 离线 account login",
     "PageTitle": "账户管理",
     "TargetName": "AuthServerUsernameBox",
-    "TargetText": "认证服务器地址（API 根地址）",
-    "ResourceKey": "Str_Ui_Auth_Server_Address_Api_Root",
-    "SectionTitle": "认证服务器（皮肤站）登录",
-    "SectionResourceKey": "Str_Ui_Authlib_Skin_Server_Sign_In"
+    "TargetText": "密码",
+    "SectionTitle": "账户管理",
+    "SectionResourceKey": "Str_Nav_Accounts"
   },
   {
     "Id": "accounts.AddAuthServer_Click",
     "PageKey": "accounts",
     "Title": "登录",
-    "Keywords": "认证服务器（皮肤站）登录 帐号 登录 正版 离线 account login",
+    "Keywords": "账户管理 帐号 登录 正版 离线 account login",
     "PageTitle": "账户管理",
     "TargetText": "登录",
     "ResourceKey": "Str_Ui_Sign_In",
-    "SectionTitle": "认证服务器（皮肤站）登录",
-    "SectionResourceKey": "Str_Ui_Authlib_Skin_Server_Sign_In"
+    "SectionTitle": "账户管理",
+    "SectionResourceKey": "Str_Nav_Accounts"
   },
   {
     "Id": "settings.page",
@@ -1532,78 +1577,583 @@
     "SectionTitle": "窗口与托盘"
   },
   {
+    "Id": "settings.UxHabitsSettingsGroup",
+    "PageKey": "settings",
+    "Title": "使用习惯、隐私与显示",
+    "Keywords": "Ux Habits Settings Group 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxHabitsSettingsGroup",
+    "TargetText": "使用习惯、隐私与显示",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxRecentHistoryCheck",
+    "PageKey": "settings",
+    "Title": "记录最近启动的实例（默认关闭）",
+    "Keywords": "Ux Recent History Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxRecentHistoryCheck",
+    "TargetText": "记录最近启动的实例（默认关闭）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxRecentToolsCheck",
+    "PageKey": "settings",
+    "Title": "记录最近使用的工具（默认关闭）",
+    "Keywords": "Ux Recent Tools Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxRecentToolsCheck",
+    "TargetText": "记录最近使用的工具（默认关闭）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxClearRecent_Click",
+    "PageKey": "settings",
+    "Title": "清空最近使用记录",
+    "Keywords": "窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "清空最近使用记录",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxRememberBrowseCheck",
+    "PageKey": "settings",
+    "Title": "从实例详情返回时恢复筛选条件与浏览位置",
+    "Keywords": "Ux Remember Browse Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxRememberBrowseCheck",
+    "TargetText": "从实例详情返回时恢复筛选条件与浏览位置",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxRememberResultsCheck",
+    "PageKey": "settings",
+    "Title": "保留本次会话的任务结果（最多 100 条，退出后清空）",
+    "Keywords": "Ux Remember Results Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxRememberResultsCheck",
+    "TargetText": "保留本次会话的任务结果（最多 100 条，退出后清空）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxClearResults_Click",
+    "PageKey": "settings",
+    "Title": "清空本次任务结果",
+    "Keywords": "窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "清空本次任务结果",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxHideServerAddressesCheck",
+    "PageKey": "settings",
+    "Title": "隐藏服务器地址（默认关闭）",
+    "Keywords": "Ux Hide Server Addresses Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxHideServerAddressesCheck",
+    "TargetText": "隐藏服务器地址（默认关闭）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxRememberWindowCheck",
+    "PageKey": "settings",
+    "Title": "记住主窗口位置，显示器断开后移回可见区域",
+    "Keywords": "Ux Remember Window Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxRememberWindowCheck",
+    "TargetText": "记住主窗口位置，显示器断开后移回可见区域",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxFollowReducedMotionCheck",
+    "PageKey": "settings",
+    "Title": "跟随系统的减少动画偏好",
+    "Keywords": "Ux Follow Reduced Motion Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxFollowReducedMotionCheck",
+    "TargetText": "跟随系统的减少动画偏好",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxTimeFormatCombo",
+    "PageKey": "settings",
+    "Title": "时间显示",
+    "Keywords": "Ux Time Format Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxTimeFormatCombo",
+    "TargetText": "时间显示",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxCapacityUnitCombo",
+    "PageKey": "settings",
+    "Title": "容量单位",
+    "Keywords": "Ux Capacity Unit Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxCapacityUnitCombo",
+    "TargetText": "容量单位",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxExactCapacityCheck",
+    "PageKey": "settings",
+    "Title": "同时显示精确字节数",
+    "Keywords": "Ux Exact Capacity Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxExactCapacityCheck",
+    "TargetText": "同时显示精确字节数",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.UxResetLayout_Click",
+    "PageKey": "settings",
+    "Title": "恢复界面布局…",
+    "Keywords": "恢复窗口、搜索框与下载面板布局，不影响账号和游戏文件 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "恢复界面布局…",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.RecoverySettingsGroup",
+    "PageKey": "settings",
+    "Title": "提醒、启动检查与恢复",
+    "Keywords": "Recovery Settings Group 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "RecoverySettingsGroup",
+    "TargetText": "提醒、启动检查与恢复",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.ReminderBadgeCheck",
+    "PageKey": "settings",
+    "Title": "显示右下角提醒角标（默认开启）",
+    "Keywords": "Reminder Badge Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "ReminderBadgeCheck",
+    "TargetText": "显示右下角提醒角标（默认开启）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.LaunchHealthCheck",
+    "PageKey": "settings",
+    "Title": "启动前检查实例完整性（默认开启）",
+    "Keywords": "Launch Health Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "LaunchHealthCheck",
+    "TargetText": "启动前检查实例完整性（默认开启）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.LaunchHealthModeCombo",
+    "PageKey": "settings",
+    "Title": "后台建议只增加角标，点击后查看详情。你主动执行操作时的确认、错误反馈，以及自己设置的模组更新提醒方式保持原样。",
+    "Keywords": "Launch Health Mode Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "LaunchHealthModeCombo",
+    "TargetText": "后台建议只增加角标，点击后查看详情。你主动执行操作时的确认、错误反馈，以及自己设置的模组更新提醒方式保持原样。",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.RememberDownloadsCheck",
+    "PageKey": "settings",
+    "Title": "保存可恢复的下载任务（默认开启）",
+    "Keywords": "Remember Downloads Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "RememberDownloadsCheck",
+    "TargetText": "保存可恢复的下载任务（默认开启）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.ModSnapshotCheck",
+    "PageKey": "settings",
+    "Title": "更新模组 / 资源包前保存原文件快照（默认开启）",
+    "Keywords": "Mod Snapshot Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "ModSnapshotCheck",
+    "TargetText": "更新模组 / 资源包前保存原文件快照（默认开启）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.ModSnapshotCountSlider",
+    "PageKey": "settings",
+    "Title": "保留快照数量（1–100）",
+    "Keywords": "Mod Snapshot Count Slider 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "ModSnapshotCountSlider",
+    "TargetText": "保留快照数量（1–100）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.ModSnapshotSpaceSlider",
+    "PageKey": "settings",
+    "Title": "快照总空间上限（64–16384 MB）",
+    "Keywords": "Mod Snapshot Space Slider 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "ModSnapshotSpaceSlider",
+    "TargetText": "快照总空间上限（64–16384 MB）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.OpenReminders_Click",
+    "PageKey": "settings",
+    "Title": "查看提醒",
+    "Keywords": "窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "查看提醒",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.OpenModSnapshots_Click",
+    "PageKey": "settings",
+    "Title": "查看更新快照",
+    "Keywords": "窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "查看更新快照",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlaySettingsGroup",
+    "PageKey": "settings",
+    "Title": "性能悬浮窗 · 系统与游戏占用",
+    "Keywords": "Performance Overlay Settings Group 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlaySettingsGroup",
+    "TargetText": "性能悬浮窗 · 系统与游戏占用",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayEnabledCheck",
+    "PageKey": "settings",
+    "Title": "显示性能悬浮窗（默认关闭）",
+    "Keywords": "Performance Overlay Enabled Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayEnabledCheck",
+    "TargetText": "显示性能悬浮窗（默认关闭）",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlaySystemCpuCheck",
+    "PageKey": "settings",
+    "Title": "系统 CPU",
+    "Keywords": "Performance Overlay System Cpu Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlaySystemCpuCheck",
+    "TargetText": "系统 CPU",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlaySystemMemoryCheck",
+    "PageKey": "settings",
+    "Title": "系统内存",
+    "Keywords": "Performance Overlay System Memory Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlaySystemMemoryCheck",
+    "TargetText": "系统内存",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayMemoryPercentCheck",
+    "PageKey": "settings",
+    "Title": "内存使用百分比",
+    "Keywords": "Performance Overlay Memory Percent Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayMemoryPercentCheck",
+    "TargetText": "内存使用百分比",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayLauncherCheck",
+    "PageKey": "settings",
+    "Title": "启动器 CPU / 内存",
+    "Keywords": "Performance Overlay Launcher Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayLauncherCheck",
+    "TargetText": "启动器 CPU / 内存",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayGamesCheck",
+    "PageKey": "settings",
+    "Title": "游戏列表",
+    "Keywords": "Performance Overlay Games Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGamesCheck",
+    "TargetText": "游戏列表",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayGameCpuCheck",
+    "PageKey": "settings",
+    "Title": "游戏 CPU",
+    "Keywords": "Performance Overlay Game Cpu Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGameCpuCheck",
+    "TargetText": "游戏 CPU",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayGameMemoryCheck",
+    "PageKey": "settings",
+    "Title": "游戏内存",
+    "Keywords": "Performance Overlay Game Memory Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGameMemoryCheck",
+    "TargetText": "游戏内存",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayGameTotalsCheck",
+    "PageKey": "settings",
+    "Title": "所选范围的游戏合计",
+    "Keywords": "Performance Overlay Game Totals Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGameTotalsCheck",
+    "TargetText": "所选范围的游戏合计",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayPidCheck",
+    "PageKey": "settings",
+    "Title": "进程 PID",
+    "Keywords": "Performance Overlay Pid Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayPidCheck",
+    "TargetText": "进程 PID",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayScopeCombo",
+    "PageKey": "settings",
+    "Title": "显示游戏范围",
+    "Keywords": "Performance Overlay Scope Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayScopeCombo",
+    "TargetText": "显示游戏范围",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayInstanceCombo",
+    "PageKey": "settings",
+    "Title": "显示游戏范围",
+    "Keywords": "Performance Overlay Instance Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayInstanceCombo",
+    "TargetText": "显示游戏范围",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayRefreshGamesButton",
+    "PageKey": "settings",
+    "Title": "刷新运行实例",
+    "Keywords": "Performance Overlay Refresh Games Button 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayRefreshGamesButton",
+    "TargetText": "刷新运行实例",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayStyleCombo",
+    "PageKey": "settings",
+    "Title": "样式",
+    "Keywords": "Performance Overlay Style Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayStyleCombo",
+    "TargetText": "样式",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayColorCombo",
+    "PageKey": "settings",
+    "Title": "配色",
+    "Keywords": "Performance Overlay Color Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayColorCombo",
+    "TargetText": "配色",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayWidthCombo",
+    "PageKey": "settings",
+    "Title": "窗口宽度",
+    "Keywords": "Performance Overlay Width Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayWidthCombo",
+    "TargetText": "窗口宽度",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlaySortCombo",
+    "PageKey": "settings",
+    "Title": "游戏排序",
+    "Keywords": "Performance Overlay Sort Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlaySortCombo",
+    "TargetText": "游戏排序",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayRefreshCombo",
+    "PageKey": "settings",
+    "Title": "刷新间隔",
+    "Keywords": "Performance Overlay Refresh Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayRefreshCombo",
+    "TargetText": "刷新间隔",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayMemoryUnitCombo",
+    "PageKey": "settings",
+    "Title": "内存单位",
+    "Keywords": "Performance Overlay Memory Unit Combo 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayMemoryUnitCombo",
+    "TargetText": "内存单位",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayFontSlider",
+    "PageKey": "settings",
+    "Title": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
+    "Keywords": "Performance Overlay Font Slider 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayFontSlider",
+    "TargetText": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayOpacitySlider",
+    "PageKey": "settings",
+    "Title": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
+    "Keywords": "Performance Overlay Opacity Slider 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayOpacitySlider",
+    "TargetText": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayTopmostCheck",
+    "PageKey": "settings",
+    "Title": "固定在最上层",
+    "Keywords": "Performance Overlay Topmost Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayTopmostCheck",
+    "TargetText": "固定在最上层",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.PerformanceOverlayLockCheck",
+    "PageKey": "settings",
+    "Title": "锁定位置",
+    "Keywords": "Performance Overlay Lock Check 窗口与托盘 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayLockCheck",
+    "TargetText": "锁定位置",
+    "SectionTitle": "窗口与托盘"
+  },
+  {
+    "Id": "settings.CheckLauncherUpdatesOnStartupCheck",
+    "PageKey": "settings",
+    "Title": "启动时检查启动器更新",
+    "Keywords": "Check Launcher Updates On Startup 启动器更新 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "CheckLauncherUpdatesOnStartupCheck",
+    "TargetText": "启动时检查启动器更新",
+    "SectionTitle": "启动器更新"
+  },
+  {
+    "Id": "settings.EnableLauncherUpdatesCheck",
+    "PageKey": "settings",
+    "Title": "允许下载安装启动器更新",
+    "Keywords": "Enable Launcher Updates Check 启动器更新 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "EnableLauncherUpdatesCheck",
+    "TargetText": "允许下载安装启动器更新",
+    "SectionTitle": "启动器更新"
+  },
+  {
+    "Id": "settings.CheckLauncherUpdateBtn",
+    "PageKey": "settings",
+    "Title": "检查更新",
+    "Keywords": "Check Launcher Update Btn 启动器更新 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "CheckLauncherUpdateBtn",
+    "TargetText": "检查更新",
+    "SectionTitle": "启动器更新"
+  },
+  {
     "Id": "settings.SimpleJavaVersionCombo",
     "PageKey": "settings",
     "Title": "Java 版本（普通）",
-    "Keywords": "Simple Java Version Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Simple Java Version Combo 启动器更新 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "SimpleJavaVersionCombo",
     "TargetText": "Java 版本（普通）",
     "ResourceKey": "Str_Ui_Java_Version",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "启动器更新"
   },
   {
     "Id": "settings.JavaVersionCombo",
     "PageKey": "settings",
     "Title": "Java 版本（高级）",
-    "Keywords": "Java Version Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Java Version Combo 启动器更新 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "JavaVersionCombo",
     "TargetText": "Java 版本（高级）",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "启动器更新"
   },
   {
     "Id": "settings.JavaArchCombo",
     "PageKey": "settings",
     "Title": "Java 架构（高级）",
-    "Keywords": "Java Arch Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Java Arch Combo 启动器更新 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "JavaArchCombo",
     "TargetText": "Java 架构（高级）",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "启动器更新"
   },
   {
     "Id": "settings.JavaInstallModeCombo",
     "PageKey": "settings",
     "Title": "Java 安装方式（高级）",
-    "Keywords": "Java Install Mode Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Java Install Mode Combo 启动器更新 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "JavaInstallModeCombo",
     "TargetText": "Java 安装方式（高级）",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "启动器更新"
   },
   {
     "Id": "settings.EnforceJavaVersionMatchCheck",
     "PageKey": "settings",
     "Title": "强制使用匹配 Java（检测到版本不匹配时直接自动切换，不再询问）",
-    "Keywords": "Enforce Java Version Match Check 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Enforce Java Version Match Check 启动器更新 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "EnforceJavaVersionMatchCheck",
     "TargetText": "强制使用匹配 Java（检测到版本不匹配时直接自动切换，不再询问）",
     "ResourceKey": "Str_Ui_Always_Use_The_Matching_Java_Switch_Auto",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "启动器更新"
   },
   {
     "Id": "settings.DownloadJavaBtn",
     "PageKey": "settings",
     "Title": "下载 Java",
-    "Keywords": "Download Java Btn 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Download Java Btn 启动器更新 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "DownloadJavaBtn",
     "TargetText": "下载 Java",
     "ResourceKey": "Str_Ui_Download_Java",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "启动器更新"
   },
   {
     "Id": "settings.ScanDiskForJavaBtn",
     "PageKey": "settings",
     "Title": "全盘扫描查找 Java（可选，默认不启用，需二次确认）",
-    "Keywords": "Scan Disk For Java Btn 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Scan Disk For Java Btn 启动器更新 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "ScanDiskForJavaBtn",
     "TargetText": "全盘扫描查找 Java（可选，默认不启用，需二次确认）",
     "ResourceKey": "Str_Ui_Scan_The_Whole_Disk_For_Java_Optional_Of",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "启动器更新"
   },
   {
     "Id": "settings.MoveJavaUp_Click",
@@ -1695,120 +2245,197 @@
     "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
   },
   {
+    "Id": "settings.DynamicMemoryCheck",
+    "PageKey": "settings",
+    "Title": "动态分配内存（每次启动重新计算）",
+    "Keywords": "Dynamic Memory Check JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "DynamicMemoryCheck",
+    "TargetText": "动态分配内存（每次启动重新计算）",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.MemoryAllocationModeCombo",
+    "PageKey": "settings",
+    "Title": "JVM 内存分配",
+    "Keywords": "Memory Allocation Mode Combo JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "MemoryAllocationModeCombo",
+    "TargetText": "JVM 内存分配",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.DynamicMinMbBox",
+    "PageKey": "settings",
+    "Title": "最小（MB）",
+    "Keywords": "Dynamic Min Mb Box JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "DynamicMinMbBox",
+    "TargetText": "最小（MB）",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.DynamicMaxMbBox",
+    "PageKey": "settings",
+    "Title": "最大（MB）",
+    "Keywords": "Dynamic Max Mb Box JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "DynamicMaxMbBox",
+    "TargetText": "最大（MB）",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.DynamicMinPercentBox",
+    "PageKey": "settings",
+    "Title": "最小（%）",
+    "Keywords": "Dynamic Min Percent Box JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "DynamicMinPercentBox",
+    "TargetText": "最小（%）",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.DynamicMaxPercentBox",
+    "PageKey": "settings",
+    "Title": "最大（%）",
+    "Keywords": "Dynamic Max Percent Box JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "DynamicMaxPercentBox",
+    "TargetText": "最大（%）",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.FixedMemoryMbBox",
+    "PageKey": "settings",
+    "Title": "指定固定值（MB，可选；留空使用动态区间）",
+    "Keywords": "Fixed Memory Mb Box JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FixedMemoryMbBox",
+    "TargetText": "指定固定值（MB，可选；留空使用动态区间）",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
     "Id": "settings.MinMemBox",
     "PageKey": "settings",
-    "Title": "最小内存 (MB)",
-    "Keywords": "Min Mem Box Java 列表（多 共存） 选项 配置 settings preferences",
+    "Title": "手动最小内存（MB）",
+    "Keywords": "Min Mem Box JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "MinMemBox",
-    "TargetText": "最小内存 (MB)",
-    "ResourceKey": "Str_Ui_Min_Memory_Mb",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "TargetText": "手动最小内存（MB）",
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.MaxMemBox",
     "PageKey": "settings",
-    "Title": "最大内存 (MB)",
-    "Keywords": "Max Mem Box Java 列表（多 共存） 选项 配置 settings preferences",
+    "Title": "手动最大内存（MB）",
+    "Keywords": "Max Mem Box JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "MaxMemBox",
-    "TargetText": "最大内存 (MB)",
-    "ResourceKey": "Str_Ui_Max_Memory_Mb",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "TargetText": "手动最大内存（MB）",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.MemoryDisplayBasisCombo",
+    "PageKey": "settings",
+    "Title": "内存信息显示",
+    "Keywords": "Memory Display Basis Combo JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "MemoryDisplayBasisCombo",
+    "TargetText": "内存信息显示",
+    "SectionTitle": "JVM 内存分配"
+  },
+  {
+    "Id": "settings.RefreshMemoryPreview_Click",
+    "PageKey": "settings",
+    "Title": "刷新内存信息",
+    "Keywords": "JVM 内存分配 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "刷新内存信息",
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.WidthBox",
     "PageKey": "settings",
     "Title": "游戏窗口宽度",
-    "Keywords": "Width Box Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "Width Box JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "WidthBox",
     "TargetText": "游戏窗口宽度",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.HeightBox",
     "PageKey": "settings",
     "Title": "游戏窗口高度",
-    "Keywords": "Height Box Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "Height Box JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "HeightBox",
     "TargetText": "游戏窗口高度",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.SourceCombo",
     "PageKey": "settings",
     "Title": "下载源",
-    "Keywords": "Source Combo Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "Source Combo JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "SourceCombo",
     "TargetText": "下载源",
     "ResourceKey": "Str_Ui_Download_Source",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.OpenMirrorSettings_Click",
     "PageKey": "settings",
     "Title": "镜像管理…（社区资源 / GitHub / 自定义）",
-    "Keywords": "Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetText": "镜像管理…（社区资源 / GitHub / 自定义）",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.GameLanguageCombo",
     "PageKey": "settings",
     "Title": "游戏内语言",
-    "Keywords": "Game Language Combo Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "Game Language Combo JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "GameLanguageCombo",
     "TargetText": "游戏内语言",
     "ResourceKey": "Str_Ui_In_Game_Language",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.GameVersionTypeLabelBox",
     "PageKey": "settings",
     "Title": "游戏内水印文字（左下角显示，如 &quot;XCL2&quot;；留空则显示官方原始的 &quot;release&quot;）",
-    "Keywords": "Game Version Type Label Box Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "Game Version Type Label Box JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "GameVersionTypeLabelBox",
     "TargetText": "游戏内水印文字（左下角显示，如 &quot;XCL2&quot;；留空则显示官方原始的 &quot;release&quot;）",
     "ResourceKey": "Str_Ui_In_Game_Watermark_Text_Shown_In_The_Bott",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.InjectionScanCheck",
     "PageKey": "settings",
     "Title": "启用注入检测（游戏启动后自动扫描是否有可疑模块/外挂）",
-    "Keywords": "Injection Scan Check Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "Injection Scan Check JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "InjectionScanCheck",
     "TargetText": "启用注入检测（游戏启动后自动扫描是否有可疑模块/外挂）",
     "ResourceKey": "Str_Ui_Enable_Injection_Scanning_Checks_For_Sus",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.GameConsoleWindowCheck",
     "PageKey": "settings",
     "Title": "启动游戏时额外弹出独立 CMD 窗口，实时显示游戏日志（方便在命令行里直接查看）",
-    "Keywords": "Game Console Window Check Java 列表（多 共存） 选项 配置 settings preferences",
+    "Keywords": "Game Console Window Check JVM 内存分配 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "GameConsoleWindowCheck",
     "TargetText": "启动游戏时额外弹出独立 CMD 窗口，实时显示游戏日志（方便在命令行里直接查看）",
     "ResourceKey": "Str_Ui_Open_A_Separate_Console_Window_On_Launch",
-    "SectionTitle": "Java 列表（多 Java 共存）",
-    "SectionResourceKey": "Str_Ui_Java_List_Multiple_Java_Runtimes"
+    "SectionTitle": "JVM 内存分配"
   },
   {
     "Id": "settings.TouchModeCheck",
@@ -1993,6 +2620,85 @@
     "PageTitle": "设置",
     "TargetName": "ShowFeatureSearchCheck",
     "TargetText": "显示顶部功能搜索框",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.FeatureSearchStyleCombo",
+    "PageKey": "settings",
+    "Title": "顶部搜索框样式：",
+    "Keywords": "Feature Search Style Combo 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FeatureSearchStyleCombo",
+    "TargetText": "顶部搜索框样式：",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.FeatureSearchEditCheck",
+    "PageKey": "settings",
+    "Title": "编辑搜索框（仅当前设置页生效）",
+    "Keywords": "Feature Search Edit Check 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FeatureSearchEditCheck",
+    "TargetText": "编辑搜索框（仅当前设置页生效）",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.FeatureSearchWidthSlider",
+    "PageKey": "settings",
+    "Title": "搜索框宽度",
+    "Keywords": "Feature Search Width Slider 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FeatureSearchWidthSlider",
+    "TargetText": "搜索框宽度",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.FeatureSearchHeightSlider",
+    "PageKey": "settings",
+    "Title": "搜索框高度",
+    "Keywords": "Feature Search Height Slider 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FeatureSearchHeightSlider",
+    "TargetText": "搜索框高度",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.FeatureSearchOffsetXBox",
+    "PageKey": "settings",
+    "Title": "搜索框水平位置偏移",
+    "Keywords": "水平偏移，正数向右；单位为 WPF 像素。 Feature Search Offset XBox 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FeatureSearchOffsetXBox",
+    "TargetText": "搜索框水平位置偏移",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.FeatureSearchOffsetYBox",
+    "PageKey": "settings",
+    "Title": "搜索框垂直位置偏移",
+    "Keywords": "垂直偏移，正数向下；单位为 WPF 像素。 Feature Search Offset YBox 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FeatureSearchOffsetYBox",
+    "TargetText": "搜索框垂直位置偏移",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.FeatureSearchOpacitySlider",
+    "PageKey": "settings",
+    "Title": "搜索框不透明度",
+    "Keywords": "Feature Search Opacity Slider 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "FeatureSearchOpacitySlider",
+    "TargetText": "搜索框不透明度",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
+    "Id": "settings.ResetFeatureSearchAppearance_Click",
+    "PageKey": "settings",
+    "Title": "重置搜索框布局",
+    "Keywords": "外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "重置搜索框布局",
     "SectionTitle": "外观与视觉效果"
   },
   {
@@ -2342,11 +3048,11 @@
   {
     "Id": "settings.AlwaysOnTopCheck",
     "PageKey": "settings",
-    "Title": "启动器始终置顶（F3 可临时切换，本次会话有效）",
+    "Title": "启动器始终置顶",
     "Keywords": "Always On Top Check 动画与性能 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "AlwaysOnTopCheck",
-    "TargetText": "启动器始终置顶（F3 可临时切换，本次会话有效）",
+    "TargetText": "启动器始终置顶",
     "SectionTitle": "动画与性能"
   },
   {
@@ -2844,36 +3550,37 @@
   {
     "Id": "settings.OpenDirectXPage_Click",
     "PageKey": "settings",
-    "Title": "一键打开官方下载链接 ↗",
+    "Title": "微软官方下载页 ↗",
     "Keywords": "DirectX 运行库 选项 配置 settings preferences",
     "PageTitle": "设置",
-    "TargetText": "一键打开官方下载链接 ↗",
+    "TargetText": "微软官方下载页 ↗",
     "SectionTitle": "DirectX 运行库"
   },
   {
     "Id": "settings.XclChangelogButton",
     "PageKey": "settings",
     "Title": "📋 查看 XCL 更新日志",
-    "Keywords": "https://github.com/adorable0127/xztx127-craft-launcher2/releases Xcl Changelog Button 更新日志 选项 配置 settings preferences",
+    "Keywords": "在启动器中查看 XCL 发布日志 Xcl Changelog Button 更新日志 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "XclChangelogButton",
     "TargetText": "📋 查看 XCL 更新日志",
     "SectionTitle": "更新日志"
   },
   {
-    "Id": "settings.OpenExternalPage_Click",
+    "Id": "settings.XclChangelogExternalButton",
     "PageKey": "settings",
-    "Title": "一键打开链接 ↗",
-    "Keywords": "更新日志 选项 配置 settings preferences",
+    "Title": "在浏览器中查看 XCL 日志 ↗",
+    "Keywords": "Xcl Changelog External Button 更新日志 选项 配置 settings preferences",
     "PageTitle": "设置",
-    "TargetText": "一键打开链接 ↗",
+    "TargetName": "XclChangelogExternalButton",
+    "TargetText": "在浏览器中查看 XCL 日志 ↗",
     "SectionTitle": "更新日志"
   },
   {
     "Id": "settings.MinecraftChangelogButton",
     "PageKey": "settings",
     "Title": "🧱 Minecraft 更新日志页",
-    "Keywords": "中文 Minecraft Wiki 的 Java 版版本列表 Changelog Button 更新日志 选项 配置 settings preferences",
+    "Keywords": "在启动器中查看中文 Minecraft Wiki 的 Java 版版本列表 Changelog Button 更新日志 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "MinecraftChangelogButton",
     "TargetText": "🧱 Minecraft 更新日志页",
@@ -3009,6 +3716,16 @@
     "SectionTitle": "危险操作"
   },
   {
+    "Id": "settings.UxChangeSummaryButton",
+    "PageKey": "settings",
+    "Title": "查看本次修改",
+    "Keywords": "只比较设置值；搜索、滚动、展开分区不会计入修改 Ux Change Summary Button 危险操作 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "UxChangeSummaryButton",
+    "TargetText": "查看本次修改",
+    "SectionTitle": "危险操作"
+  },
+  {
     "Id": "logs.page",
     "PageKey": "logs",
     "Title": "日志",
@@ -3019,7 +3736,7 @@
     "Id": "logs.tab.0",
     "PageKey": "logs",
     "Title": "🎮 游戏日志",
-    "Keywords": "选择正在运行/最近的游戏进程： 崩溃 错误 报错 log crash",
+    "Keywords": "崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "🎮 游戏日志",
     "TabIndex": 0,
@@ -3039,7 +3756,7 @@
     "Id": "logs.tab.2",
     "PageKey": "logs",
     "Title": "💥 崩溃报告分析",
-    "Keywords": "崩溃文件： 选择上方的崩溃文件后，这里会显示自动分析出的中文提示。 崩溃 错误 报错 log crash",
+    "Keywords": "选择上方的崩溃文件后，这里会显示自动分析出的中文提示。 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "💥 崩溃报告分析",
     "TabIndex": 2,
@@ -3049,7 +3766,7 @@
     "Id": "logs.tab.3",
     "PageKey": "logs",
     "Title": "🛡 注入检测",
-    "Keywords": "选择正在运行的游戏进程： 崩溃 错误 报错 log crash",
+    "Keywords": "崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "🛡 注入检测",
     "TabIndex": 3,
@@ -3068,27 +3785,23 @@
   {
     "Id": "logs.ShowLogCheck",
     "PageKey": "logs",
-    "Title": "显示日志面板（默认不显示，勾选后小白模式也能查看）",
-    "Keywords": "Show Log Check 日志 崩溃 错误 报错 log crash",
+    "Title": "显示日志",
+    "Keywords": "显示日志面板（默认不显示，勾选后小白模式也能查看） Show Log Check 日志 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetName": "ShowLogCheck",
-    "TargetText": "显示日志面板（默认不显示，勾选后小白模式也能查看）",
-    "ResourceKey": "Str_Ui_Show_The_Log_Panel_Hidden_By_Default_Tic",
+    "TargetText": "显示日志",
     "SectionTitle": "日志",
     "SectionResourceKey": "Str_Nav_Logs"
   },
   {
-    "Id": "logs.ProcessCombo",
+    "Id": "logs.OpenButtonMenu_Click",
     "PageKey": "logs",
-    "Title": "选择正在运行/最近的游戏进程：",
-    "Keywords": "Process Combo 🎮 游戏日志 崩溃 错误 报错 log crash",
+    "Title": "更多 ▾",
+    "Keywords": "日志 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
-    "TargetName": "ProcessCombo",
-    "TargetText": "选择正在运行/最近的游戏进程：",
-    "TabIndex": 0,
-    "ResourceKey": "Str_Ui_Choose_A_Running_Or_Recent_Game_Process",
-    "SectionTitle": "🎮 游戏日志",
-    "SectionResourceKey": "Str_Ui_Game_Log"
+    "TargetText": "更多 ▾",
+    "SectionTitle": "日志",
+    "SectionResourceKey": "Str_Nav_Logs"
   },
   {
     "Id": "logs.RefreshGameLog_Click",
@@ -3098,30 +3811,6 @@
     "PageTitle": "日志",
     "TargetText": "刷新",
     "TabIndex": 0,
-    "ResourceKey": "Str_Common_Refresh",
-    "SectionTitle": "🎮 游戏日志",
-    "SectionResourceKey": "Str_Ui_Game_Log"
-  },
-  {
-    "Id": "logs.ClearGameLogView_Click",
-    "PageKey": "logs",
-    "Title": "清空本视图内的日志",
-    "Keywords": "🎮 游戏日志 崩溃 错误 报错 log crash",
-    "PageTitle": "日志",
-    "TargetText": "清空本视图内的日志",
-    "TabIndex": 0,
-    "ResourceKey": "Str_Ui_Clear_This_View",
-    "SectionTitle": "🎮 游戏日志",
-    "SectionResourceKey": "Str_Ui_Game_Log"
-  },
-  {
-    "Id": "logs.AnalyzeCurrentGameLogWithAi_Click",
-    "PageKey": "logs",
-    "Title": "AI 分析当前游戏日志",
-    "Keywords": "将当前游戏日志脱敏后提交给已配置的 AI 服务分析 🎮 游戏日志 崩溃 错误 报错 log crash",
-    "PageTitle": "日志",
-    "TargetText": "AI 分析当前游戏日志",
-    "TabIndex": 0,
     "SectionTitle": "🎮 游戏日志",
     "SectionResourceKey": "Str_Ui_Game_Log"
   },
@@ -3129,9 +3818,20 @@
     "Id": "logs.CopyCurrentGameLog_Click",
     "PageKey": "logs",
     "Title": "复制",
-    "Keywords": "复制当前游戏日志的完整内容 🎮 游戏日志 崩溃 错误 报错 log crash",
+    "Keywords": "复制脱敏后的内容 🎮 游戏日志 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "复制",
+    "TabIndex": 0,
+    "SectionTitle": "🎮 游戏日志",
+    "SectionResourceKey": "Str_Ui_Game_Log"
+  },
+  {
+    "Id": "logs.OpenButtonMenu_Click.2",
+    "PageKey": "logs",
+    "Title": "更多 ▾",
+    "Keywords": "🎮 游戏日志 崩溃 错误 报错 log crash",
+    "PageTitle": "日志",
+    "TargetText": "更多 ▾",
     "TabIndex": 0,
     "SectionTitle": "🎮 游戏日志",
     "SectionResourceKey": "Str_Ui_Game_Log"
@@ -3144,18 +3844,6 @@
     "PageTitle": "日志",
     "TargetText": "刷新",
     "TabIndex": 1,
-    "ResourceKey": "Str_Common_Refresh",
-    "SectionTitle": "🖥 启动器日志",
-    "SectionResourceKey": "Str_Ui_Launcher_Log"
-  },
-  {
-    "Id": "logs.AnalyzeLauncherLogWithAi_Click",
-    "PageKey": "logs",
-    "Title": "AI 分析启动器日志",
-    "Keywords": "将当前启动器异常日志脱敏后提交给已配置的 AI 服务分析 🖥 启动器日志 崩溃 错误 报错 log crash",
-    "PageTitle": "日志",
-    "TargetText": "AI 分析启动器日志",
-    "TabIndex": 1,
     "SectionTitle": "🖥 启动器日志",
     "SectionResourceKey": "Str_Ui_Launcher_Log"
   },
@@ -3163,7 +3851,7 @@
     "Id": "logs.CopyLauncherLog_Click",
     "PageKey": "logs",
     "Title": "复制",
-    "Keywords": "复制启动器异常日志的完整内容 🖥 启动器日志 崩溃 错误 报错 log crash",
+    "Keywords": "复制脱敏后的内容 🖥 启动器日志 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "复制",
     "TabIndex": 1,
@@ -3171,37 +3859,23 @@
     "SectionResourceKey": "Str_Ui_Launcher_Log"
   },
   {
-    "Id": "logs.CrashFileCombo",
+    "Id": "logs.OpenButtonMenu_Click.3",
     "PageKey": "logs",
-    "Title": "崩溃文件：",
-    "Keywords": "Crash File Combo 💥 崩溃报告分析 崩溃 错误 报错 log crash",
+    "Title": "更多 ▾",
+    "Keywords": "🖥 启动器日志 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
-    "TargetName": "CrashFileCombo",
-    "TargetText": "崩溃文件：",
-    "TabIndex": 2,
-    "ResourceKey": "Str_Ui_Crash_File",
-    "SectionTitle": "💥 崩溃报告分析",
-    "SectionResourceKey": "Str_Ui_Crash_Report_Analysis"
+    "TargetText": "更多 ▾",
+    "TabIndex": 1,
+    "SectionTitle": "🖥 启动器日志",
+    "SectionResourceKey": "Str_Ui_Launcher_Log"
   },
   {
     "Id": "logs.RescanCrash_Click",
     "PageKey": "logs",
-    "Title": "重新扫描",
+    "Title": "刷新",
     "Keywords": "💥 崩溃报告分析 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
-    "TargetText": "重新扫描",
-    "TabIndex": 2,
-    "ResourceKey": "Str_Ui_Rescan",
-    "SectionTitle": "💥 崩溃报告分析",
-    "SectionResourceKey": "Str_Ui_Crash_Report_Analysis"
-  },
-  {
-    "Id": "logs.AnalyzeCrashLogWithAi_Click",
-    "PageKey": "logs",
-    "Title": "AI 分析崩溃报告",
-    "Keywords": "需要先在 AI 助手设置中允许读取崩溃报告 💥 崩溃报告分析 崩溃 错误 报错 log crash",
-    "PageTitle": "日志",
-    "TargetText": "AI 分析崩溃报告",
+    "TargetText": "刷新",
     "TabIndex": 2,
     "SectionTitle": "💥 崩溃报告分析",
     "SectionResourceKey": "Str_Ui_Crash_Report_Analysis"
@@ -3210,7 +3884,7 @@
     "Id": "logs.CopyCrashLog_Click",
     "PageKey": "logs",
     "Title": "复制",
-    "Keywords": "复制当前崩溃报告的完整内容 💥 崩溃报告分析 崩溃 错误 报错 log crash",
+    "Keywords": "复制脱敏后的内容 💥 崩溃报告分析 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "复制",
     "TabIndex": 2,
@@ -3218,37 +3892,23 @@
     "SectionResourceKey": "Str_Ui_Crash_Report_Analysis"
   },
   {
-    "Id": "logs.ScanProcessCombo",
+    "Id": "logs.OpenButtonMenu_Click.4",
     "PageKey": "logs",
-    "Title": "选择正在运行的游戏进程：",
-    "Keywords": "Scan Process Combo 🛡 注入检测 崩溃 错误 报错 log crash",
+    "Title": "更多 ▾",
+    "Keywords": "💥 崩溃报告分析 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
-    "TargetName": "ScanProcessCombo",
-    "TargetText": "选择正在运行的游戏进程：",
-    "TabIndex": 3,
-    "ResourceKey": "Str_Ui_Select_A_Running_Game_Process",
-    "SectionTitle": "🛡 注入检测",
-    "SectionResourceKey": "Str_Ui_Injection_Scan"
+    "TargetText": "更多 ▾",
+    "TabIndex": 2,
+    "SectionTitle": "💥 崩溃报告分析",
+    "SectionResourceKey": "Str_Ui_Crash_Report_Analysis"
   },
   {
     "Id": "logs.ScanNow_Click",
     "PageKey": "logs",
-    "Title": "立即扫描",
+    "Title": "扫描",
     "Keywords": "🛡 注入检测 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
-    "TargetText": "立即扫描",
-    "TabIndex": 3,
-    "ResourceKey": "Str_Ui_Scan_Now",
-    "SectionTitle": "🛡 注入检测",
-    "SectionResourceKey": "Str_Ui_Injection_Scan"
-  },
-  {
-    "Id": "logs.AnalyzeInjectionLogWithAi_Click",
-    "PageKey": "logs",
-    "Title": "AI 分析注入日志",
-    "Keywords": "先执行注入检测，再将扫描结果提交给 AI 分析 🛡 注入检测 崩溃 错误 报错 log crash",
-    "PageTitle": "日志",
-    "TargetText": "AI 分析注入日志",
+    "TargetText": "扫描",
     "TabIndex": 3,
     "SectionTitle": "🛡 注入检测",
     "SectionResourceKey": "Str_Ui_Injection_Scan"
@@ -3257,9 +3917,20 @@
     "Id": "logs.CopyInjectionLog_Click",
     "PageKey": "logs",
     "Title": "复制",
-    "Keywords": "复制当前注入扫描结果的完整内容 🛡 注入检测 崩溃 错误 报错 log crash",
+    "Keywords": "复制脱敏后的内容 🛡 注入检测 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "复制",
+    "TabIndex": 3,
+    "SectionTitle": "🛡 注入检测",
+    "SectionResourceKey": "Str_Ui_Injection_Scan"
+  },
+  {
+    "Id": "logs.OpenButtonMenu_Click.5",
+    "PageKey": "logs",
+    "Title": "更多 ▾",
+    "Keywords": "🛡 注入检测 崩溃 错误 报错 log crash",
+    "PageTitle": "日志",
+    "TargetText": "更多 ▾",
     "TabIndex": 3,
     "SectionTitle": "🛡 注入检测",
     "SectionResourceKey": "Str_Ui_Injection_Scan"
@@ -3272,30 +3943,6 @@
     "PageTitle": "日志",
     "TargetText": "刷新",
     "TabIndex": 4,
-    "ResourceKey": "Str_Common_Refresh",
-    "SectionTitle": "完整启动器日志",
-    "SectionResourceKey": "Str_Ui_Full_Launcher_Log"
-  },
-  {
-    "Id": "logs.OpenLauncherLogInIndependentWindow_Click",
-    "PageKey": "logs",
-    "Title": "独立窗口打开",
-    "Keywords": "完整启动器日志 崩溃 错误 报错 log crash",
-    "PageTitle": "日志",
-    "TargetText": "独立窗口打开",
-    "TabIndex": 4,
-    "ResourceKey": "Str_Ui_Open_In_Independent_Window",
-    "SectionTitle": "完整启动器日志",
-    "SectionResourceKey": "Str_Ui_Full_Launcher_Log"
-  },
-  {
-    "Id": "logs.AnalyzeFullLauncherLogWithAi_Click",
-    "PageKey": "logs",
-    "Title": "AI 分析完整日志",
-    "Keywords": "汇总当前会话与磁盘日志，脱敏并提交给 AI 分析 完整启动器日志 崩溃 错误 报错 log crash",
-    "PageTitle": "日志",
-    "TargetText": "AI 分析完整日志",
-    "TabIndex": 4,
     "SectionTitle": "完整启动器日志",
     "SectionResourceKey": "Str_Ui_Full_Launcher_Log"
   },
@@ -3303,9 +3950,20 @@
     "Id": "logs.CopyFullLauncherLog_Click",
     "PageKey": "logs",
     "Title": "复制",
-    "Keywords": "复制完整启动器日志的完整内容 完整启动器日志 崩溃 错误 报错 log crash",
+    "Keywords": "复制脱敏后的内容 完整启动器日志 崩溃 错误 报错 log crash",
     "PageTitle": "日志",
     "TargetText": "复制",
+    "TabIndex": 4,
+    "SectionTitle": "完整启动器日志",
+    "SectionResourceKey": "Str_Ui_Full_Launcher_Log"
+  },
+  {
+    "Id": "logs.OpenButtonMenu_Click.6",
+    "PageKey": "logs",
+    "Title": "更多 ▾",
+    "Keywords": "完整启动器日志 崩溃 错误 报错 log crash",
+    "PageTitle": "日志",
+    "TargetText": "更多 ▾",
     "TabIndex": 4,
     "SectionTitle": "完整启动器日志",
     "SectionResourceKey": "Str_Ui_Full_Launcher_Log"
@@ -3348,10 +4006,38 @@
     "SectionTitle": "模型"
   },
   {
+    "Id": "ai.TaskSelectionCombo",
+    "PageKey": "ai",
+    "Title": "当前任务",
+    "Keywords": "这里只显示未完成的任务；已完成任务可从右侧入口查看或删除。运行中的任务会打开原会话。 Task Selection Combo 模型 人工智能 聊天 对话 assistant",
+    "PageTitle": "AI 助手",
+    "TargetName": "TaskSelectionCombo",
+    "TargetText": "当前任务",
+    "SectionTitle": "模型"
+  },
+  {
+    "Id": "ai.CompletedTasksButton_Click",
+    "PageKey": "ai",
+    "Title": "已完成",
+    "Keywords": "模型 人工智能 聊天 对话 assistant",
+    "PageTitle": "AI 助手",
+    "TargetText": "已完成",
+    "SectionTitle": "模型"
+  },
+  {
+    "Id": "ai.RefreshTasksButton_Click",
+    "PageKey": "ai",
+    "Title": "刷新",
+    "Keywords": "模型 人工智能 聊天 对话 assistant",
+    "PageTitle": "AI 助手",
+    "TargetText": "刷新",
+    "SectionTitle": "模型"
+  },
+  {
     "Id": "ai.WorkModeCombo",
     "PageKey": "ai",
     "Title": "工作模式",
-    "Keywords": "Plan 只读调查并制定计划；Build 按已有权限执行任务。切换仅影响下一次发送，不会自动执行计划。 Work Mode Combo 模型 人工智能 聊天 对话 assistant",
+    "Keywords": "纯聊天仅用于对话；Plan 只读调查并制定计划；Build 按已有权限执行；Agent 复杂任务建议保存计划，简单需求可直接处理。 Work Mode Combo 模型 人工智能 聊天 对话 assistant",
     "PageTitle": "AI 助手",
     "TargetName": "WorkModeCombo",
     "TargetText": "工作模式",
@@ -3378,12 +4064,32 @@
     "SectionTitle": "模型"
   },
   {
-    "Id": "ai.control316",
+    "Id": "ai.UploadAttachmentButton",
+    "PageKey": "ai",
+    "Title": "上传文件",
+    "Keywords": "支持图片和文件；图片分析需要当前模型支持视觉。ZIP 会安全解压到临时只读目录，上传不会授予命令权限。 Upload Attachment Button 模型 人工智能 聊天 对话 assistant",
+    "PageTitle": "AI 助手",
+    "TargetName": "UploadAttachmentButton",
+    "TargetText": "上传文件",
+    "SectionTitle": "模型"
+  },
+  {
+    "Id": "ai.control390",
     "PageKey": "ai",
     "Title": "任务步骤与断点",
     "Keywords": "模型 人工智能 聊天 对话 assistant",
     "PageTitle": "AI 助手",
     "TargetText": "任务步骤与断点",
+    "SectionTitle": "模型"
+  },
+  {
+    "Id": "ai.TaskTrackingButton",
+    "PageKey": "ai",
+    "Title": "任务 / 普通对话切换",
+    "Keywords": "设为非任务后普通聊天不自动创建任务；已有任务记录和变更历史会保留。生成期间不能更改。 Task Tracking Button 模型 非任务 普通对话 设为任务 设为非任务 关闭任务 人工智能 聊天 对话 assistant",
+    "PageTitle": "AI 助手",
+    "TargetName": "TaskTrackingButton",
+    "TargetText": "任务 / 普通对话切换",
     "SectionTitle": "模型"
   },
   {
@@ -3394,6 +4100,15 @@
     "PageTitle": "AI 助手",
     "TargetName": "ResumeTaskButton",
     "TargetText": "跨会话续做",
+    "SectionTitle": "模型"
+  },
+  {
+    "Id": "ai.CompletedTasksButton_Click.2",
+    "PageKey": "ai",
+    "Title": "已完成任务",
+    "Keywords": "模型 人工智能 聊天 对话 assistant",
+    "PageTitle": "AI 助手",
+    "TargetText": "已完成任务",
     "SectionTitle": "模型"
   },
   {
@@ -3437,23 +4152,14 @@
     "SectionTitle": "模型"
   },
   {
-    "Id": "ai.UsageExpander",
+    "Id": "ai.UsageIndicatorButton",
     "PageKey": "ai",
-    "Title": "本对话 · 暂无用量",
-    "Keywords": "点击展开用量详情；圆环表示当前请求上下文的剩余比例。 Usage Expander 模型 人工智能 聊天 对话 assistant",
+    "Title": "上下文占用及 Token 用量详情",
+    "Keywords": "Usage Indicator Button 模型 人工智能 聊天 对话 assistant",
     "PageTitle": "AI 助手",
-    "TargetName": "UsageExpander",
-    "TargetText": "本对话 · 暂无用量",
+    "TargetName": "UsageIndicatorButton",
+    "TargetText": "上下文占用及 Token 用量详情",
     "SectionTitle": "模型"
-  },
-  {
-    "Id": "ai.SettingsButton_Click",
-    "PageKey": "ai",
-    "Title": "设置上下文上限 / 单价 / 等待时间",
-    "Keywords": "本对话 · 暂无用量 人工智能 聊天 对话 assistant",
-    "PageTitle": "AI 助手",
-    "TargetText": "设置上下文上限 / 单价 / 等待时间",
-    "SectionTitle": "本对话 · 暂无用量"
   },
   {
     "Id": "toolbox.page",
@@ -3506,7 +4212,7 @@
     "Id": "toolbox.tab.4",
     "PageKey": "toolbox",
     "Title": "🧹 系统工具",
-    "Keywords": "系统 工具 内存优化 垃圾 清理 快捷方式 清理游戏垃圾 清理当前 .minecraft 文件夹里的历史日志压缩包、旧崩溃报告、网页缓存、Mixin调试输出、JVM崩溃转储等确定安全删除的临时文件，不会动存档/Mod/资源包/设置。 开启后，每次启动游戏前会按系统当前实际可用内存自动重新计算 -Xms/-Xmx，覆盖设置页里手动填写的固定内存数值。 优化时机 工具箱 小工具 toolbox tools",
+    "Keywords": "系统 工具 内存优化 垃圾 清理 快捷方式 清理游戏垃圾 清理当前 .minecraft 文件夹里的历史日志压缩包、旧崩溃报告、网页缓存、Mixin调试输出、JVM崩溃转储等确定安全删除的临时文件，不会动存档/Mod/资源包/设置。 开启后，每次启动都会按设置页选择的动态范围或总内存百分比计算 -Xms/-Xmx。可在设置页修改上下限、固定值和内存信息的显示方式。 额外预览时机（实际启动始终重新计算） 工具箱 小工具 toolbox tools",
     "PageTitle": "百宝箱",
     "TargetText": "🧹 系统工具",
     "TabIndex": 4,
@@ -4158,24 +4864,23 @@
   {
     "Id": "toolbox.MemOptCheck",
     "PageKey": "toolbox",
-    "Title": "启动前自动优化内存分配",
+    "Title": "启用动态内存分配",
     "Keywords": "Mem Opt Check 🧹 系统工具 工具箱 小工具 toolbox tools",
     "PageTitle": "百宝箱",
     "TargetName": "MemOptCheck",
-    "TargetText": "启动前自动优化内存分配",
+    "TargetText": "启用动态内存分配",
     "TabIndex": 4,
-    "ResourceKey": "Str_Ui_Optimise_Memory_Allocation_Before_",
     "SectionTitle": "🧹 系统工具",
     "SectionResourceKey": "Str_Ui_System_Tools"
   },
   {
     "Id": "toolbox.MemOptTimingBeforeLaunchRadio",
     "PageKey": "toolbox",
-    "Title": "游戏启动前进行内存优化",
+    "Title": "仅游戏启动前计算",
     "Keywords": "Mem Opt Timing Before Launch Radio 🧹 系统工具 工具箱 小工具 toolbox tools",
     "PageTitle": "百宝箱",
     "TargetName": "MemOptTimingBeforeLaunchRadio",
-    "TargetText": "游戏启动前进行内存优化",
+    "TargetText": "仅游戏启动前计算",
     "TabIndex": 4,
     "SectionTitle": "🧹 系统工具",
     "SectionResourceKey": "Str_Ui_System_Tools"
@@ -4183,11 +4888,11 @@
   {
     "Id": "toolbox.MemOptTimingOnOpenRadio",
     "PageKey": "toolbox",
-    "Title": "启动器打开时进行内存优化",
+    "Title": "启动器打开时也预览",
     "Keywords": "Mem Opt Timing On Open Radio 🧹 系统工具 工具箱 小工具 toolbox tools",
     "PageTitle": "百宝箱",
     "TargetName": "MemOptTimingOnOpenRadio",
-    "TargetText": "启动器打开时进行内存优化",
+    "TargetText": "启动器打开时也预览",
     "TabIndex": 4,
     "SectionTitle": "🧹 系统工具",
     "SectionResourceKey": "Str_Ui_System_Tools"
@@ -5507,17 +6212,599 @@
     "SectionTitle": "XCL2"
   },
   {
+    "Id": "settings.ExperienceDetailsGroup",
+    "PageKey": "settings",
+    "Title": "体验细节",
+    "Keywords": "体验 设置 细节 自定义 偏好 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "ExperienceDetailsGroup",
+    "TargetText": "体验细节",
+    "SectionTitle": "体验细节"
+  },
+  {
+    "Id": "settings.Experience_Ux50DownloadQuietEnd",
+    "PageKey": "settings",
+    "Title": "安静时段结束",
+    "Keywords": "本地时间，例如 08:00；与开始相同时全天安静。 下载细节 Ux50DownloadQuietEnd 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DownloadQuietEnd",
+    "TargetText": "安静时段结束",
+    "SectionTitle": "体验细节 › 下载细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50DownloadQuietHours",
+    "PageKey": "settings",
+    "Title": "启用下载提醒安静时段",
+    "Keywords": "时段内允许的下载完成提醒只进入右下角角标；原有不提醒偏好仍然生效，不修改模组更新提醒。 下载细节 Ux50DownloadQuietHours 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DownloadQuietHours",
+    "TargetText": "启用下载提醒安静时段",
+    "SectionTitle": "体验细节 › 下载细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50DownloadQuietStart",
+    "PageKey": "settings",
+    "Title": "安静时段开始",
+    "Keywords": "本地时间，24 小时制，例如 22:00。 下载细节 Ux50DownloadQuietStart 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DownloadQuietStart",
+    "TargetText": "安静时段开始",
+    "SectionTitle": "体验细节 › 下载细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50DownloadRetryCountdown",
+    "PageKey": "settings",
+    "Title": "显示真实重试倒计时",
+    "Keywords": "仅在下载器确实进入退避等待时显示，不改变重试次数或时长。 下载细节 Ux50DownloadRetryCountdown 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DownloadRetryCountdown",
+    "TargetText": "显示真实重试倒计时",
+    "SectionTitle": "体验细节 › 下载细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50DownloadShowOrigin",
+    "PageKey": "settings",
+    "Title": "任务详情显示发起页面",
+    "Keywords": "下载细节 Ux50DownloadShowOrigin 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DownloadShowOrigin",
+    "TargetText": "任务详情显示发起页面",
+    "SectionTitle": "体验细节 › 下载细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50DownloadSpeedGraph",
+    "PageKey": "settings",
+    "Title": "下载面板速度曲线",
+    "Keywords": "默认关闭；仅在下载列表打开时按真实传输字节采样，不在后台积累历史。 下载细节 Ux50DownloadSpeedGraph 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DownloadSpeedGraph",
+    "TargetText": "下载面板速度曲线",
+    "SectionTitle": "体验细节 › 下载细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50DownloadStageDetails",
+    "PageKey": "settings",
+    "Title": "显示连接、等待、传输和校验阶段",
+    "Keywords": "下载细节 Ux50DownloadStageDetails 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DownloadStageDetails",
+    "TargetText": "显示连接、等待、传输和校验阶段",
+    "SectionTitle": "体验细节 › 下载细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50BulkModSummary",
+    "PageKey": "settings",
+    "Title": "批量启停模组前显示数量摘要",
+    "Keywords": "实例与模组细节 Ux50BulkModSummary 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50BulkModSummary",
+    "TargetText": "批量启停模组前显示数量摘要",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50DisambiguateFolderNames",
+    "PageKey": "settings",
+    "Title": "同名文件夹显示所属目录",
+    "Keywords": "实例与模组细节 Ux50DisambiguateFolderNames 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50DisambiguateFolderNames",
+    "TargetText": "同名文件夹显示所属目录",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50ImportPreview",
+    "PageKey": "settings",
+    "Title": "导入前预览",
+    "Keywords": "写入前查看目标、文件数量和同名冲突；预览不会解压或创建目录。 实例与模组细节 Ux50ImportPreview 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50ImportPreview",
+    "TargetText": "导入前预览",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50RenamePreview",
+    "PageKey": "settings",
+    "Title": "实例重命名前预览",
+    "Keywords": "实例与模组细节 Ux50RenamePreview 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50RenamePreview",
+    "TargetText": "实例重命名前预览",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50ShowBackgroundTaskOwnership",
+    "PageKey": "settings",
+    "Title": "切换实例后的后台任务归属",
+    "Keywords": "实例页仅在存在其他实例的后台任务时显示。 实例与模组细节 Ux50ShowBackgroundTaskOwnership 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50ShowBackgroundTaskOwnership",
+    "TargetText": "切换实例后的后台任务归属",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50ShowCachedModMetadata",
+    "PageKey": "settings",
+    "Title": "显示模组资料缓存时间",
+    "Keywords": "资料仅在手动检查更新后缓存于本次会话，不会后台联网。 实例与模组细节 Ux50ShowCachedModMetadata 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50ShowCachedModMetadata",
+    "TargetText": "显示模组资料缓存时间",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50ShowHiddenModSelections",
+    "PageKey": "settings",
+    "Title": "提示筛选后隐藏的已选模组",
+    "Keywords": "实例与模组细节 Ux50ShowHiddenModSelections 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50ShowHiddenModSelections",
+    "TargetText": "提示筛选后隐藏的已选模组",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50ShowSharedGameDirectory",
+    "PageKey": "settings",
+    "Title": "共享游戏目录标记",
+    "Keywords": "仅在多个实例实际共用同一游戏目录时显示。 实例与模组细节 Ux50ShowSharedGameDirectory 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50ShowSharedGameDirectory",
+    "TargetText": "共享游戏目录标记",
+    "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchFilterChips",
+    "PageKey": "settings",
+    "Title": "显示可单独移除的筛选标签",
+    "Keywords": "搜索与列表 Ux50SearchFilterChips 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchFilterChips",
+    "TargetText": "显示可单独移除的筛选标签",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchHighlight",
+    "PageKey": "settings",
+    "Title": "轻量标记命中的文字",
+    "Keywords": "搜索与列表 Ux50SearchHighlight 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchHighlight",
+    "TargetText": "轻量标记命中的文字",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchHistory",
+    "PageKey": "settings",
+    "Title": "保存本地搜索历史",
+    "Keywords": "仅记录主动提交的搜索；可在搜索框菜单中删除单条或全部清空。关闭后不记录，也不显示历史。 搜索与列表 Ux50SearchHistory 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchHistory",
+    "TargetText": "保存本地搜索历史",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchLayeredEscape",
+    "PageKey": "settings",
+    "Title": "Esc 先收起建议、再清空搜索",
+    "Keywords": "搜索与列表 Ux50SearchLayeredEscape 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchLayeredEscape",
+    "TargetText": "Esc 先收起建议、再清空搜索",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchLoadedCounts",
+    "PageKey": "settings",
+    "Title": "显示本页实际加载数量",
+    "Keywords": "搜索与列表 Ux50SearchLoadedCounts 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchLoadedCounts",
+    "TargetText": "显示本页实际加载数量",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchMultipleKeywords",
+    "PageKey": "settings",
+    "Title": "本地搜索支持多个关键词",
+    "Keywords": "搜索与列表 Ux50SearchMultipleKeywords 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchMultipleKeywords",
+    "TargetText": "本地搜索支持多个关键词",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchSavedFilters",
+    "PageKey": "settings",
+    "Title": "允许保存筛选组合",
+    "Keywords": "只在搜索框菜单中主动保存，关闭后不读取或修改已保存的组合。 搜索与列表 Ux50SearchSavedFilters 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchSavedFilters",
+    "TargetText": "允许保存筛选组合",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchStableSort",
+    "PageKey": "settings",
+    "Title": "本地列表显示排序方向并保持同值顺序",
+    "Keywords": "搜索与列表 Ux50SearchStableSort 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchStableSort",
+    "TargetText": "本地列表显示排序方向并保持同值顺序",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50SearchWaitForComposition",
+    "PageKey": "settings",
+    "Title": "中文输入完成后再搜索",
+    "Keywords": "搜索与列表 Ux50SearchWaitForComposition 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50SearchWaitForComposition",
+    "TargetText": "中文输入完成后再搜索",
+    "SectionTitle": "体验细节 › 搜索与列表",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50ExportLocationPreview",
+    "PageKey": "settings",
+    "Title": "诊断导出前显示最终文件名与保存位置",
+    "Keywords": "日志与辅助 Ux50ExportLocationPreview 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50ExportLocationPreview",
+    "TargetText": "诊断导出前显示最终文件名与保存位置",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50FullTimeTooltips",
+    "PageKey": "settings",
+    "Title": "时间提示显示完整日期与时区",
+    "Keywords": "日志与辅助 Ux50FullTimeTooltips 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50FullTimeTooltips",
+    "TargetText": "时间提示显示完整日期与时区",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50HoldDangerousConfirm",
+    "PageKey": "settings",
+    "Title": "危险操作输入确认码后，还需按住确认按钮",
+    "Keywords": "日志与辅助 Ux50HoldDangerousConfirm 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50HoldDangerousConfirm",
+    "TargetText": "危险操作输入确认码后，还需按住确认按钮",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50HoldForceLaunch",
+    "PageKey": "settings",
+    "Title": "按住确认也适用于强制启动",
+    "Keywords": "日志与辅助 Ux50HoldForceLaunch 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50HoldForceLaunch",
+    "TargetText": "按住确认也适用于强制启动",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50HoldSystemOperations",
+    "PageKey": "settings",
+    "Title": "按住确认适用于系统设置与痕迹清理",
+    "Keywords": "日志与辅助 Ux50HoldSystemOperations 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50HoldSystemOperations",
+    "TargetText": "按住确认适用于系统设置与痕迹清理",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50LogCopyLineNumbers",
+    "PageKey": "settings",
+    "Title": "复制选中日志时附带原始行号",
+    "Keywords": "日志与辅助 Ux50LogCopyLineNumbers 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50LogCopyLineNumbers",
+    "TargetText": "复制选中日志时附带原始行号",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50LogSmartFollow",
+    "PageKey": "settings",
+    "Title": "查看历史日志时暂停跟随，滚到底部后恢复",
+    "Keywords": "日志与辅助 Ux50LogSmartFollow 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50LogSmartFollow",
+    "TargetText": "查看历史日志时暂停跟随，滚到底部后恢复",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50UniformNumberSpacing",
+    "PageKey": "settings",
+    "Title": "数值与容量单位采用统一间距",
+    "Keywords": "日志与辅助 Ux50UniformNumberSpacing 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50UniformNumberSpacing",
+    "TargetText": "数值与容量单位采用统一间距",
+    "SectionTitle": "体验细节 › 日志与辅助",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsButtonDodge",
+    "PageKey": "settings",
+    "Title": "允许启动按钮躲避",
+    "Keywords": "趣味与彩蛋 AprilFoolsButtonDodge 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsButtonDodge",
+    "TargetText": "允许启动按钮躲避",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsExternalVideos",
+    "PageKey": "settings",
+    "Title": "允许彩蛋打开外部视频",
+    "Keywords": "默认关闭；只有自行允许才会打开浏览器。 趣味与彩蛋 AprilFoolsExternalVideos 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsExternalVideos",
+    "TargetText": "允许彩蛋打开外部视频",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsFakeErrors",
+    "PageKey": "settings",
+    "Title": "允许模拟报错",
+    "Keywords": "默认关闭，模拟消息会标明彩蛋。 趣味与彩蛋 AprilFoolsFakeErrors 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsFakeErrors",
+    "TargetText": "允许模拟报错",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsLaunchRefusal",
+    "PageKey": "settings",
+    "Title": "允许拒绝启动台词",
+    "Keywords": "默认关闭；视觉整蛊中成功触发启动时始终结束整蛊。 趣味与彩蛋 AprilFoolsLaunchRefusal 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsLaunchRefusal",
+    "TargetText": "允许拒绝启动台词",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsMouseAvoidanceDistance",
+    "PageKey": "settings",
+    "Title": "鼠标避让距离",
+    "Keywords": "逻辑像素 趣味与彩蛋 AprilFoolsMouseAvoidanceDistance 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsMouseAvoidanceDistance",
+    "TargetText": "鼠标避让距离",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsMoveIntervalMs",
+    "PageKey": "settings",
+    "Title": "移动间隔",
+    "Keywords": "越小越快；仍遵守减少动画和低功耗设置。 毫秒 趣味与彩蛋 AprilFoolsMoveIntervalMs 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsMoveIntervalMs",
+    "TargetText": "移动间隔",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsTileMovement",
+    "PageKey": "settings",
+    "Title": "允许磁贴跳动",
+    "Keywords": "趣味与彩蛋 AprilFoolsTileMovement 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsTileMovement",
+    "TargetText": "允许磁贴跳动",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_AprilFoolsWindowMovement",
+    "PageKey": "settings",
+    "Title": "允许窗口移动",
+    "Keywords": "趣味与彩蛋 AprilFoolsWindowMovement 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_AprilFoolsWindowMovement",
+    "TargetText": "允许窗口移动",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_EnableAprilFoolsEasterEggs",
+    "PageKey": "settings",
+    "Title": "允许愚人节彩蛋",
+    "Keywords": "关闭时会打开确认挑战，输入彩蛋码可跳过；点击小白旗或按 F1 可立即结束当天整蛊。 趣味与彩蛋 EnableAprilFoolsEasterEggs 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_EnableAprilFoolsEasterEggs",
+    "TargetText": "允许愚人节彩蛋",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputEscapeRevert",
+    "PageKey": "settings",
+    "Title": "Esc 撤销当前文本编辑",
+    "Keywords": "仅恢复当前焦点框本次编辑前的内容，不撤销其他设置。 输入与编辑 Ux50InputEscapeRevert 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputEscapeRevert",
+    "TargetText": "Esc 撤销当前文本编辑",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputFilenameValidation",
+    "PageKey": "settings",
+    "Title": "文件名非法字符定位",
+    "Keywords": "输入与编辑 Ux50InputFilenameValidation 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputFilenameValidation",
+    "TargetText": "文件名非法字符定位",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputLocalCopyFeedback",
+    "PageKey": "settings",
+    "Title": "就地复制反馈",
+    "Keywords": "输入与编辑 Ux50InputLocalCopyFeedback 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputLocalCopyFeedback",
+    "TargetText": "就地复制反馈",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputMemoryUnits",
+    "PageKey": "settings",
+    "Title": "内存单位识别",
+    "Keywords": "内存框允许 2048MB、2GB；纯数字仍按 MB 解释。 输入与编辑 Ux50InputMemoryUnits 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputMemoryUnits",
+    "TargetText": "内存单位识别",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputMultilinePastePreview",
+    "PageKey": "settings",
+    "Title": "单行输入的多行粘贴预览",
+    "Keywords": "不处理密码框、命令、源码、密钥及多行编辑框。 输入与编辑 Ux50InputMultilinePastePreview 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputMultilinePastePreview",
+    "TargetText": "单行输入的多行粘贴预览",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputPathDrop",
+    "PageKey": "settings",
+    "Title": "拖入路径",
+    "Keywords": "拖入单个文件或文件夹只填写路径，不打开、导入或执行。 输入与编辑 Ux50InputPathDrop 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputPathDrop",
+    "TargetText": "拖入路径",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputPreciseSliders",
+    "PageKey": "settings",
+    "Title": "滑块精确数值输入",
+    "Keywords": "输入与编辑 Ux50InputPreciseSliders 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputPreciseSliders",
+    "TargetText": "滑块精确数值输入",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputRememberPickerDirectory",
+    "PageKey": "settings",
+    "Title": "记住文件选择目录",
+    "Keywords": "默认关闭；按用途单独记住目录，不保存选中文件。可在下方清除。 输入与编辑 Ux50InputRememberPickerDirectory 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputRememberPickerDirectory",
+    "TargetText": "记住文件选择目录",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputWhitespaceHint",
+    "PageKey": "settings",
+    "Title": "首尾空格提示",
+    "Keywords": "只提示地址或路径中的多余空格，不自动修改内容。 输入与编辑 Ux50InputWhitespaceHint 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputWhitespaceHint",
+    "TargetText": "首尾空格提示",
+    "SectionTitle": "体验细节 › 输入与编辑",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_Ux50InputHoldRevealSecret",
+    "PageKey": "settings",
+    "Title": "允许按住查看密码或密钥",
+    "Keywords": "默认关闭；按住密码框的眼睛按钮临时显示，松开或失去焦点立即隐藏。 隐私与输入 Ux50InputHoldRevealSecret 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_Ux50InputHoldRevealSecret",
+    "TargetText": "允许按住查看密码或密钥",
+    "SectionTitle": "体验细节 › 隐私与输入",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.AprilFoolsCodeButton",
+    "PageKey": "settings",
+    "Title": "输入彩蛋码",
+    "Keywords": "输入彩蛋码 跳过 xztx127 关闭愚人节菜单 确认挑战 文字游戏 闯关 趣味与彩蛋 AprilFoolsCodeButton 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "AprilFoolsCodeButton",
+    "TargetText": "输入彩蛋码",
+    "SectionTitle": "体验细节 › 趣味与彩蛋",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
     "Id": "worlds.page",
     "PageKey": "worlds",
     "Title": "存档",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档"
   },
   {
     "Id": "worlds.action.0",
     "PageKey": "worlds",
     "Title": "打开存档目录",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "打开存档目录"
   },
@@ -5525,7 +6812,7 @@
     "Id": "worlds.action.1",
     "PageKey": "worlds",
     "Title": "查看投影 / 结构文件",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "查看投影 / 结构文件"
   },
@@ -5533,7 +6820,7 @@
     "Id": "worlds.action.2",
     "PageKey": "worlds",
     "Title": "允许作弊",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "允许作弊",
     "TabIndex": 0
@@ -5542,7 +6829,7 @@
     "Id": "worlds.action.3",
     "PageKey": "worlds",
     "Title": "极限模式",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "极限模式",
     "TabIndex": 0
@@ -5551,7 +6838,7 @@
     "Id": "worlds.action.4",
     "PageKey": "worlds",
     "Title": "保存设置",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "保存设置",
     "TabIndex": 0
@@ -5560,7 +6847,7 @@
     "Id": "worlds.action.5",
     "PageKey": "worlds",
     "Title": "修改并生成副本",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "修改并生成副本",
     "TabIndex": 0
@@ -5569,7 +6856,7 @@
     "Id": "worlds.tab.0",
     "PageKey": "worlds",
     "Title": "世界设置",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "世界设置",
     "TabIndex": 0
@@ -5578,7 +6865,7 @@
     "Id": "worlds.tab.1",
     "PageKey": "worlds",
     "Title": "投影 / 材料",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "投影 / 材料",
     "TabIndex": 1
@@ -5587,16 +6874,106 @@
     "Id": "worlds.tab.2",
     "PageKey": "worlds",
     "Title": "NBT 结构",
-    "Keywords": "世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "NBT 结构",
     "TabIndex": 2
   },
   {
+    "Id": "worlds.tab.3",
+    "PageKey": "worlds",
+    "Title": "二维地图",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "二维地图",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.overview",
+    "PageKey": "worlds",
+    "Title": "二维地表地图预览",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "预览",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.dimension",
+    "PageKey": "worlds",
+    "Title": "地图维度选择（主世界 / 下界 / 末地）",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "维度",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.center",
+    "PageKey": "worlds",
+    "Title": "地图中心坐标与预览半径",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "中心 X",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.spawn",
+    "PageKey": "worlds",
+    "Title": "地图定位出生点",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "出生点",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.player",
+    "PageKey": "worlds",
+    "Title": "地图定位玩家位置",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "玩家位置",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.height",
+    "PageKey": "worlds",
+    "Title": "地图高度图",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "高度图",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.grid",
+    "PageKey": "worlds",
+    "Title": "地图区块网格",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "区块网格",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.export",
+    "PageKey": "worlds",
+    "Title": "地图导出 PNG",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "导出 PNG",
+    "TabIndex": 3
+  },
+  {
+    "Id": "worlds.map.fit",
+    "PageKey": "worlds",
+    "Title": "地图适应窗口与缩放平移",
+    "Keywords": "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
+    "PageTitle": "存档",
+    "TargetText": "适应窗口",
+    "TabIndex": 3
+  },
+  {
     "Id": "worlds.field.name",
     "PageKey": "worlds",
     "Title": "存档名称",
-    "Keywords": "name 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "name 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "存档名称",
     "TabIndex": 0
@@ -5605,7 +6982,7 @@
     "Id": "worlds.field.gameMode",
     "PageKey": "worlds",
     "Title": "游戏模式",
-    "Keywords": "gameMode 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "gameMode 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "游戏模式",
     "TabIndex": 0
@@ -5614,7 +6991,7 @@
     "Id": "worlds.field.difficulty",
     "PageKey": "worlds",
     "Title": "难度",
-    "Keywords": "difficulty 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "difficulty 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "难度",
     "TabIndex": 0
@@ -5623,7 +7000,7 @@
     "Id": "worlds.field.seed",
     "PageKey": "worlds",
     "Title": "世界种子",
-    "Keywords": "seed 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "seed 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "世界种子",
     "TabIndex": 0
@@ -5632,7 +7009,7 @@
     "Id": "worlds.field.time",
     "PageKey": "worlds",
     "Title": "世界总时长（tick）",
-    "Keywords": "time 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "time 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "世界总时长（tick）",
     "TabIndex": 0
@@ -5641,7 +7018,7 @@
     "Id": "worlds.field.dayTime",
     "PageKey": "worlds",
     "Title": "昼夜时间（tick）",
-    "Keywords": "dayTime 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "dayTime 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "昼夜时间（tick）",
     "TabIndex": 0
@@ -5650,7 +7027,7 @@
     "Id": "worlds.field.spawnX",
     "PageKey": "worlds",
     "Title": "出生点 X",
-    "Keywords": "spawnX 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "spawnX 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "出生点 X",
     "TabIndex": 0
@@ -5659,7 +7036,7 @@
     "Id": "worlds.field.spawnY",
     "PageKey": "worlds",
     "Title": "出生点 Y",
-    "Keywords": "spawnY 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "spawnY 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "出生点 Y",
     "TabIndex": 0
@@ -5668,7 +7045,7 @@
     "Id": "worlds.field.spawnZ",
     "PageKey": "worlds",
     "Title": "出生点 Z",
-    "Keywords": "spawnZ 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "spawnZ 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "出生点 Z",
     "TabIndex": 0
@@ -5677,7 +7054,7 @@
     "Id": "worlds.field.spawnAngle",
     "PageKey": "worlds",
     "Title": "出生朝向",
-    "Keywords": "spawnAngle 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "spawnAngle 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "出生朝向",
     "TabIndex": 0
@@ -5686,7 +7063,7 @@
     "Id": "worlds.field.raining",
     "PageKey": "worlds",
     "Title": "下雨",
-    "Keywords": "raining 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "raining 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "下雨",
     "TabIndex": 0
@@ -5695,7 +7072,7 @@
     "Id": "worlds.field.thundering",
     "PageKey": "worlds",
     "Title": "雷暴",
-    "Keywords": "thundering 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "thundering 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "雷暴",
     "TabIndex": 0
@@ -5704,7 +7081,7 @@
     "Id": "worlds.field.rainTime",
     "PageKey": "worlds",
     "Title": "降雨计时（tick）",
-    "Keywords": "rainTime 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "rainTime 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "降雨计时（tick）",
     "TabIndex": 0
@@ -5713,7 +7090,7 @@
     "Id": "worlds.field.thunderTime",
     "PageKey": "worlds",
     "Title": "雷暴计时（tick）",
-    "Keywords": "thunderTime 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "thunderTime 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "雷暴计时（tick）",
     "TabIndex": 0
@@ -5722,7 +7099,7 @@
     "Id": "worlds.field.clearWeatherTime",
     "PageKey": "worlds",
     "Title": "晴天计时（tick）",
-    "Keywords": "clearWeatherTime 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "clearWeatherTime 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "晴天计时（tick）",
     "TabIndex": 0
@@ -5731,7 +7108,7 @@
     "Id": "worlds.field.difficultyLocked",
     "PageKey": "worlds",
     "Title": "锁定难度",
-    "Keywords": "difficultyLocked 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "difficultyLocked 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "锁定难度",
     "TabIndex": 0
@@ -5740,7 +7117,7 @@
     "Id": "worlds.field.mapFeatures",
     "PageKey": "worlds",
     "Title": "生成结构",
-    "Keywords": "mapFeatures 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "mapFeatures 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "生成结构",
     "TabIndex": 0
@@ -5749,7 +7126,7 @@
     "Id": "worlds.field.borderCenterX",
     "PageKey": "worlds",
     "Title": "世界边界中心 X",
-    "Keywords": "borderCenterX 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "borderCenterX 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "世界边界中心 X",
     "TabIndex": 0
@@ -5758,7 +7135,7 @@
     "Id": "worlds.field.borderCenterZ",
     "PageKey": "worlds",
     "Title": "世界边界中心 Z",
-    "Keywords": "borderCenterZ 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "borderCenterZ 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "世界边界中心 Z",
     "TabIndex": 0
@@ -5767,7 +7144,7 @@
     "Id": "worlds.field.borderSize",
     "PageKey": "worlds",
     "Title": "世界边界直径",
-    "Keywords": "borderSize 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "borderSize 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "世界边界直径",
     "TabIndex": 0
@@ -5776,7 +7153,7 @@
     "Id": "worlds.field.player.health",
     "PageKey": "worlds",
     "Title": "玩家生命",
-    "Keywords": "player.health 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.health 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "玩家生命",
     "TabIndex": 0
@@ -5785,7 +7162,7 @@
     "Id": "worlds.field.player.foodLevel",
     "PageKey": "worlds",
     "Title": "饥饿值",
-    "Keywords": "player.foodLevel 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.foodLevel 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "饥饿值",
     "TabIndex": 0
@@ -5794,7 +7171,7 @@
     "Id": "worlds.field.player.foodSaturation",
     "PageKey": "worlds",
     "Title": "饱和度",
-    "Keywords": "player.foodSaturation 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.foodSaturation 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "饱和度",
     "TabIndex": 0
@@ -5803,7 +7180,7 @@
     "Id": "worlds.field.player.xpLevel",
     "PageKey": "worlds",
     "Title": "经验等级",
-    "Keywords": "player.xpLevel 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.xpLevel 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "经验等级",
     "TabIndex": 0
@@ -5812,7 +7189,7 @@
     "Id": "worlds.field.player.xpTotal",
     "PageKey": "worlds",
     "Title": "总经验",
-    "Keywords": "player.xpTotal 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.xpTotal 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "总经验",
     "TabIndex": 0
@@ -5821,7 +7198,7 @@
     "Id": "worlds.field.player.xpProgress",
     "PageKey": "worlds",
     "Title": "当前等级经验进度",
-    "Keywords": "player.xpProgress 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.xpProgress 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "当前等级经验进度",
     "TabIndex": 0
@@ -5830,7 +7207,7 @@
     "Id": "worlds.field.player.x",
     "PageKey": "worlds",
     "Title": "玩家 X",
-    "Keywords": "player.x 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.x 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "玩家 X",
     "TabIndex": 0
@@ -5839,7 +7216,7 @@
     "Id": "worlds.field.player.y",
     "PageKey": "worlds",
     "Title": "玩家 Y",
-    "Keywords": "player.y 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.y 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "玩家 Y",
     "TabIndex": 0
@@ -5848,7 +7225,7 @@
     "Id": "worlds.field.player.z",
     "PageKey": "worlds",
     "Title": "玩家 Z",
-    "Keywords": "player.z 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.z 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "玩家 Z",
     "TabIndex": 0
@@ -5857,7 +7234,7 @@
     "Id": "worlds.field.player.gameMode",
     "PageKey": "worlds",
     "Title": "玩家游戏模式",
-    "Keywords": "player.gameMode 世界 编辑 存档 NBT 投影 结构 world save",
+    "Keywords": "player.gameMode 世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save",
     "PageTitle": "存档",
     "TargetText": "玩家游戏模式",
     "TabIndex": 0

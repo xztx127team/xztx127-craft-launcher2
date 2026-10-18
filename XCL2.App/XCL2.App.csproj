@@ -10,9 +10,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>XCL2</AssemblyName>
     <RootNamespace>XCL2.App</RootNamespace>
-    <Version>2.2.22</Version>
-    <AssemblyVersion>2.2.22.0</AssemblyVersion>
-    <FileVersion>2.2.22.0</FileVersion>
+    <Version>2.2.23</Version>
+    <AssemblyVersion>2.2.23.0</AssemblyVersion>
+    <FileVersion>2.2.23.0</FileVersion>
     <Platforms>AnyCPU</Platforms>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -36,7 +36,24 @@
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
   </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>XclBedrockPre</_Parameter1>
+      <_Parameter2>$(XCL2_PRE_KEY)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>XclBedrockRel</_Parameter1>
+      <_Parameter2>$(XCL2_REL_KEY)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <Target Name="XclValidateBedrockKeys" BeforeTargets="CoreCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(XCL2_PRE_KEY)', '^[0-9A-Fa-f]{96}$')) Or !$([System.Text.RegularExpressions.Regex]::IsMatch('$(XCL2_REL_KEY)', '^[0-9A-Fa-f]{96}$'))"
+           Text="缺少或格式错误的环境变量 XCL2_PRE_KEY / XCL2_REL_KEY（各需 96 位十六进制字符）。请先运行 set-xcl2-keys.bat，并重启 Visual Studio 或终端后再编译。" />
+  </Target>
 
   <!-- WebView2 的托管组件和架构对应的 Loader 必须随程序分发。
        即使主程序单文件发布，也保留 WebView2 为独立文件，供 SDK / 本机 Loader 稳定加载。 -->

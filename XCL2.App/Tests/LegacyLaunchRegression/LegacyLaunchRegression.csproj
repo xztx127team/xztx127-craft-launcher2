@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/LegacyMinecraftCompatibility.cs" Link="LegacyMinecraftCompatibility.cs" />
+    <Compile Include="../../Services/LegacyAssetLayout.cs" Link="LegacyAssetLayout.cs" />
+    <Compile Include="../../Services/JavaExecutableArchitecture.cs" Link="JavaExecutableArchitecture.cs" />
+  </ItemGroup>
+</Project>

@@ -22,6 +22,7 @@ internal static class AiStreamingCompletion
         Action<JsonElement>? providerError = null, Action? responseStarted = null)
     {
         using var reader = new StreamReader(stream, Encoding.UTF8, true, 4096, leaveOpen: true);
+        var lines = new AiResponseLimits.BoundedLineReader(reader);
         var answer = new StringBuilder();
         var thought = new StringBuilder();
         var summary = new StringBuilder();
@@ -92,9 +93,12 @@ internal static class AiStreamingCompletion
                 // cannot retry and replay a partially received response or command.
                 responseStarted?.Invoke();
             }
+            long incomingLength = (long)parsed.Content.Length + parsed.Reasoning.Length + parsed.ReasoningSummary.Length;
+            long receivedLength = (long)answer.Length + thought.Length + summary.Length;
+            if (incomingLength > AiResponseLimits.MaxGeneratedChars - receivedLength)
+                throw new AiResponseLimitException("回答及推理内容超过累计长度上限，已保留收到的内容；未执行不完整指令。");
             if (parsed.Content.Length > 0)
             {
-                if (answer.Length + parsed.Content.Length > 2_000_000) throw new IOException("回答超过长度上限。");
                 answer.Append(parsed.Content);
                 PublishAnswer();
             }
@@ -112,15 +116,15 @@ internal static class AiStreamingCompletion
         {
             while (true)
             {
-                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                var line = await lines.ReadLineAsync(ct).ConfigureAwait(false);
                 if (line == null) { Dispatch(); break; }
-                if (line.Length > 2_000_000) throw new IOException("SSE 帧超过长度上限。");
                 if (line.Length == 0) { Dispatch(); if (finished) break; continue; }
                 if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
                 var value = line[5..]; if (value.StartsWith(' ')) value = value[1..];
                 if (value.Trim() == "[DONE]") { Dispatch(); finished = true; break; }
+                if ((long)value.Length + Environment.NewLine.Length > AiResponseLimits.MaxSseFrameChars - frame.Length)
+                    throw new AiResponseLimitException("SSE 帧超过长度上限，已保留收到的内容；未执行不完整指令。");
                 frame.AppendLine(value);
-                if (frame.Length > 2_000_000) throw new IOException("SSE 帧超过长度上限。");
                 // Publish a complete JSON object immediately, including providers that omit
                 // blank separators. Genuine multiline JSON waits until it is complete.
                 if (AiProviderJson.IsCompleteObject(frame.ToString())) Dispatch();

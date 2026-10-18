@@ -61,6 +61,17 @@ Check(FeatureSearchMatcher.Match(sample, "memory", "settings").Select(entry => e
 Check(FeatureSearchMatcher.Match(sample, "memory MEMORY", " SETTINGS ").Count == 4,
     "repeated words and scope whitespace do not duplicate or lose results");
 
+Check(FeatureSearchMatcher.Match(sample, "other memory", "settings", true).Select(entry => entry.Id)
+    .SequenceEqual(new[] { "keyword", "stable" }), "optional multiword argument uses all words across title and aliases");
+Check(FeatureSearchMatcher.Match(sample, "other memory", "settings", false).Count == 2,
+    "single phrase option still finds a contiguous title-plus-keyword phrase");
+Check(FeatureSearchMatcher.Match(sample, "memory other", "settings", false).Count == 0,
+    "single phrase option does not reorder separated keywords");
+Check(entries.Any(entry => entry.TargetName == "Experience_Ux50SearchHistory" && entry.SectionKey == "ExperienceDetailsGroup"),
+    "opt-in history setting has the actual dynamic control route");
+Check(entries.Any(entry => entry.TargetName == "Experience_EnableAprilFoolsEasterEggs" && entry.PageKey == "settings"),
+    "April Fools master switch is globally searchable");
+
 var raw = new[]
 {
     new FeatureSearchEntry("localized", "settings", "下载 Java", "java runtime", "DownloadJavaBtn", "下载 Java", ResourceKey: "download")
@@ -77,4 +88,58 @@ Check(FeatureSearchMatcher.Match(localized, "下载 Java").Count == 1,
 Check(raw[0].Title == "下载 Java", "localization does not mutate cached source entries");
 Check(FeatureSearchMatcher.Normalize("  ＪＡＶＡ\t架构\n") == "JAVA 架构", "Unicode width and whitespace normalize deterministically");
 
+var searchDefault = FeatureSearchLayoutPolicy.Resolve(FeatureSearchLayout.Default, true, 1000, 600);
+Check(searchDefault == new FeatureSearchPlacement(0, -2, 300, 36),
+    "default floating entry moves down exactly five WPF pixels from the old -7 margin");
+Check(FeatureSearchLayoutPolicy.Resolve(FeatureSearchLayout.Default, false, 1000, 600)
+    == new FeatureSearchPlacement(700, 0, 300, 36), "top style remains right anchored by default");
+var invalidLayout = new FeatureSearchLayout(double.NaN, double.PositiveInfinity, double.NegativeInfinity, double.NaN, -10).Normalize();
+Check(invalidLayout == new FeatureSearchLayout(300, 36, 0, 0, 20),
+    "invalid imported dimensions and offsets recover safely and opacity stays visible");
+var offscreen = new FeatureSearchLayout(500, 100, 9000, 9000, 70);
+var clampedSearch = FeatureSearchLayoutPolicy.Resolve(offscreen, true, 420, 200);
+Check(clampedSearch == new FeatureSearchPlacement(0, 100, 420, 100),
+    "resizing the window contains the entry inside the available area");
+var narrowSearch = FeatureSearchLayoutPolicy.Resolve(FeatureSearchLayout.Default, true, 80, 20);
+Check(narrowSearch.Width == 80 && narrowSearch.Height == 20 && narrowSearch.X == 0 && narrowSearch.Y == -2,
+    "tiny viewports shrink the rendered entry without losing the saved preferred size");
+Check(FeatureSearchLayoutPolicy.Resolve(FeatureSearchLayout.Default with { OffsetX = -999, OffsetY = -999 }, true, 1000, 600)
+    == searchDefault, "floating entry preserves its intentional -2 upper bound");
+var draggedSearch = FeatureSearchLayoutPolicy.FromPlacement(new FeatureSearchPlacement(100, 50, 320, 48),
+    FeatureSearchLayout.Default, true, 1000, 600);
+Check(FeatureSearchLayoutPolicy.Resolve(draggedSearch, true, 1000, 600)
+    == new FeatureSearchPlacement(100, 50, 320, 48), "dragged placement round trips through persisted offsets");
+var draggedTopSearch = FeatureSearchLayoutPolicy.FromPlacement(new FeatureSearchPlacement(100, 50, 320, 48),
+    FeatureSearchLayout.Default, false, 1000, 600);
+Check(FeatureSearchLayoutPolicy.Resolve(draggedTopSearch, false, 1000, 600)
+    == new FeatureSearchPlacement(100, 50, 320, 48), "top style dragging round trips through its right anchor");
+Check(offscreen.Width == 500 && FeatureSearchLayoutPolicy.Resolve(offscreen, true, 1200, 900).Width == 500,
+    "temporary viewport clamping does not mutate the user's preferred geometry");
+
+var holdDrag = new FeatureSearchLongPressDrag();
+holdDrag.Begin(100, 80);
+Check(holdDrag.Move(103, 82, TimeSpan.FromMilliseconds(150)) == null && !holdDrag.IsDragging,
+    "a short held movement does not move the search box or enter drag mode");
+Check(holdDrag.Move(130, 100, TimeSpan.FromMilliseconds(499)) == null,
+    "all position movement before the full 500 milliseconds stays in the holding phase");
+var delayedTimerDelta = holdDrag.Move(150, 115, TimeSpan.FromMilliseconds(510));
+Check(holdDrag.IsDragging && delayedTimerDelta == (20d, 15d),
+    "the first move after 500ms starts dragging even when the dispatcher timer has not run");
+Check(holdDrag.Move(160, 120, TimeSpan.FromMilliseconds(550)) == (30d, 20d),
+    "post-hold deltas stay anchored to unapplied movement rather than accumulating preview geometry");
+holdDrag.End();
+Check(!holdDrag.IsActive && !holdDrag.TryActivate(TimeSpan.FromSeconds(1))
+    && holdDrag.Move(200, 200, TimeSpan.FromSeconds(2)) == null,
+    "releasing or canceling a gesture prevents a delayed timer and move from reviving it");
+holdDrag.Begin(10, 20);
+Check(!holdDrag.TryActivate(TimeSpan.FromMilliseconds(499))
+    && holdDrag.TryActivate(TimeSpan.FromMilliseconds(500)), "the exact 500ms boundary is deterministic");
+Check(holdDrag.Move(40, 60, TimeSpan.FromMilliseconds(700)) == (30d, 40d),
+    "a normal stationary long press keeps the first real drag movement");
+holdDrag.End();
+holdDrag.Begin(0, 0);
+Check(holdDrag.Move(1, 2, TimeSpan.FromMilliseconds(100)) == null
+    && holdDrag.Move(2, 1, TimeSpan.FromMilliseconds(200)) == null
+    && holdDrag.Move(4, 3, TimeSpan.FromMilliseconds(600)) == (2d, 2d),
+    "minor pre-hold pointer jitter never permanently disables dragging and is not replayed as a jump");
 Console.WriteLine($"PASS: {checks} feature search regression checks; {entries.Count} indexed destinations.");

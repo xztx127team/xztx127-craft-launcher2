@@ -14,6 +14,9 @@ public class ConfigService
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
     private static readonly object SettingsBackupIoGate = new();
+    private readonly object _saveGate = new();
+    private string _previousLocalJson = "{}", _previousDiskJson = "{}";
+    private bool _recoverInvalidPrimary;
 
     /// <summary>配置主副本：%APPDATA%\XCL2\config.json。所有保存先写这里。</summary>
     public string ConfigPath { get; }
@@ -143,12 +146,16 @@ public class ConfigService
             .ToArray();
         Exception? lastConfigReadError = null;
         string? loadedFrom = null;
+        string? loadedConfigJson = null;
         foreach (var candidate in loadCandidates)
         {
             try
             {
                 var json = File.ReadAllText(candidate);
+                using var document = JsonDocument.Parse(json);
+                if (document.RootElement.ValueKind != JsonValueKind.Object) throw new JsonException("配置主内容必须是 JSON 对象。");
                 Config = JsonSerializer.Deserialize<AppConfig>(json) ?? new AppConfig();
+                loadedConfigJson = json;
                 loadedFrom = candidate;
                 break;
             }
@@ -165,7 +172,11 @@ public class ConfigService
                 ErrorPresenter.LogFallback("所有配置副本均无法读取，已使用默认配置", lastConfigReadError);
         }
 
+        _previousLocalJson = JsonSerializer.Serialize(Config, JsonOpts);
+        _previousDiskJson = loadedFrom == ConfigPath ? loadedConfigJson! : _previousLocalJson;
+        _recoverInvalidPrimary = loadedFrom != ConfigPath && lastConfigReadError != null;
         var inputModeMigrated = false;
+        var aiRequestTimeoutMigrated = false;
 
         // ===== 一次性迁移：把"每次启动前询问操作模式"抬成默认开启 =====
         // 问题现象：用户反馈"每次使用时并没有弹出窗口主动询问"。根因不在弹窗代码，而在这里——
@@ -189,6 +200,9 @@ public class ConfigService
         // 写一份注册表镜像以兼容旧版。这样能严格满足“AppData 优先、运行目录/注册表仅镜像”。
         if (RegistryFeatureEnabled && loadedFrom == null)
             RegistrySyncedFields.LoadFromRegistry(Config);
+
+        // 新动态策略不迁移/覆盖旧手动值或开关；只规范化动态字段的非法配置。
+        MemoryOptimizerService.NormalizeConfig(Config);
 
         // 访客模式严格限定为当前进程会话状态。旧版本曾把 GuestModeEnabled 置为 true 并持久化，
         // 导致用户关闭启动器后再次打开仍停在访客模式。无论磁盘/注册表里的旧值是什么，
@@ -232,6 +246,12 @@ public class ConfigService
         // AI 助手旧配置迁移/空值修复。旧版只持久化悬浮球，完整 AI 配置以前每次启动都会丢失；
         // 新版统一存到 AppConfig.AiAssistant，同时保留 AiAssistantFloatingButton 做向后兼容。
         Config.AiAssistant ??= new AiAssistantConfig();
+        if (!Config.AiRequestTimeout86400Migrated)
+        {
+            Config.AiAssistant.RequestTimeoutSeconds = 86400;
+            Config.AiRequestTimeout86400Migrated = true;
+            aiRequestTimeoutMigrated = true;
+        }
         Config.AiAssistant.CustomModels ??= new List<AiModelDefinition>();
         Config.AiAssistant.CustomModels.RemoveAll(m => m == null || string.IsNullOrWhiteSpace(m.Id));
         Config.AiAssistant.ModelTierOverrides ??= new Dictionary<string, AiModelTier>();
@@ -288,17 +308,21 @@ public class ConfigService
         {
             // 即使 AppData 主文件“存在但已损坏”，也要用刚刚成功读取的镜像/旧配置修复它；
             // 不能只因为 File.Exists=true 就一直让以后每次启动都先撞一次坏主文件再回退。
-            try { Save(); }
+            try
+            {
+                Save();
+                inputModeMigrated = false;
+                aiRequestTimeoutMigrated = false;
+            }
             catch (Exception ex) { ErrorPresenter.LogFallback($"恢复配置到 AppData 主副本失败：{ConfigPath}", ex); }
-            inputModeMigrated = false; // 上面这次 Save 已经把迁移结果一起写进去了
         }
 
-        // 把上面那次一次性迁移的结果落盘。写失败也不影响本次会话（本次内存里已经是开启状态），
+        // 把上面那次一次性迁移的结果落盘。写失败也不影响本次会话（本次内存里已经应用迁移），
         // 只是下次启动会再迁移一遍，行为仍然正确。
-        if (inputModeMigrated)
+        if (inputModeMigrated || aiRequestTimeoutMigrated)
         {
             try { Save(); }
-            catch (Exception ex) { ErrorPresenter.LogFallback("保存\"启动前询问操作模式\"迁移结果失败", ex); }
+            catch (Exception ex) { ErrorPresenter.LogFallback("保存一次性设置迁移结果失败", ex); }
         }
     }
 
@@ -324,6 +348,31 @@ public class ConfigService
 
     public void Save()
     {
+        lock (_saveGate) SaveCore();
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher != null && !dispatcher.CheckAccess())
+        {
+            try
+            {
+                if (!dispatcher.HasShutdownStarted && !dispatcher.HasShutdownFinished)
+                    dispatcher.BeginInvoke(new Action(RaiseSaved));
+            }
+            catch (Exception ex) { ErrorPresenter.LogFallback("配置已保存，但无法调度设置刷新通知", ex); }
+        }
+        else RaiseSaved();
+    }
+
+    private void RaiseSaved()
+    {
+        // Saved is an observer of an already committed write. A broken view/plugin cannot
+        // turn that success into a caller rollback or prevent the other views from refreshing.
+        foreach (var handler in Saved?.GetInvocationList() ?? Array.Empty<Delegate>())
+            try { ((Action)handler)(); }
+            catch (Exception ex) { ErrorPresenter.LogFallback("配置已保存，但一个设置刷新订阅执行失败", ex); }
+    }
+
+    private void SaveCore()
+    {
         Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
         Config.AiAssistant ??= new AiAssistantConfig();
         Config.AiAssistant.NormalizeToolActionLimit();
@@ -341,37 +390,38 @@ public class ConfigService
             var json = JsonSerializer.Serialize(Config, JsonOpts);
 
             // 主副本先写；只有主副本成功后才更新便携镜像，避免镜像比主副本“领先”。
-            WriteTextAtomically(ConfigPath, json);
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(MirrorConfigPath)!);
-                WriteTextAtomically(MirrorConfigPath, json);
-            }
-            catch (Exception ex)
-            {
-                // 镜像失败不应让已经成功写入 AppData 的设置被判定为保存失败。
-                ErrorPresenter.LogFallback($"更新便携配置镜像失败：{MirrorConfigPath}", ex);
-            }
-
-            RegistryConfigService.SetAppDataConfigPath(ConfigPath);
-            RegistryFeatureEnabled = Config.RegistryFeatureEnabled;
-            if (RegistryFeatureEnabled)
-                RegistrySyncedFields.SaveToRegistry(Config);
+            AppConfig? mergedConfig = null;
+            var mergedJson = ConfigMergeStore.Commit(ConfigPath, json, _previousLocalJson, _previousDiskJson, _recoverInvalidPrimary,
+                publishMirror: merged =>
+                {
+                    try { WriteTextAtomically(MirrorConfigPath, merged); }
+                    catch (Exception ex) { ErrorPresenter.LogFallback($"更新便携配置镜像失败：{MirrorConfigPath}", ex); }
+                    // Registry is another mirror. Publish it before releasing the same cross-process
+                    // gate, using the committed global toggle rather than this instance's stale value.
+                    RegistryFeatureEnabled = mergedConfig!.RegistryFeatureEnabled;
+                    if (RegistryFeatureEnabled)
+                    {
+                        RegistryConfigService.SetAppDataConfigPath(ConfigPath);
+                        RegistrySyncedFields.SaveToRegistry(mergedConfig);
+                    }
+                },
+                onMirrorError: ex => ErrorPresenter.LogFallback("主配置已保存，但发布配置镜像失败", ex),
+                validate: merged => mergedConfig = JsonSerializer.Deserialize<AppConfig>(merged)
+                    ?? throw new JsonException("合并后的配置无法反序列化。"));
+            _previousLocalJson = json;
+            _previousDiskJson = mergedJson;
+            _recoverInvalidPrimary = false;
+            RegistryFeatureEnabled = mergedConfig!.RegistryFeatureEnabled;
         }
         finally
         {
             Config.GuestModeEnabled = sessionGuestMode;
         }
-        Saved?.Invoke();
     }
 
     private static void WriteTextAtomically(string path, string content)
     {
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
-        var temp = path + ".tmp";
-        File.WriteAllText(temp, content);
-        File.Move(temp, path, overwrite: true);
+        ConfigMergeStore.WriteAtomically(path, content);
     }
 
     /// <summary>每次进入设置页先备份当前 AppData 主配置。仅保留最近 20 份，防止无限增长。</summary>

@@ -17,11 +17,13 @@ public sealed class DownloadRateLimiter
     private readonly object _lock = new();
     private long _bucketBytes;
     private long _capacityBytes;
-    private DateTime _lastRefill = DateTime.UtcNow;
+    private long _lastRefill = System.Diagnostics.Stopwatch.GetTimestamp();
 
     /// <summary>当前限速目标，单位字节/秒。0 或负数表示不限速（<see cref="ConsumeAsync"/> 直接放行）。
     /// 可以在下载过程中动态调整（智能限速会周期性地改这个值），下一次 ConsumeAsync 调用即生效。</summary>
-    public long BytesPerSecond { get; set; }
+    private long _bytesPerSecond;
+    public long BytesPerSecond { get => Interlocked.Read(ref _bytesPerSecond); set => Interlocked.Exchange(ref _bytesPerSecond, value); }
+    public Func<long>? DynamicLimit { get; set; }
 
     public DownloadRateLimiter(long bytesPerSecond = 0)
     {
@@ -35,49 +37,37 @@ public sealed class DownloadRateLimiter
     {
         if (bytes <= 0) return;
 
-        while (true)
+        var remaining = bytes;
+        while (remaining > 0)
         {
-            TimeSpan waitFor = TimeSpan.Zero;
+            ct.ThrowIfCancellationRequested();
+            TimeSpan waitFor;
             lock (_lock)
             {
-                var target = BytesPerSecond;
-                if (target <= 0)
-                {
-                    // 不限速：直接放行，同时保持桶是满的，避免限速重新开启的瞬间因为桶是空的
-                    // 而突然卡一下（那一下卡顿会让用户以为程序卡死）。
-                    _bucketBytes = _capacityBytes;
-                    return;
-                }
-
+                var target = DynamicLimit?.Invoke() ?? BytesPerSecond;
+                if (target <= 0) { _bucketBytes = _capacityBytes; return; }
                 _capacityBytes = Math.Max(target, 64 * 1024);
-
+                _bucketBytes = Math.Min(_bucketBytes, _capacityBytes);
                 RefillLocked(target);
-
-                if (_bucketBytes >= bytes)
-                {
-                    _bucketBytes -= bytes;
-                    return;
-                }
-
-                // 令牌不够：算出还差多少字节，按当前速率换算成需要等待的时间。
-                var deficit = bytes - _bucketBytes;
-                var secondsToWait = (double)deficit / target;
-                waitFor = TimeSpan.FromSeconds(Math.Clamp(secondsToWait, 0.005, 2));
+                // 一个网络 buffer 可能比桶容量大，分批消耗，避免永远凑不齐令牌。
+                var granted = (int)Math.Min(remaining, _bucketBytes);
+                _bucketBytes -= granted;
+                remaining -= granted;
+                if (remaining <= 0) return;
+                waitFor = TimeSpan.FromSeconds(Math.Clamp((double)Math.Min(remaining, _capacityBytes) / target, 0.005, 1));
             }
-
             await Task.Delay(waitFor, ct);
         }
     }
 
     private void RefillLocked(long target)
     {
-        var now = DateTime.UtcNow;
-        var elapsed = (now - _lastRefill).TotalSeconds;
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(_lastRefill, now).TotalSeconds;
         if (elapsed <= 0) return;
-        _lastRefill = now;
-
         var refill = (long)(elapsed * target);
         if (refill <= 0) return;
+        _lastRefill = now;
 
         _bucketBytes = Math.Min(_capacityBytes, _bucketBytes + refill);
     }

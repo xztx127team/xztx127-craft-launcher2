@@ -2,11 +2,15 @@
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Models/AiAssistantModels.cs" Link="AiAssistantModels.cs" />
+    <Compile Include="../../Models/AiAgentSettings.cs" Link="AiAgentSettings.cs" />
+    <Compile Include="../../Models/AiCommandPermissions.cs" Link="AiCommandPermissions.cs" />
+    <Compile Include="../../Models/AiAttachmentModels.cs" Link="AiAttachmentModels.cs" />
     <Compile Include="../../Models/AiAssistantActivity.cs" Link="AiAssistantActivity.cs" />
     <Compile Include="../../Models/AiFileDiff.cs" Link="AiFileDiff.cs" />
     <Compile Include="../../Services/AiUsageAccounting.cs" Link="AiUsageAccounting.cs" />
     <Compile Include="../../Services/AiCompletionContentParser.cs" Link="AiCompletionContentParser.cs" />
     <Compile Include="../../Services/AiStreamingCompletion.cs" Link="AiStreamingCompletion.cs" />
     <Compile Include="../../Services/AiProviderJson.cs" Link="AiProviderJson.cs" />
+    <Compile Include="../../Services/AiResponseLimits.cs" Link="AiResponseLimits.cs" />
   </ItemGroup>
 </Project>

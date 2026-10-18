@@ -14,6 +14,17 @@ AiUsageAccounting.Usage? Parse(string json)
     using var doc = JsonDocument.Parse(json);
     return AiUsageAccounting.Parse(doc.RootElement);
 }
+// Occupancy tracks consumed context; a default full-window output reservation is not usage.
+Check(AiUsageAccounting.ContextOccupancy(null, 1000).Proportion == null, "unsent context remains unknown");
+var contextRequest = new AiRequestUsage { InputTokens = 600, OutputTokens = 50, ReservedOutputTokens = 200, InProgress = true };
+Check(AiUsageAccounting.ContextOccupancy(contextRequest, 1000).Proportion == 0.65, "running context tracks consumed output");
+contextRequest.ReservedOutputTokens = 400;
+Check(AiUsageAccounting.ContextOccupancy(contextRequest, 1000).Proportion == 0.65, "reservation does not make ring appear full");
+contextRequest.InProgress = false;
+Check(AiUsageAccounting.ContextOccupancy(contextRequest, 1000).Used == 650, "finished context retains actual output");
+Check(AiUsageAccounting.ContextOccupancy(contextRequest, 0).Proportion == null, "unknown capacity never shows zero occupancy");
+Check(AiUsageAccounting.ContextOccupancy(contextRequest, 500).Proportion == 1, "context ring caps at full while retaining count");
+
 var snapshot = Parse("""{"usage":{"prompt_tokens":1000,"completion_tokens":100,"total_tokens":1100,"prompt_tokens_details":{"cached_tokens":750}}}""")!;
 Check(snapshot.Input == 1000 && snapshot.Output == 100 && snapshot.Cached == 750, "OpenAI usage and cached tokens");
 Check(Parse("""{"usage":{"prompt_tokens":1000,"completion_tokens":100}}""")!.Cached == null, "missing cache remains unknown");
@@ -46,6 +57,9 @@ Check(AiUsageAccounting.Cost(request, new() { InputPricePerMillion = decimal.Max
 var config = new AiAssistantConfig { RequestTimeoutSeconds = 86400, LongWaitHintSeconds = 3600, LongWaitDescription = "继续等待", ModelAccounting = new() { ["test-model"] = rates } };
 var restored = JsonSerializer.Deserialize<AiAssistantConfig>(JsonSerializer.Serialize(config))!;
 Check(restored.RequestTimeoutSeconds == 86400 && restored.LongWaitDescription == "继续等待" && AiUsageAccounting.Settings(restored, "TEST-MODEL").OutputPricePerMillion == 8m, "accounting and long wait settings round trip");
+var hiddenTaskBar = JsonSerializer.Deserialize<AiAssistantConfig>(JsonSerializer.Serialize(new AiAssistantConfig { ShowTaskSelectionBar = false }))!;
+Check(!hiddenTaskBar.ShowTaskSelectionBar, "task bar preference survives config round trip");
+Check(JsonSerializer.Deserialize<AiAssistantConfig>("{}")!.ShowTaskSelectionBar, "existing config enables new task bar by default");
 var session = new AiChatSession { UsageRequests = new() { request } };
 Check(JsonSerializer.Deserialize<AiChatSession>(JsonSerializer.Serialize(session))!.UsageRequests.Single().TotalTokens == 1100, "session usage survives reopening");
 Check(JsonSerializer.Deserialize<AiChatSession>("{}")!.UsageRequests.Count == 0, "old sessions remain compatible");

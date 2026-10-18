@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -124,7 +124,7 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
             if (_step == 0) _ = RefreshSourceFoldersAsync();
         };
         Unloaded += (_, _) => CancelSourceScans();
-        RequestClose += (_, _) => CancelSourceScans();
+        OverlayClosed += (_, _) => CancelSourceScans();
         SourceModeSimple.IsEnabled = false;
         SimpleModeHintText.Text = "正在加载已导入的安装文件夹…";
         _ = LoadMcVersionsAsync();
@@ -529,53 +529,36 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
         var cfgFolders = _owner.ConfigService.Config.Folders;
         var defaultFolder = cfgFolders.FirstOrDefault(f => f.IsDefault) ?? cfgFolders.FirstOrDefault();
         var folderPath = defaultFolder?.Path ?? Path.Combine(AppContext.BaseDirectory, ".minecraft");
-        try { Directory.CreateDirectory(folderPath); }
-        catch (Exception ex)
-        {
-            ErrorPresenter.ShowFriendlyError("无法创建游戏文件夹，可能是路径没有写入权限，或者路径包含非法字符。",
-                $"[导入整合包] 创建游戏文件夹失败：{ex}", "出了点问题");
-            return;
-        }
 
         // 目标版本目录：整合包内部固定版本名的场景在 ModManagerPage 里也是这么处理的，
         // 由 Import/ImportMrpackAsync 自己在 targetVersionDir 下展开。
-        var tempVersionId = "modpack-" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var tempVersionId = ModpackInstallService.MakeUniqueInstanceName(folderPath, "modpack-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         var targetVersionDir = Path.Combine(folderPath, "versions", tempVersionId);
+        if (!await ImportPreviewDialog.ConfirmAsync(dialog.FileName, targetVersionDir, tempVersionId, ImportPreviewKind.ModpackArchive)) return;
 
         ImportModpackBtn.IsEnabled = false;
         try
         {
-            string packName;
-
-            // .mrpack 是 Modrinth 官方整合包格式，内部结构跟 .xclpack/普通 .zip 完全不同
-            // （只有下载清单，没有打包 mod jar 本体），需要单独走 ImportMrpackAsync 边解析边下载。
-            if (ModpackService.IsMrpack(dialog.FileName))
+            var installer = new ModpackInstallService(_owner.ConfigService.Config);
+            var requirements = await Task.Run(() => installer.ReadRequirements(dialog.FileName));
+            if (string.IsNullOrWhiteSpace(requirements.McVersion))
+                throw new InvalidDataException("整合包未声明 Minecraft 版本，无法新建可启动实例。请先创建对应游戏版本，再从模组管理中导入内容。");
+            string? javaForInstaller = null;
+            if (requirements.Loader is "Forge" or "NeoForge")
+                javaForInstaller = await EnsureJavaReadyAsync(requirements.McVersion, 0, 10);
+            var installed = await RunInDownloadQueueAsync("安装整合包 " + (requirements.Name ?? tempVersionId), async (item, ct) =>
             {
-                var progress = new Progress<string>(msg => ModpackImportStatusText.Text = msg);
-                var result = await _modpackService.ImportMrpackAsync(dialog.FileName, targetVersionDir, progress);
-                packName = result.Name;
-                if (result.FailedFiles.Count > 0)
+                var taskProgress = item.CreateProgress();
+                var progress = new Progress<ProgressInfo>(info =>
                 {
-                    ErrorPresenter.ShowFriendlyError(
-                        $"整合包「{result.Name}」大部分内容已导入成功，但有 {result.FailedFiles.Count} 个文件下载失败" +
-                        "（可能是对应的 Mod 已在源站下架），可以之后在「Mod 管理」页手动补装。",
-                        $"[导入 mrpack] 下载失败的文件：{string.Join(", ", result.FailedFiles)}", "部分导入失败");
-                }
-            }
-            else
-            {
-                var manifest = _modpackService.Import(dialog.FileName, targetVersionDir);
-                if (manifest == null)
-                {
-                    ErrorPresenter.ShowFriendlyError("整合包导入失败，文件格式不正确或者文件已损坏。",
-                        $"[导入整合包] Import 返回 null，文件：{dialog.FileName}", "出了点问题");
-                    return;
-                }
-                packName = manifest.Name;
-            }
-
-            _importedModpack = true;
-            _importedVersionId = tempVersionId;
+                    taskProgress.Report(info);
+                    ModpackImportStatusText.Text = info.Stage + (string.IsNullOrWhiteSpace(info.CurrentFile) ? "" : " · " + info.CurrentFile);
+                });
+                return await Task.Run(() => installer.InstallToNewInstanceAsync(dialog.FileName, folderPath, tempVersionId, javaForInstaller, progress, ct), ct);
+            }, tempVersionId, folderPath);
+            var packName = requirements.Name ?? installed.InstanceId;
+            _importedVersionId = installed.InstanceId;
+            _owner.ConfigService.Config.VersionIsolationOverrides[installed.InstanceId] = true;
 
             var existing = _owner.ConfigService.Config.Folders.FirstOrDefault(f => f.Path == folderPath);
             if (existing == null)
@@ -586,6 +569,12 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
             _owner.ConfigService.Config.SelectedFolderPath = existing.Path;
             _owner.ConfigService.Save();
             FolderPathBox.Text = existing.Path;
+            if (installed.FailedFiles.Count > 0)
+            {
+                MessageBoxDialog.ShowWarning($"游戏本体与加载器已安装，但 {installed.FailedFiles.Count} 个整合包文件未完成：\n" + string.Join("\n", installed.FailedFiles.Take(10)) + "\n实例已保留，可在模组管理中补全；向导不会继续启动。", "整合包部分安装失败");
+                _owner.RefreshSidebar(); CloseWith(null); return;
+            }
+            _importedModpack = true;
 
             var label = string.IsNullOrWhiteSpace(packName) ? "整合包" : $"整合包「{packName}」";
             MessageBoxDialog.ShowInfo($"{label}导入成功！接下来选一个账户就能启动游戏了。", "完成");
@@ -593,7 +582,7 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
         }
         catch (Exception ex)
         {
-            ErrorPresenter.ShowFriendlyError("整合包导入失败，可能是文件损坏，网络问题（Modrinth 整合包需要联网下载文件），或磁盘空间/权限有问题。",
+            ErrorPresenter.ShowFriendlyError("整合包安装未完成。请检查清单版本、网络、Java 和磁盘空间；尚未将失败的实例标为可启动。",
                 $"[导入整合包] 导入异常，文件：{dialog.FileName}\n{ex}", "出了点问题");
         }
         finally
@@ -1333,10 +1322,7 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
         }
         catch (OperationCanceledException)
         {
-            // 用户在下载列表里点了暂停/取消，见 RunInDownloadQueueAsync 的注释。
-            // 已经下载到一半的文件不会被删，用户随时可以在下载列表里点"继续"把它装完，
-            // 所以这里不算失败，只提示一声，不弹错误框。
-            ToastService.ShowInfo("一键启动已取消（下载被暂停或取消）。已下载的部分保留，可在标题栏下载列表里继续。");
+            ToastService.ShowInfo("一键启动已取消。已下载并校验通过的文件会保留，重新运行向导即可继续补全。");
         }
         catch (CriticalStepFailedException ex)
         {
@@ -1405,51 +1391,22 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
         // 跟上面装游戏版本同样的处理：Java 运行时也登记进标题栏下载列表，不再自己推进度条。
         // 之前这里是向导独占地把进度画在自己那条 RunBar 上，用户既看不到速度，也没法暂停，
         // 更不知道"卡住的是网络还是程序死了"。
-        return await RunInDownloadQueueAsync($"下载 Java {targetMajor} 运行时", async (item, ct) =>
-            await _javaService.DownloadJavaAsync(request, item.CreateProgress(), ct));
+        return await JavaDownloadQueueService.DownloadAsync(_javaService, request);
     }
 
     /// <summary>
     /// 把一次下载交给标题栏的下载列表（<see cref="DownloadQueueService"/>）去跑，并等它跑完、
     /// 把结果值带回来。
     ///
-    /// DownloadQueueService.StartNew 本身是"发射后不管"的（它只负责登记条目、更新进度、
-    /// 完成后从列表里摘掉），而一键启动需要等这一步真的装完才能继续往下走（装 Java、写配置、
-    /// 启动游戏），所以这里用一个 TaskCompletionSource 把"队列任务的结束"桥接成一个可 await
-    /// 的 Task。
-    ///
-    /// 关于暂停/取消：下载列表里的"暂停"在实现上就是取消当前这次下载（见 DownloadQueueItem
-    /// 类头注释），会让这里抛 OperationCanceledException。对一键启动来说，暂停/取消等于
-    /// "这次一键启动不继续了"，所以直接把取消往外抛，由 StartAll_Click 统一按"用户取消"处理，
-    /// 不会卡在这里永远等下去。用户随后在下载列表里点"继续"仍然能把这个版本装完（下载队列
-    /// 自己会重跑 resumeAction），只是装完之后不会再自动进游戏——那时候从主界面点启动即可。
+    /// 一键启动依赖真实安装结果，因此使用队列统一的等待接口；取消或失败就结束本次向导，
+    /// 不在调用方退出后提供后台重试并意外继续启动。
     /// </summary>
     private static async Task<T> RunInDownloadQueueAsync<T>(string name,
         Func<DownloadQueueItem, CancellationToken, Task<T>> work,
         string? targetVersionId = null, string? targetFolderPath = null)
     {
-        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        DownloadQueueService.Instance.StartNew(name, async (item, ct) =>
-        {
-            try
-            {
-                var result = await work(item, ct);
-                tcs.TrySetResult(result);
-            }
-            catch (OperationCanceledException)
-            {
-                tcs.TrySetCanceled();
-                throw; // 继续往上抛，让下载队列把这一条标成"已暂停/已取消"
-            }
-            catch (Exception ex)
-            {
-                tcs.TrySetException(ex);
-                throw; // 同上，让下载队列把失败原因显示在条目上
-            }
-        }, targetVersionId, targetFolderPath);
-
-        return await tcs.Task;
+        return await DownloadQueueService.Instance.RunAndWaitAsync(name, work,
+            targetVersionId: targetVersionId, targetFolderPath: targetFolderPath);
     }
 
     /// <summary>

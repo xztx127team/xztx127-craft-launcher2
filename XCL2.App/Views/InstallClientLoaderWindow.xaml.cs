@@ -77,7 +77,7 @@ public partial class InstallClientLoaderWindow : OverlayDialogControl
         // 每次打开又关闭这个窗口就多留一个永不退出的后台任务，属于资源泄漏，顺手修掉。
         // UserControl 没有 Window.Closed 事件；Overlay 弹窗用 IOverlayDialog.RequestClose
         // 表示"我要关了"，语义等价，用它做资源释放。
-        RequestClose += (_, _) => { _loaderService.Dispose(); _vanillaDownloader.Dispose(); };
+        OverlayClosed += (_, _) => { _loaderService.Dispose(); _vanillaDownloader.Dispose(); };
 
         McVersionCombo.ItemsSource = _mcVersions;
         BuildVersionCombo.ItemsSource = _buildVersions;

@@ -26,6 +26,18 @@ internal static class AiUsageAccounting
         return new(input, output, total, cached);
     }
 
+    internal sealed record ContextUsage(long Used, double? Proportion);
+
+    /// <summary>圆环显示当前主请求的占用比例；未知上限或未发送时不伪造百分比。</summary>
+    internal static ContextUsage ContextOccupancy(AiRequestUsage? request, int limit)
+    {
+        if (request == null) return new(0, null);
+        // 预留输出用于预算准入，不属于已经写入上下文的 token。
+        // 默认可预留整个剩余窗口，因此把预留量算作占用会让生成期间总是显示 100%。
+        long occupied = Math.Max(0, request.InputTokens) + Math.Max(0, request.OutputTokens);
+        return new(occupied, limit > 0 ? Math.Clamp((double)occupied / limit, 0, 1) : null);
+    }
+
     private static long? Read(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
         && value.TryGetInt64(out var number) && number >= 0 && number <= 1_000_000_000_000 ? number : null;
@@ -62,17 +74,20 @@ internal static class AiUsageAccounting
 
     internal static AiModelAccountingConfig Settings(AiAssistantConfig config, string model)
     {
-        var definition = AiModelIds.FindInCatalog(config, model);
-        var key = definition?.ModelKey ?? model;
-        var exact = config.ModelAccounting?.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
-        if (exact != null) return exact;
-        if (!AiModelIds.TrySplitModelKey(key, out _, out var rawId))
-            return config.ModelAccounting?.FirstOrDefault(p => string.Equals(p.Key, model, StringComparison.OrdinalIgnoreCase)).Value ?? new();
-        var legacyOwner = AiModelIds.FindInCatalog(config, rawId);
-        // 同名第二接口绝不继承第一接口的累计、价格或配额。
-        if (legacyOwner != null && string.Equals(legacyOwner.ModelKey, key, StringComparison.OrdinalIgnoreCase))
-            return config.ModelAccounting?.FirstOrDefault(p => string.Equals(p.Key, rawId, StringComparison.OrdinalIgnoreCase)).Value?.Clone() ?? new();
-        return new();
+        lock (config)
+        {
+            var definition = AiModelIds.FindInCatalog(config, model);
+            var key = definition?.ModelKey ?? model;
+            var exact = config.ModelAccounting?.FirstOrDefault(p => string.Equals(p.Key, key, StringComparison.OrdinalIgnoreCase)).Value;
+            if (exact != null) return exact;
+            if (!AiModelIds.TrySplitModelKey(key, out _, out var rawId))
+                return config.ModelAccounting?.FirstOrDefault(p => string.Equals(p.Key, model, StringComparison.OrdinalIgnoreCase)).Value ?? new();
+            var legacyOwner = AiModelIds.FindInCatalog(config, rawId);
+            // 同名第二接口绝不继承第一接口的累计、价格或配额。
+            if (legacyOwner != null && string.Equals(legacyOwner.ModelKey, key, StringComparison.OrdinalIgnoreCase))
+                return config.ModelAccounting?.FirstOrDefault(p => string.Equals(p.Key, rawId, StringComparison.OrdinalIgnoreCase)).Value?.Clone() ?? new();
+            return new();
+        }
     }
 
     /// <summary>本地软配额按预计输入 + 预留输出检查；服务商实际计量仍为最终依据。</summary>

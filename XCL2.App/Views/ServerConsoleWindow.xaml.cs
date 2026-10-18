@@ -27,7 +27,7 @@ public partial class ServerConsoleWindow : OverlayDialogControl
         AttachToProcess();
 
         // 同上：Window.Closed → IOverlayDialog.RequestClose
-        RequestClose += (_, _) => Detach();
+        OverlayClosed += (_, _) => Detach();
     }
 
     private void AttachToProcess()

@@ -186,11 +186,12 @@ internal static class TouchInputInjector
     /// <summary>菜单采用屏幕绝对位置：同时更新系统指针和 GLFW 的窗口消息坐标。
     /// 只投递 WM_MOUSEMOVE 会使读取 GetCursorPos 的后端仍看到旧坐标。
     /// 松开游戏遗留的局部约束后定位；游戏视角路径绝不调用此方法。</summary>
-    public static bool MenuPointerMove(IntPtr game, int screenX, int screenY, bool leftDown)
+    public static bool MenuPointerMove(IntPtr game, int screenX, int screenY, bool leftDown,
+        bool worldJoined = false, LegacyTouchCursorEvidence? cursorEvidence = null)
     {
         if (game == IntPtr.Zero || GetForegroundWindow() != game) return false;
         // 旧游戏仍明确抓取鼠标时，禁止菜单绝对定位把视角拉到手指位置。
-        if (ReadGameMenuMode(game, allowFullscreenCapture: true) == false) return false;
+        if (ReadGameMenuMode(game, worldJoined: worldJoined, cursorEvidence: cursorEvidence) == false) return false;
         ClipCursor(IntPtr.Zero);
         if (!SetCursorPos(screenX, screenY)) return false;
         return PostMenuMouseMessage(game, 0x0200, screenX, screenY, leftDown);
@@ -384,10 +385,11 @@ internal static class TouchInputInjector
 
     /// <summary>
     /// 只观察游戏已经建立的鼠标约束，不主动抓取/隐藏/移动鼠标。
-    /// 加载画面隐藏光标不等于进入世界：还必须确认光标被约束在游戏客户区内。
+    /// 加载画面隐藏光标不等于进入世界：还必须确认局部约束，或客户端世界数据与隐藏回中光标。
     /// true=菜单，false=游戏视角，null=状态不明确，调用方保留已确认的模式。
     /// </summary>
-    public static bool? ReadGameMenuMode(IntPtr gameHwnd, bool allowFullscreenCapture = false)
+    public static bool? ReadGameMenuMode(IntPtr gameHwnd, bool allowFullscreenCapture = false,
+        bool worldJoined = false, LegacyTouchCursorEvidence? cursorEvidence = null)
     {
         if (!TryGetClientAreaOnScreen(gameHwnd, out var left, out var top, out var right, out var bottom) ||
             right <= left || bottom <= top || !GetClipCursor(out var clip)) return null;
@@ -401,10 +403,16 @@ internal static class TouchInputInjector
             clip.Bottom == desktopTop + GetSystemMetrics(79);
         var info = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
         if (!GetCursorInfo(ref info)) return null;
+        var centerX = left + (right - left) / 2; var centerY = top + (bottom - top) / 2;
+        var showing = (info.flags & CURSOR_SHOWING) != 0;
+        var suppressed = (info.flags & CURSOR_SUPPRESSED) != 0;
+        var recentered = cursorEvidence?.Observe(info.ptScreenPos.x, info.ptScreenPos.y, centerX, centerY,
+            showing, suppressed, Environment.TickCount64) == true;
         // 旧后端抓取光标时仍可能留下 WPF 箭头，客户区约束优先于箭头句柄。
         // 不调用 ClipCursor/ShowCursor/CenterCursor 来推测视角模式。
         return TouchInputModePolicy.Classify(confined, wholeDesktop, info.hCursor != IntPtr.Zero,
-            (info.flags & CURSOR_SHOWING) != 0, (info.flags & CURSOR_SUPPRESSED) != 0, allowFullscreenCapture);
+            showing, suppressed, allowFullscreenCapture, worldJoined,
+            Math.Abs(info.ptScreenPos.x - centerX) <= 3 && Math.Abs(info.ptScreenPos.y - centerY) <= 3, recentered);
     }
 
     /// <summary>

@@ -10,6 +10,8 @@ namespace XCL2.App.Services;
 internal static class TouchVersionPolicy
 {
     private const string VersionPattern = @"(?<major>1|2[6-9]|[3-9]\d)\.(?<minor>\d+)(?:\.(?<patch>\d+))?(?:(?:[-_\s]*)(?:(?:snapshot|snap|t|快照)[-_\s]*(?<snapshot>\d+)|第(?<snapshot>\d+|[一二三四五六七八九十]+)个?快照|(?:pre-release|pre|rc|release[-_\s]*candidate)[-_\s]*\d+))?";
+    // 不把缺失/损坏快照序号的名称截断为正式版 26.3。
+    private const string VersionEnd = @"(?![\d.]|[-_\s]*(?:snapshot|snap\b|t\b|快照|第|pre|rc|release))";
 
     private static bool? ParseExact(string? value)
     {
@@ -20,9 +22,9 @@ internal static class TouchVersionPolicy
         {
             if (major != 26 || minor != 3) return major > 26 || major == 26 && minor > 3;
             var snapshot = match.Groups["snapshot"];
-            if (!snapshot.Success && match.Groups["patch"].Success) return int.TryParse(match.Groups["patch"].Value, out var shorthand) && shorthand >= 4;
-            if (!snapshot.Success) return true; // 26.3 正式版、预发布和候选版本。
-            if (int.TryParse(snapshot.Value, out var number)) return number >= 4;
+            if (!snapshot.Success) return true; // 26.3 正式版、补丁版、预发布和候选版本；补丁号不是快照序号。
+            if (char.IsDigit(snapshot.Value[0]))
+                return int.TryParse(snapshot.Value, out var number) && number > 0 ? number >= 4 : null;
             return snapshot.Value is not ("一" or "二" or "三");
         }
         // 旧周快照和经典 alpha/beta 版本均早于 26.3。
@@ -35,10 +37,10 @@ internal static class TouchVersionPolicy
     {
         var exact = ParseExact(version);
         if (exact.HasValue || string.IsNullOrWhiteSpace(version)) return exact;
-        var title = Regex.Match(version, @"\bMinecraft\s+(?<version>" + VersionPattern + @")(?![\d.])", RegexOptions.IgnoreCase);
+        var title = Regex.Match(version, @"\bMinecraft\s+(?<version>" + VersionPattern + ")" + VersionEnd, RegexOptions.IgnoreCase);
         if (title.Success) return ParseExact(title.Groups["version"].Value);
         // 非标准实例名只在候选版本唯一时采用，不能遇到第一个数字就决定路径。
-        var candidates = Regex.Matches(version, @"(?<![\d.])" + VersionPattern + @"(?![\d.])", RegexOptions.IgnoreCase)
+        var candidates = Regex.Matches(version, @"(?<![\d.])" + VersionPattern + VersionEnd, RegexOptions.IgnoreCase)
             .Cast<Match>().Select(m => ParseExact(m.Value)).Where(v => v.HasValue).Distinct().ToArray();
         return candidates.Length == 1 ? candidates[0] : null;
     }
@@ -101,8 +103,9 @@ internal static class TouchVersionPolicy
             }
             foreach (var item in chain.AsEnumerable().Reverse())
             {
-                var result = ParseExact(item.Detail.Id) ?? ParseExact(item.Detail.InheritsFrom)
-                    ?? ParseExact(item.Detail.ClientVersion);
+                // 父版本缺失时，仍优先采用 inheritsFrom/clientVersion，不能被重命名的子实例 ID 覆盖。
+                var result = ParseExact(item.Detail.InheritsFrom) ?? ParseExact(item.Detail.ClientVersion)
+                    ?? ParseExact(item.Detail.Id);
                 if (result.HasValue) return result;
             }
             return FromVersion(versionId);

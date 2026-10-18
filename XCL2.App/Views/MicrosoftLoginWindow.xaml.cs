@@ -14,15 +14,20 @@ namespace XCL2.App.Views;
 public partial class MicrosoftLoginWindow : OverlayDialogControl
 {
     private readonly string _redirectUri;
-    private readonly TaskCompletionSource<string> _codeTcs = new();
-    private bool _settled;
+    private readonly TaskCompletionSource<string> _codeTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private bool _settled, _initializationStarted;
 
     public MicrosoftLoginWindow(string authorizeUrl, string redirectUri = MicrosoftAuthService.NativeClientRedirectUri)
     {
         InitializeComponent();
         _redirectUri = redirectUri;
-        Loaded += async (_, _) => await InitializeAsync(authorizeUrl);
-        RequestClose += OnRequestClose;
+        Loaded += async (_, _) =>
+        {
+            if (_initializationStarted || _settled) return;
+            _initializationStarted = true;
+            await InitializeAsync(authorizeUrl);
+        };
+        OverlayClosed += OnOverlayClosed;
     }
 
     /// <summary>等待用户完成登录并拿到授权码；窗口被手动关闭则视为取消。</summary>
@@ -33,12 +38,14 @@ public partial class MicrosoftLoginWindow : OverlayDialogControl
         try
         {
             await Browser.EnsureCoreWebView2Async();
+            if (_settled) return;
             Browser.CoreWebView2.NavigationStarting += (_, e) => CheckUrl(e.Uri);
             Browser.CoreWebView2.SourceChanged += (_, _) => CheckUrl(Browser.CoreWebView2.Source);
             Browser.CoreWebView2.Navigate(authorizeUrl);
         }
         catch (Exception ex)
         {
+            if (_settled) return;
             // 常见原因：机器上没有装 WebView2 Runtime。降级提示用户改用浏览器登录，
             // 而不是让整个窗口空白卡死、看起来毫无反应。
             Browser.Visibility = Visibility.Collapsed;
@@ -92,12 +99,14 @@ public partial class MicrosoftLoginWindow : OverlayDialogControl
 
     // 迁移后修复：OverlayDialogControl 继承自 UserControl，没有 Window.OnClosed 这个虚方法
     // 可以重写（这也是 error CS0115 的原因——"没有找到适合的方法来重写"）。
-    // Overlay 弹窗对应"我要关了"这件事的钩子是 IOverlayDialog.RequestClose 事件，
+    // Overlay 弹窗对应"我要关了"这件事的钩子是 OverlayDialogControl.OverlayClosed 事件，
     // 之前的 SkinSelectWindow 等其它迁移弹窗已经在用这个模式（见 IOverlayDialog.cs 顶部注释），
     // 这里补上同样的写法：构造函数里订阅一次，逻辑跟原来 OnClosed 里的完全一致。
-    private void OnRequestClose(object? sender, bool? result)
+    private void OnOverlayClosed(object? sender, bool? result)
     {
         // 用户直接关掉弹窗而没有走到重定向：视为取消登录，而不是让上层一直卡着等待。
-        if (!_settled) _codeTcs.TrySetCanceled();
+        if (!_settled) { _settled = true; _codeTcs.TrySetCanceled(); }
+        try { Browser.Dispose(); }
+        catch (Exception ex) { ErrorPresenter.LogFallback("释放登录浏览器失败", ex); }
     }
 }

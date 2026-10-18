@@ -45,7 +45,9 @@ public static class UiRenderScheduler
         {
             CompositionTarget.Rendering -= Rendered;
             // Rendering 位于提交之前；只排续步，先让本次布局/合成调用栈返回。
-            continuation = dispatcher.BeginInvoke(DispatcherPriority.ContextIdle,
+            // 等本次提交调用栈返回即可，不等待 ContextIdle。启动/下载繁忙时
+            // 空闲队列可能迟迟排不到，让已准备的低透明度弹窗停在起点数秒。
+            continuation = dispatcher.BeginInvoke(DispatcherPriority.Render,
                 new Action(() => Finish(true)));
         }
         void Arm()

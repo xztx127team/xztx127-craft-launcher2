@@ -26,9 +26,9 @@ public partial class MainWindow
             }
             if (args.LaunchGame)
             {
-                if (args.ResultFile == null) { ApplyStartupLaunch(args.AccountName, args.InstanceName); return; }
+                if (args.ResultFile == null) { ApplyStartupLaunch(args.AccountName, args.InstanceName, useSelectedAccount: args.UseSelectedAccount); return; }
                 var completion = new TaskCompletionSource<LauncherCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-                ApplyStartupLaunch(args.AccountName, args.InstanceName, completion);
+                ApplyStartupLaunch(args.AccountName, args.InstanceName, completion, args.UseSelectedAccount);
                 await LauncherCommandResultWriter.WriteAsync(path, await completion.Task);
             }
         }

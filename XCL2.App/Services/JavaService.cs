@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
@@ -79,25 +79,36 @@ public class JavaService
     /// </summary>
     internal static int GetDownloadTargetMajorVersion(int requiredMajor) => requiredMajor == 16 ? 17 : requiredMajor;
 
+    /// <summary>实际选中的 Java 位数；未知返回 null，不使用启动器/操作系统位数代替。</summary>
+    public static int? TryGetJavaBitness(string? javaPath) => JavaExecutableArchitecture.TryReadBitness(javaPath);
+
     public string? FindJava(string? configuredPath, int? preferMajorVersion = null, ConfigService? configService = null)
+        => FindJava(configuredPath, preferMajorVersion, configService, CancellationToken.None, null);
+
+    public string? FindJava(string? configuredPath, int? preferMajorVersion, ConfigService? configService,
+        CancellationToken cancellationToken, IReadOnlyList<string>? registeredJavaPaths)
     {
+        var probedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // 第一优先级：用户在"Java 列表"里维护的、按 Priority 排序的登记项。
         // 只有传入了 configService 时才会走这条路径——保持这个方法在没有 ConfigService 上下文的
         // 调用点(比如单测/独立工具)下行为不变，不强制要求调用方总是传配置。
-        if (configService != null)
+        var registeredPaths = registeredJavaPaths ?? configService?.GetJavaListInPriorityOrder().Select(entry => entry.JavawPath).ToArray();
+        if (registeredPaths != null)
         {
-            foreach (var entry in configService.GetJavaListInPriorityOrder())
+            foreach (var registeredPath in registeredPaths)
             {
-                if (string.IsNullOrEmpty(entry.JavawPath) || !File.Exists(entry.JavawPath)) continue;
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrEmpty(registeredPath) || !File.Exists(registeredPath)) continue;
 
                 if (preferMajorVersion is not > 0)
-                    return entry.JavawPath; // 没有版本要求：列表里优先级最高的可用项直接命中
+                    return registeredPath; // 没有版本要求：列表里优先级最高的可用项直接命中
+                if (!probedPaths.Add(registeredPath)) continue;
 
-                // 有版本要求：优先信任登记时探测到的 MajorVersion(避免每次启动都重新起进程探测)，
-                // 缺失时才现测一次(兼容手动编辑 config.json 漏填版本号的情况)。
-                var detected = entry.MajorVersion ?? TryGetJavaMajorVersionSync(entry.JavawPath);
+                // The executable may have been replaced in-place since it was registered.
+                // Stored metadata is for display; actual automatic selection probes the current file.
+                var detected = TryGetJavaMajorVersionSync(registeredPath, cancellationToken);
                 if (detected is int detectedListMajor && IsJavaMajorCompatible(detectedListMajor, preferMajorVersion.Value))
-                    return entry.JavawPath;
+                    return registeredPath;
             }
         }
 
@@ -159,7 +170,9 @@ public class JavaService
         // 有版本要求：实际探测每个候选的版本号（而不是猜文件夹名），找到第一个真正匹配的。
         foreach (var candidate in orderedCandidates)
         {
-            var detected = TryGetJavaMajorVersionSync(candidate);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!probedPaths.Add(candidate)) continue;
+            var detected = TryGetJavaMajorVersionSync(candidate, cancellationToken);
             if (detected is int detectedCandidateMajor && IsJavaMajorCompatible(detectedCandidateMajor, preferMajorVersion.Value))
                 return candidate;
         }
@@ -174,31 +187,34 @@ public class JavaService
     /// 公开出来是因为启动前"检查用户手动指定的 Java 跟这个版本要求是否匹配"(MainWindow.LaunchInternalAsync)
     /// 需要复用同一份探测逻辑，不想再实现一份重复的调进程代码。</summary>
     public static int? TryGetJavaMajorVersionSync(string javawPath)
+        => TryGetJavaMajorVersionSync(javawPath, CancellationToken.None);
+
+    public static int? TryGetJavaMajorVersionSync(string javawPath, CancellationToken cancellationToken)
     {
         try
         {
-            var javaExe = Path.Combine(Path.GetDirectoryName(javawPath) ?? "", "java.exe");
+            var javaExe = ResolveProbeExecutable(javawPath);
             if (!File.Exists(javaExe)) return null;
-
-            var psi = new System.Diagnostics.ProcessStartInfo(javaExe, "-version")
-            {
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc == null) return null;
-            var output = proc.StandardError.ReadToEnd();
-            proc.WaitForExit(5000);
-
-            return ParseJavaMajorVersion(output);
+            var output = JavaProcessProbe.ReadVersionOutputAsync(javaExe, TimeSpan.FromSeconds(5), cancellationToken)
+                .GetAwaiter().GetResult();
+            return output == null ? null : ParseJavaMajorVersion(output);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             ErrorPresenter.LogFallback($"探测 Java 版本失败：{javawPath}", ex);
             return null;
         }
+    }
+
+    private static string ResolveProbeExecutable(string javaPath)
+    {
+        if (string.Equals(Path.GetFileName(javaPath), "javaw.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            var console = Path.Combine(Path.GetDirectoryName(javaPath) ?? "", "java.exe");
+            if (File.Exists(console)) return console;
+        }
+        return javaPath;
     }
 
     /// <summary>
@@ -207,25 +223,10 @@ public class JavaService
     /// - 新式(Java 9+，JEP 223 起): "21.0.5" / "17" -> 主版本号就是第一段
     /// </summary>
     internal static int? ParseJavaMajorVersion(string versionOutput)
-    {
-        var idx = versionOutput.IndexOf('"');
-        var lastIdx = versionOutput.LastIndexOf('"');
-        if (idx < 0 || lastIdx <= idx) return null;
-        var versionString = versionOutput.Substring(idx + 1, lastIdx - idx - 1);
-
-        var parts = versionString.Split('.', '_', '-');
-        if (parts.Length == 0) return null;
-        if (!int.TryParse(parts[0], out var first)) return null;
-
-        // "1.8.0_412" 这种旧格式第一段永远是 1，真正版本号在第二段。
-        if (first == 1 && parts.Length > 1 && int.TryParse(parts[1], out var second))
-            return second;
-
-        return first;
-    }
+        => JavaVersionOutputPolicy.ParseMajor(versionOutput);
 
     /// <summary>
-    /// 快速探测本机 Java（轻量版，秒回）：只查常见位置——便携版目录(RuntimeDir)、JAVA_HOME、
+    /// 快速探测本机 Java：只查常见位置——便携版目录(RuntimeDir)、JAVA_HOME、
     /// 注册表、PATH 环境变量，不遍历整个磁盘，供设置页 Java 列表的"刷新"按钮使用。
     /// 和 FindJava() 走的是同一批候选来源，区别是这里返回全部候选(带实测版本号)供用户在列表里
     /// 挑选/一键批量登记，而不是只取第一个能用的。跟 ScanWholeDiskForJavaAsync（全盘扫描，
@@ -646,25 +647,12 @@ public class JavaService
     {
         try
         {
-            var javaExe = Path.Combine(Path.GetDirectoryName(javawPath) ?? "", "java.exe");
+            var javaExe = ResolveProbeExecutable(javawPath);
             if (!File.Exists(javaExe)) return null;
-
-            var psi = new System.Diagnostics.ProcessStartInfo(javaExe, "-version")
-            {
-                UseShellExecute = false,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-                CreateNoWindow = true
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc == null) return null;
-            var output = await proc.StandardError.ReadToEndAsync(ct);
-            await proc.WaitForExitAsync(ct);
-
-            var idx = output.IndexOf('"');
-            var lastIdx = output.LastIndexOf('"');
-            return idx >= 0 && lastIdx > idx ? output.Substring(idx + 1, lastIdx - idx - 1) : null;
+            var output = await JavaProcessProbe.ReadVersionOutputAsync(javaExe, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+            return JavaVersionOutputPolicy.ParseVersion(output);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return null; }
     }
 
@@ -768,13 +756,21 @@ public class JavaService
 
         try
         {
-            using var proc = System.Diagnostics.Process.Start(psi)
-                ?? throw new InvalidOperationException("无法启动 Java 系统安装程序。");
-            // 启动 MSI 后不可通过取消等待假装安装已结束；必须等进程退出再清理安装包。
-            await proc.WaitForExitAsync();
-            if (proc.ExitCode == 1602) throw new OperationCanceledException("用户取消了 Java 系统安装。");
-            if (proc.ExitCode is not (0 or 1641 or 3010))
-                throw new InvalidOperationException($"Java 系统安装失败，退出码：{proc.ExitCode}。");
+            async Task<int> InstallAsync()
+            {
+                ct.ThrowIfCancellationRequested();
+                using var proc = System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("无法启动 Java 系统安装程序。");
+                // MSI 一旦启动，等待进程真实退出后再恢复取消按钮、清理安装包。
+                await proc.WaitForExitAsync();
+                return proc.ExitCode;
+            }
+            var item = DownloadQueueService.Instance.CurrentItem;
+            var exitCode = item != null ? await item.RunInstallerPhaseAsync(InstallAsync) : await InstallAsync();
+            if (exitCode == 1602) throw new OperationCanceledException("用户取消了 Java 系统安装。");
+            if (exitCode is not (0 or 1641 or 3010))
+                throw new InvalidOperationException($"Java 系统安装失败，退出码：{exitCode}。");
+            if ((exitCode is 1641 or 3010) && item != null) item.CompletionText = "Java 已安装，需要重启计算机";
             ct.ThrowIfCancellationRequested();
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)

@@ -65,6 +65,22 @@ try
     }
 
     DownloadEndpoints.ResetHealth();
+    DownloadEndpoints.ResetHealth();
+    calls.Clear();
+    using (var client = new HttpClient(new Handler((request, ct) =>
+    {
+        calls.Add(request.RequestUri!.Host);
+        if (request.RequestUri.Host != "gh-proxy.org") return Task.FromResult(Bytes(good));
+        var partial = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new ByteArrayContent(good[..3]) };
+        partial.Content.Headers.ContentRange = new ContentRangeHeaderValue(0, 2, good.Length);
+        return Task.FromResult(partial);
+    })))
+    {
+        await DownloadEndpoints.DownloadFileWithFallbackAsync(client, github, true, path, "failed");
+        Expect(calls.SequenceEqual(new[] { "gh-proxy.org", "gh-proxy.com" }), "Unsolicited partial GET switches source even without hash/size.");
+        Expect(File.ReadAllBytes(path).SequenceEqual(good), "A partial 206 cannot replace a complete destination.");
+    }
+
     calls.Clear();
     using (var client = new HttpClient(new Handler((request, ct) =>
     {

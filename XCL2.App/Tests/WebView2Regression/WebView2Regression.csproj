@@ -13,6 +13,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
     <Compile Include="../../Services/EmbeddedWebView.cs" Link="Services/EmbeddedWebView.cs" />
+    <Compile Include="../../Services/ExternalLinkService.cs" Link="Services/ExternalLinkService.cs" />
     <Compile Include="../../Services/WebView2RuntimeDetector.cs" Link="Services/WebView2RuntimeDetector.cs" />
     <Compile Include="../../Views/Tools/SeedStructureQueryTool.xaml.cs" Link="Views/Tools/SeedStructureQueryTool.xaml.cs" />
     <Compile Include="../../Views/Tools/Web2BrowserTool.xaml.cs" Link="Views/Tools/Web2BrowserTool.xaml.cs" />

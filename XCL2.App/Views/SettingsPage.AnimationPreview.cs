@@ -60,7 +60,7 @@ public partial class SettingsPage
 
     private void QueueAnimationPreview(AnimationKind kind)
     {
-        if (!HasAutomaticAnimationPreview(kind) || !IsLoaded || !IsVisible) return;
+        if (_uxResetInProgress || !HasAutomaticAnimationPreview(kind) || !IsLoaded || !IsVisible) return;
         _animationPreviewDebounceTimer ??= CreateAnimationPreviewTimer();
         _animationPreviewDebounceTimer.Stop();
         _pendingAnimationPreview = kind;

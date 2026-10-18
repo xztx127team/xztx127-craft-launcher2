@@ -20,18 +20,22 @@ public static class OfflineLaunchReminderService
 
         if (count >= 25 && (count == 25 || (count - 25) % 50 == 0))
         {
-            if (MessageBoxDialog.ShowConfirm("你正在使用离线账户启动。若已拥有正版可忽略；支持正版可以获得官方联机和账户服务。是否前往 Xbox 购买 Minecraft？", "支持正版"))
-                OpenUrl(BuyUrl);
+            ReminderCenterService.Publish("offline-license", "离线账户提示",
+                "若已拥有正版可忽略；正版账户可使用官方联机和账户服务。",
+                "查看购买页面", () => { OpenUrl(BuyUrl); return Task.CompletedTask; });
             return;
         }
 
         if (count > 25 && (count - 25) % 10 == 0)
         {
-            if (MessageBoxDialog.ShowConfirm("本项目一直保持开源。愿意捐助一次支持维护吗？捐助后将不再提示。", "支持 XCL2"))
-            {
-                config.DonationAcknowledged = true;
-                OpenUrl(DonateUrl);
-            }
+            ReminderCenterService.Publish("support-project", "支持 XCL2",
+                "项目持续开源维护，可以在方便时查看支持页面，也可以忽略此建议。",
+                "查看支持页面", () =>
+                {
+                    config.DonationAcknowledged = true;
+                    (System.Windows.Application.Current?.MainWindow as MainWindow)?.ConfigService.Save();
+                    OpenUrl(DonateUrl); return Task.CompletedTask;
+                });
         }
     }
 

@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -28,6 +28,15 @@ public partial class LogsPage : UserControl
 
     // 游戏日志 Tab：记录当前订阅了 OutputReceived 事件的进程，切换选择时需要先取消订阅旧的。
     private GameProcessInfo? _subscribedProcess;
+    private Action<string>? _subscribedOutputHandler;
+    private int _gameLogSubscriptionGeneration;
+    private long _fullLauncherLogRevision = -1;
+    private readonly object _pendingGameLogLock = new();
+    private readonly StringBuilder _pendingGameLog = new();
+    private GameProcessInfo? _pendingGameLogSource;
+    private int _pendingGameLogGeneration;
+    private bool _pendingGameLogDrain;
+    private int _processReloadQueued;
 
     // 需求：游戏崩溃退出后，这个 Tab 不应该瞬间"空屏"——用户往往就是想在崩溃那一刻
     // 立刻看最后几行输出来定位问题，日志一闪而空对排错完全没有帮助。
@@ -51,8 +60,7 @@ public partial class LogsPage : UserControl
     private readonly DispatcherTimer _launcherLogTimer;
     private DateTime _launcherLogLastWrite = DateTime.MinValue;
 
-    // 完整启动器日志 Tab：内容来自纯内存的 LauncherLogService.Buffer，没有文件可供比对修改时间，
-    // 所以直接每秒无条件读一次（内存操作，开销可忽略），而不是像上面文件轮询那样先判断有没有变化。
+    // 会话实时视图每秒仅检查修订号；无新增内容时不复制日志字符串，也不重新投影。
     private readonly DispatcherTimer _fullLauncherLogTimer;
 
     // 独立启动器日志窗口：见 LauncherLogWindowService 类头注释。只在用户点了"独立窗口"按钮
@@ -68,6 +76,7 @@ public partial class LogsPage : UserControl
     {
         _owner = owner;
         InitializeComponent();
+        InitializeLogReading();
 
         // 默认不显示日志面板，符合"小白 0 基础也能用"的定位：日志只是可选的高手工具。
         ShowLogCheck.IsChecked = _owner.ConfigService.Config.ShowLogPanel;
@@ -78,7 +87,7 @@ public partial class LogsPage : UserControl
         RescanCrash_Click(this, new RoutedEventArgs());
         LoadFullLauncherLog();
 
-        _owner.ProcessManager.Changed += () => Dispatcher.Invoke(ReloadProcessCombos);
+        _owner.ProcessManager.Changed += OnProcessesChanged;
 
         // 启动器日志文件每 2 秒检查一次是否有更新，有变化才重新读取，避免频繁磁盘 IO。
         _launcherLogTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -92,15 +101,85 @@ public partial class LogsPage : UserControl
         _fullLauncherLogTimer.Tick += (_, _) => AutoRefreshFullLauncherLog();
         _fullLauncherLogTimer.Start();
 
+        Loaded += (_, _) =>
+        {
+            _owner.ProcessManager.Changed -= OnProcessesChanged;
+            _owner.ProcessManager.Changed += OnProcessesChanged;
+            _launcherLogTimer.Start(); _fullLauncherLogTimer.Start();
+            LoadGameLog();
+        };
         Unloaded += (_, _) =>
         {
+            _owner.ProcessManager.Changed -= OnProcessesChanged;
             _launcherLogTimer.Stop();
             _fullLauncherLogTimer.Stop();
-            if (_subscribedProcess != null) _subscribedProcess.OutputReceived -= OnGameLogLineReceived;
+            ++_gameLogSubscriptionGeneration;
+            if (_subscribedProcess != null && _subscribedOutputHandler != null) _subscribedProcess.OutputReceived -= _subscribedOutputHandler;
             // 只停掉我们进程内的同步定时器；已经弹出的独立日志窗口本身不受影响，继续独立存在
             // （见 LauncherLogWindowService.Dispose 的注释：这正是"不依附于咱们的进程"的应有之义）。
             _launcherLogWindowService?.Dispose();
         };
+    }
+
+    private void OnProcessesChanged()
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished || Interlocked.Exchange(ref _processReloadQueued, 1) != 0) return;
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            Interlocked.Exchange(ref _processReloadQueued, 0);
+            if (IsLoaded) ReloadProcessCombos();
+        }));
+    }
+
+    private void OpenButtonMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: { } menu } button)
+        { menu.PlacementTarget = button; menu.IsOpen = true; }
+    }
+
+    private void TaskResults_Click(object sender, RoutedEventArgs e)
+        => TaskResultHistoryDialog.Show(_owner.ConfigService.Config, () => _owner.ConfigService.Save());
+
+    private async void ExportDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            // Capture UI-owned buffers before background file IO. No config/account files are read.
+            string game;
+            if (ProcessCombo.SelectedItem is GameProcessInfo process)
+            {
+                lock (process.OutputBuffer)
+                {
+                    var count = Math.Min(process.OutputBuffer.Length, DiagnosticRedactionService.MaxEntryChars);
+                    game = process.OutputBuffer.ToString(process.OutputBuffer.Length - count, count);
+                    if (process.OutputBuffer.Length > count) game = DiagnosticRedactionService.TrimPartialFirstLine(game);
+                }
+            }
+            else
+            {
+                var snapshot = _lastKnownLogSnapshot ?? "";
+                game = snapshot.Length > DiagnosticRedactionService.MaxEntryChars ? DiagnosticRedactionService.TrimPartialFirstLine(snapshot[^DiagnosticRedactionService.MaxEntryChars..]) : snapshot;
+            }
+            var crash = RawLogView(CrashRawBox);
+            var launcher = LauncherLogService.GetBufferedTail();
+            var entries = await Task.Run(() =>
+            {
+                var sources = new List<DiagnosticExportSource>
+                {
+                    new("启动器会话日志（末尾）", launcher), new("当前游戏输出（末尾）", game),
+                    new("已选崩溃报告", crash)
+                };
+                var path = Path.Combine(App.DataDir, "logs", "crash.log");
+                if (File.Exists(path))
+                {
+                    try { sources.Add(new("启动器异常日志（末尾）", DiagnosticRedactionService.ReadTextTail(path))); }
+                    catch { sources.Add(new("启动器异常日志", "该日志暂时无法读取。")); }
+                }
+                return sources;
+            });
+            DiagnosticsExportDialog.Show(entries);
+        }
+        catch (Exception ex) { ToastService.ShowWarning("准备诊断失败：" + DiagnosticRedactionService.Sanitize(ex.Message, 1000)); }
     }
 
     private void ApplyVisibility()
@@ -139,24 +218,28 @@ public partial class LogsPage : UserControl
 
     private void LoadGameLog()
     {
+        var generation = ++_gameLogSubscriptionGeneration;
         if (_subscribedProcess != null)
         {
-            _subscribedProcess.OutputReceived -= OnGameLogLineReceived;
+            if (_subscribedOutputHandler != null) _subscribedProcess.OutputReceived -= _subscribedOutputHandler;
+            _lastKnownLogSnapshot = _subscribedProcess.GetOutputSnapshot();
+            _lastKnownLogVersionId = _subscribedProcess.VersionId;
             _subscribedProcess = null;
+            _subscribedOutputHandler = null;
         }
 
         if (ProcessCombo.SelectedItem is GameProcessInfo info)
         {
-            lock (info.OutputBuffer)
-                GameLogBox.Text = info.OutputBuffer.Length > 0 ? info.OutputBuffer.ToString() : Loc.T("Str_Cs_No_Output_Yet", "(暂无输出)");
-            GameLogBox.ScrollToEnd();
+            var snapshot = info.GetOutputSnapshot();
+            SetLogViewSource(GameLogBox, snapshot.Length > 0 ? snapshot : Loc.T("Str_Cs_No_Output_Yet", "(暂无输出)"), initial: true);
 
             _subscribedProcess = info;
-            info.OutputReceived += OnGameLogLineReceived;
+            _subscribedOutputHandler = line => OnGameLogLineReceived(info, generation, line);
+            info.OutputReceived += _subscribedOutputHandler;
 
             // 记下这份快照：万一这个进程接下来崩溃/退出、从"运行中列表"里消失，
             // 下次 LoadGameLog 找不到匹配进程时还能回退展示这份内容，而不是清空。
-            lock (info.OutputBuffer) _lastKnownLogSnapshot = info.OutputBuffer.ToString();
+            _lastKnownLogSnapshot = snapshot;
             _lastKnownLogVersionId = info.VersionId;
         }
         else if (!string.IsNullOrEmpty(_lastKnownLogSnapshot))
@@ -165,29 +248,49 @@ public partial class LogsPage : UserControl
             // 但我们手上还留着它退出前的日志快照——继续展示这份内容，不清空，
             // 并且在末尾加一行明显的提示，说明这是"进程已结束时的最后日志"而不是实时输出，
             // 避免用户误以为游戏还在运行。
-            GameLogBox.Text = _lastKnownLogSnapshot.TrimEnd('\r', '\n') + Environment.NewLine +
+            SetLogViewSource(GameLogBox, _lastKnownLogSnapshot.TrimEnd('\r', '\n') + Environment.NewLine +
                 Environment.NewLine +
-                $"==== [{_lastKnownLogVersionId}] 进程已退出，以上为退出前的最后日志（点击上方\"清空本视图内的日志\"可清空此视图） ====";
-            GameLogBox.ScrollToEnd();
+                $"==== [{_lastKnownLogVersionId}] 进程已退出，以上为退出前的最后日志（点击上方\"清空本视图内的日志\"可清空此视图） ====", initial: true);
         }
         else
         {
-            GameLogBox.Text = Loc.T("Str_Cs_No_Game_Process_Is_Running_Once_You_Laun", "当前没有正在运行的游戏进程。启动游戏后这里会实时显示游戏的控制台输出。");
+            SetLogViewSource(GameLogBox, Loc.T("Str_Cs_No_Game_Process_Is_Running_Once_You_Laun", "当前没有正在运行的游戏进程。启动游戏后这里会实时显示游戏的控制台输出。"));
         }
     }
 
-    private void OnGameLogLineReceived(string line)
+    private void OnGameLogLineReceived(GameProcessInfo source, int generation, string line)
     {
-        Dispatcher.Invoke(() =>
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        lock (_pendingGameLogLock)
         {
-            // 双重确认：事件可能是异步线程触发的，真正写入 UI 前确认订阅关系没有在这期间被切换掉。
-            if (!ReferenceEquals(ProcessCombo.SelectedItem, _subscribedProcess)) return;
-            GameLogBox.AppendText(line + Environment.NewLine);
-            GameLogBox.ScrollToEnd();
-            // 快照跟着实时输出同步更新，保证进程真退出的那一刻快照是完整的（含最后一行）。
-            if (_subscribedProcess != null)
-                lock (_subscribedProcess.OutputBuffer) _lastKnownLogSnapshot = _subscribedProcess.OutputBuffer.ToString();
-        });
+            if (generation != Volatile.Read(ref _gameLogSubscriptionGeneration)) return;
+            if (!ReferenceEquals(source, _pendingGameLogSource) || generation != _pendingGameLogGeneration)
+            { _pendingGameLog.Clear(); _pendingGameLogSource = source; _pendingGameLogGeneration = generation; }
+            _pendingGameLog.AppendLine(line);
+            if (_pendingGameLog.Length > 500_000)
+            {
+                _pendingGameLog.Remove(0, _pendingGameLog.Length - 400_000);
+                _pendingGameLog.Insert(0, "[实时输出较多，排队视图已省略较早内容]" + Environment.NewLine);
+                if (_pendingGameLog.Capacity > 500_000) _pendingGameLog.Capacity = 500_000;
+            }
+            if (_pendingGameLogDrain) return;
+            _pendingGameLogDrain = true;
+        }
+        // Only one queued UI operation exists even while a noisy game produces thousands of lines.
+        _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(DrainGameLogLines));
+    }
+
+    private void DrainGameLogLines()
+    {
+        string text; GameProcessInfo? source; int generation;
+        lock (_pendingGameLogLock)
+        {
+            text = _pendingGameLog.ToString(); source = _pendingGameLogSource; generation = _pendingGameLogGeneration;
+            _pendingGameLog.Clear(); _pendingGameLogDrain = false;
+        }
+        if (!LogViewTextService.AcceptLiveOutput(source, _subscribedProcess, ProcessCombo.SelectedItem,
+            generation, _gameLogSubscriptionGeneration, IsLoaded)) return;
+        AppendLogViewText(GameLogBox, text);
     }
 
     /// <summary>"清空本视图内的日志"按钮：只清空这个 Tab 当前显示的文本和内部快照，
@@ -196,7 +299,8 @@ public partial class LogsPage : UserControl
     /// 只是清掉了"清空这一刻之前"的历史内容。</summary>
     private void ClearGameLogView_Click(object sender, RoutedEventArgs e)
     {
-        GameLogBox.Text = Loc.T("Str_Cs_No_Output_Yet", "(暂无输出)");
+        lock (_pendingGameLogLock) _pendingGameLog.Clear();
+        SetLogViewSource(GameLogBox, Loc.T("Str_Cs_No_Output_Yet", "(暂无输出)"));
         _lastKnownLogSnapshot = null;
         _lastKnownLogVersionId = null;
     }
@@ -246,8 +350,9 @@ public partial class LogsPage : UserControl
     /// GameLogBox 里可能因为性能考虑被截断显示的那部分。</summary>
     private void CopyCurrentGameLog_Click(object sender, RoutedEventArgs e)
     {
+        if (CopySelectedLog(GameLogBox, sender as FrameworkElement)) return;
         var (raw, _) = GetCurrentGameLogRawAndSource();
-        CopyLogTextToClipboard(raw);
+        CopyLogTextToClipboard(raw, sender as FrameworkElement);
     }
 
     private void AnalyzeLauncherLogWithAi_Click(object sender, RoutedEventArgs e)
@@ -296,12 +401,13 @@ public partial class LogsPage : UserControl
 
     private void CopyLauncherLog_Click(object sender, RoutedEventArgs e)
     {
+        if (CopySelectedLog(LauncherLogBox, sender as FrameworkElement)) return;
         if (!TryReadLauncherCrashLog(out var raw, out var error))
         {
             MessageBoxDialog.ShowError(error!, "复制日志");
             return;
         }
-        CopyLogTextToClipboard(raw);
+        CopyLogTextToClipboard(raw, sender as FrameworkElement);
     }
 
     private void AnalyzeCrashLogWithAi_Click(object sender, RoutedEventArgs e)
@@ -311,7 +417,7 @@ public partial class LogsPage : UserControl
             MessageBoxDialog.ShowWarning("请先在 AI 助手设置中开启“允许把日志/崩溃内容发给 AI 分析”，再提交崩溃报告。", "AI 日志分析");
             return;
         }
-        if (string.IsNullOrWhiteSpace(CrashRawBox.Text))
+        if (string.IsNullOrWhiteSpace(RawLogView(CrashRawBox)))
         {
             MessageBoxDialog.ShowInfo("请先选择一个崩溃报告。", "AI 日志分析");
             return;
@@ -319,7 +425,7 @@ public partial class LogsPage : UserControl
 
         SubmitLogToAi(
             "Minecraft 崩溃报告",
-            CrashRawBox.Text,
+            RawLogView(CrashRawBox),
             "请深入分析下面的 Minecraft 崩溃报告。优先定位第一责任方（具体 Mod、前置依赖、Mixin、Loader、Java 版本、显卡驱动或资源问题），区分根因与后续连锁异常，并给出可执行的修复顺序。",
             isCrashLogContext: true);
     }
@@ -329,7 +435,7 @@ public partial class LogsPage : UserControl
     /// 不受这个限制。</summary>
     private void CopyCrashLog_Click(object sender, RoutedEventArgs e)
     {
-        CopyLogTextToClipboard(CrashRawBox.Text);
+        if (!CopySelectedLog(CrashRawBox, sender as FrameworkElement)) CopyLogTextToClipboard(RawLogView(CrashRawBox), sender as FrameworkElement);
     }
 
     private void AnalyzeInjectionLogWithAi_Click(object sender, RoutedEventArgs e)
@@ -356,7 +462,7 @@ public partial class LogsPage : UserControl
             MessageBoxDialog.ShowInfo("请先选择游戏进程并执行一次“扫描”。", "复制日志");
             return;
         }
-        CopyLogTextToClipboard(_lastInjectionScanSnapshot);
+        CopyLogTextToClipboard(_lastInjectionScanSnapshot, sender as FrameworkElement);
     }
 
     private async void AnalyzeFullLauncherLogWithAi_Click(object sender, RoutedEventArgs e)
@@ -381,10 +487,11 @@ public partial class LogsPage : UserControl
     /// 的截断处理——复制给用户自己看应该给全文，截断只是为了不把过长内容灌爆 AI 的上下文）。</summary>
     private async void CopyFullLauncherLog_Click(object sender, RoutedEventArgs e)
     {
+        if (CopySelectedLog(FullLauncherLogBox, sender as FrameworkElement)) return;
         try
         {
             var raw = await Task.Run(BuildAllLauncherLogsText);
-            CopyLogTextToClipboard(raw);
+            CopyLogTextToClipboard(raw, sender as FrameworkElement);
         }
         catch (Exception ex)
         {
@@ -397,7 +504,7 @@ public partial class LogsPage : UserControl
     /// 里原来的内容，属于有害的"静默副作用"，必须先挡住）。剪贴板偶发被其它程序占用会抛
     /// 异常，跟项目里其它 Clipboard.SetText 调用处理方式一致：捕获后用 Toast 提示失败，
     /// 不弹阻断式对话框打断用户。</summary>
-    private static void CopyLogTextToClipboard(string? text)
+    private static void CopyLogTextToClipboard(string? text, FrameworkElement? feedbackSource = null)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -407,8 +514,10 @@ public partial class LogsPage : UserControl
 
         try
         {
-            Clipboard.SetText(text);
-            ToastService.ShowSuccess("日志已复制到剪贴板。");
+            Clipboard.SetText(DiagnosticRedactionService.Sanitize(text));
+            if (ConfigService.Active?.Config.Ux50InputLocalCopyFeedback == true && feedbackSource?.IsVisible == true)
+                InputExperienceService.ShowCopied(feedbackSource);
+            else ToastService.ShowSuccess("已复制脱敏后的日志。");
         }
         catch
         {
@@ -449,10 +558,7 @@ public partial class LogsPage : UserControl
     /// 错误通常集中在日志末尾，因此超长时保留少量开头（环境/版本）+ 大部分末尾（异常堆栈）。</summary>
     private static string PrepareLogForAi(string rawText, out bool truncated)
     {
-        var text = rawText.Replace("\0", "");
-        text = Regex.Replace(text, @"(?i)(--(?:accessToken|clientToken|refreshToken)\s+)(\S+)", "$1<REDACTED>");
-        text = Regex.Replace(text, @"(?i)(Authorization\s*:\s*Bearer\s+)(\S+)", "$1<REDACTED>");
-        text = Regex.Replace(text, @"(?i)((?:accessToken|refreshToken|clientToken|apiKey|api_key)\s*[:=]\s*)(""[^""]*""|\S+)", "$1<REDACTED>");
+        var text = DiagnosticRedactionService.Sanitize(rawText);
 
         const int maxChars = 32000;
         const int headChars = 6000;
@@ -473,7 +579,7 @@ public partial class LogsPage : UserControl
 
     // --- 完整启动器日志 Tab ---
     // 显示的是"当前会话"的内存日志（LauncherLogService.Buffer），不是磁盘上的历史 .log/crash.log 文件，
-    // 所以每次刷新都是纯内存读取，没有磁盘 IO，可以放心每秒自动刷新一次。
+    // 实时内存有上限，裁剪时显示提示；完整前缀由日志服务落入会话文件。
     private void RefreshFullLauncherLog_Click(object sender, RoutedEventArgs e) => LoadFullLauncherLog();
 
     /// <summary>需求："加入一个按钮，可以独立出一个启动器日志，不依附于咱们的进程"。
@@ -497,19 +603,12 @@ public partial class LogsPage : UserControl
 
     private void LoadFullLauncherLog()
     {
-        var text = LauncherLogService.GetBufferedText();
+        if (!LauncherLogService.TryGetBufferedText(ref _fullLauncherLogRevision, out var text)) return;
         var newText = string.IsNullOrWhiteSpace(text)
             ? Loc.T("Str_Cs_No_Session_Log_Yet", "(当前会话暂无内存日志)")
             : text;
 
-        // 内容没变化就不重新赋值，避免每秒都重置一次滚动条位置，打断用户正在往上翻看历史的操作。
-        if (newText == FullLauncherLogBox.Text) return;
-
-        // 用户手动往上滚动查看历史时，不要把它拽回底部；只有本来就停在底部（或刚打开还没滚动过）才继续跟随最新内容。
-        var wasAtBottom = FullLauncherLogBox.VerticalOffset >= FullLauncherLogBox.ExtentHeight - FullLauncherLogBox.ViewportHeight - 1;
-
-        FullLauncherLogBox.Text = newText;
-        if (wasAtBottom) FullLauncherLogBox.ScrollToEnd();
+        SetLogViewSource(FullLauncherLogBox, newText);
     }
 
     /// <summary>由定时器每 2 秒调用一次：只有文件的最后修改时间变化了才重新读取，避免无意义的磁盘 IO。</summary>
@@ -522,7 +621,7 @@ public partial class LogsPage : UserControl
             var crashLog = Path.Combine(App.DataDir, "logs", "crash.log");
             if (!File.Exists(crashLog))
             {
-                if (force) LauncherLogBox.Text = Loc.T("Str_Cs_No_Launcher_Log_Yet_Which_Means_The_Laun", "(暂无启动器日志，说明启动器运行正常，没有记录到异常。)");
+                if (force) SetLogViewSource(LauncherLogBox, Loc.T("Str_Cs_No_Launcher_Log_Yet_Which_Means_The_Laun", "(暂无启动器日志，说明启动器运行正常，没有记录到异常。)"));
                 return;
             }
 
@@ -530,12 +629,11 @@ public partial class LogsPage : UserControl
             if (!force && lastWrite == _launcherLogLastWrite) return; // 文件没变化，跳过这次刷新
 
             _launcherLogLastWrite = lastWrite;
-            LauncherLogBox.Text = File.ReadAllText(crashLog);
-            LauncherLogBox.ScrollToEnd();
+            SetLogViewSource(LauncherLogBox, File.ReadAllText(crashLog));
         }
         catch (Exception ex)
         {
-            if (force) LauncherLogBox.Text = Loc.T("Str_Cs_Couldn_T_Read_The_Launcher_Log", "读取启动器日志失败: ") + ex.Message;
+            if (force) SetLogViewSource(LauncherLogBox, Loc.T("Str_Cs_Couldn_T_Read_The_Launcher_Log", "读取启动器日志失败: ") + ex.Message);
         }
     }
 
@@ -574,7 +672,7 @@ public partial class LogsPage : UserControl
 
         foreach (var file in files)
         {
-            sb.AppendLine($"===== {file.Name}  修改时间: {file.LastWriteTime:yyyy-MM-dd HH:mm:ss}  大小: {file.Length} 字节 =====");
+            sb.AppendLine($"===== {file.Name}  修改时间: {file.LastWriteTime:yyyy-MM-dd HH:mm:ss}  大小: {PresentationPreferencesService.FormatNumberWithUnit(file.Length, "字节", "N0")} =====");
             try
             {
                 using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
@@ -640,7 +738,7 @@ public partial class LogsPage : UserControl
         if (_crashFiles.Count == 0)
         {
             CrashFindingsText.Text = Loc.T("Str_Cs_No_Crash_Reports_Found_So_No_Game_Crashe", "没有发现崩溃报告文件，说明目前没有检测到游戏崩溃记录。");
-            CrashRawBox.Text = "";
+            SetLogViewSource(CrashRawBox, "");
         }
         else
         {
@@ -671,7 +769,8 @@ public partial class LogsPage : UserControl
             }))
             : string.Join("\n\n", result.Findings.Select((f, i) => $"{i + 1}. {f}"));
 
-        CrashRawBox.Text = result.RawText;
+        SetLogViewSource(CrashRawBox, result.RawText, initial: true);
+        CrashFileCombo.ToolTip = PresentationPreferencesService.FormatFullDateTime(new DateTimeOffset(_crashFiles[idx].modifiedAt));
     }
 
     /// <summary>从崩溃文件路径反推它属于哪个游戏实例（versions/&lt;名字&gt;/... → 名字）。

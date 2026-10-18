@@ -5,16 +5,28 @@
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+            <Grid Grid.Row="0" Margin="0,0,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <TextBlock Text="{DynamicResource Str_Nav_Logs}" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                <CheckBox x:Name="ShowLogCheck" Content="{DynamicResource Str_Ui_Show_The_Log_Panel_Hidden_By_Default_Tic}"
-                          Margin="20,0,0,0" VerticalAlignment="Center" Checked="ShowLogCheck_Changed" Unchecked="ShowLogCheck_Changed"/>
-            </StackPanel>
+                <CheckBox x:Name="ShowLogCheck" Grid.Column="1" Content="显示日志" ToolTip="{DynamicResource Str_Ui_Show_The_Log_Panel_Hidden_By_Default_Tic}"
+                          Margin="12,0" VerticalAlignment="Center" Checked="ShowLogCheck_Changed" Unchecked="ShowLogCheck_Changed"/>
+                <Button Grid.Column="2" Content="更多 ▾" Padding="10,5" Click="OpenButtonMenu_Click">
+                    <Button.ContextMenu><ContextMenu>
+                        <MenuItem Header="阅读字号与视图筛选…" Click="LogReading_Click"/>
+                        <MenuItem Header="日志离线帮助…" Click="LogHelp_Click"/>
+                        <Separator/>
+                        <MenuItem Header="预览并导出诊断包…" Click="ExportDiagnostics_Click"/>
+                        <MenuItem Header="本次会话任务结果…" Click="TaskResults_Click"/>
+                    </ContextMenu></Button.ContextMenu>
+                </Button>
+            </Grid>
 
-            <Grid Grid.Row="1" Visibility="{Binding Visibility, ElementName=LogTabs}">
+            <TextBlock x:Name="LogFilterNotice" Grid.Row="1" Visibility="Collapsed" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <Grid Grid.Row="2" Visibility="{Binding Visibility, ElementName=LogTabs}">
                 <TabControl x:Name="LogTabs" Visibility="Collapsed">
                     <TabItem Header="{DynamicResource Str_Ui_Game_Log}">
                         <Grid>
@@ -22,25 +34,17 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,8,0,8">
-                                <TextBlock Text="{DynamicResource Str_Ui_Choose_A_Running_Or_Recent_Game_Process}" VerticalAlignment="Center"/>
-                                <ComboBox x:Name="ProcessCombo" Width="220" Margin="8,0,8,0"
-                                          SelectionChanged="ProcessCombo_SelectionChanged"/>
-                                <Button Content="{DynamicResource Str_Common_Refresh}" Style="{StaticResource SideNavButton}" Padding="10,4" Click="RefreshGameLog_Click"/>
-                                <!-- 需求：游戏崩溃后日志不应该瞬间清空/消失，要保留到用户自己点这个按钮手动清空为止。
-                                 这个按钮只清空"当前这个视图里显示的文本"，不会动 GameProcessInfo.OutputBuffer
-                                 本身（那份缓冲区是进程管理/其它面板还要用的底层数据），也不会影响磁盘上的
-                                 latest.log —— 纯粹是这一个 TextBox 的可见内容归零，语义上等价于"清屏"。 -->
-                                <Button Content="{DynamicResource Str_Ui_Clear_This_View}" Style="{StaticResource SideNavButton}" Padding="10,4" Margin="8,0,0,0" Click="ClearGameLogView_Click"/>
-                                <Button Content="AI 分析当前游戏日志" Style="{StaticResource PrimaryButton}" Padding="10,4" Margin="8,0,0,0"
-                                        ToolTip="将当前游戏日志脱敏后提交给已配置的 AI 服务分析" Click="AnalyzeCurrentGameLogWithAi_Click"/>
-                                <!-- 需求：在每个"AI 分析 XXX 日志"按钮右边加一个"复制"按钮，用于复制该 Tab 对应的
-                                     全部日志内容。这里复制的是跟"AI 分析"用的同一份原始日志文本（未经过 AI 提交前
-                                     的截断/脱敏处理——脱敏只是为了不把凭据发给第三方 AI 接口，用户自己复制给自己
-                                     用不需要脱敏），不是当前 TextBox 里可能被截断显示的内容。 -->
-                                <Button Content="复制" Style="{StaticResource SideNavButton}" Padding="10,4" Margin="8,0,0,0"
-                                        ToolTip="复制当前游戏日志的完整内容" Click="CopyCurrentGameLog_Click"/>
-                            </WrapPanel>
+                            <Grid Grid.Row="0" Margin="0,8,0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <ComboBox x:Name="ProcessCombo" Grid.Column="0" MinWidth="120" Margin="0,0,8,0" SelectionChanged="ProcessCombo_SelectionChanged"/>
+                                <Button Grid.Column="1" Content="刷新" Style="{StaticResource SideNavButton}" Padding="10,5" Click="RefreshGameLog_Click"/>
+                                <Button Grid.Column="2" Content="复制" ToolTip="复制脱敏后的内容" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="CopyCurrentGameLog_Click"/>
+                                <Button Grid.Column="3" Content="更多 ▾" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="OpenButtonMenu_Click">
+                                    <Button.ContextMenu><ContextMenu>
+                                        <MenuItem Header="AI 分析当前日志" Click="AnalyzeCurrentGameLogWithAi_Click"/><MenuItem Header="清空本视图" Click="ClearGameLogView_Click"/>
+                                    </ContextMenu></Button.ContextMenu>
+                                </Button>
+                            </Grid>
                             <TextBox x:Name="GameLogBox" Grid.Row="1" IsReadOnly="True" TextWrapping="NoWrap"
                                      FontFamily="Consolas" FontSize="12" VerticalScrollBarVisibility="Auto"
                                      HorizontalScrollBarVisibility="Auto" Background="#1E1E1E" Foreground="#D4D4D4"/>
@@ -53,14 +57,17 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,8,0,8">
-                                <Button Content="{DynamicResource Str_Common_Refresh}" Style="{StaticResource SideNavButton}" Padding="10,4"
-                                        Click="RefreshLauncherLog_Click"/>
-                                <Button Content="AI 分析启动器日志" Style="{StaticResource PrimaryButton}" Padding="10,4" Margin="8,0,0,0"
-                                        ToolTip="将当前启动器异常日志脱敏后提交给已配置的 AI 服务分析" Click="AnalyzeLauncherLogWithAi_Click"/>
-                                <Button Content="复制" Style="{StaticResource SideNavButton}" Padding="10,4" Margin="8,0,0,0"
-                                        ToolTip="复制启动器异常日志的完整内容" Click="CopyLauncherLog_Click"/>
-                            </WrapPanel>
+                            <Grid Grid.Row="0" Margin="0,8,0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                
+                                <Button Grid.Column="1" Content="刷新" Style="{StaticResource SideNavButton}" Padding="10,5" Click="RefreshLauncherLog_Click"/>
+                                <Button Grid.Column="2" Content="复制" ToolTip="复制脱敏后的内容" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="CopyLauncherLog_Click"/>
+                                <Button Grid.Column="3" Content="更多 ▾" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="OpenButtonMenu_Click">
+                                    <Button.ContextMenu><ContextMenu>
+                                        <MenuItem Header="AI 分析日志" Click="AnalyzeLauncherLogWithAi_Click"/>
+                                    </ContextMenu></Button.ContextMenu>
+                                </Button>
+                            </Grid>
                             <TextBox x:Name="LauncherLogBox" Grid.Row="1" IsReadOnly="True" TextWrapping="NoWrap"
                                      FontFamily="Consolas" FontSize="12" VerticalScrollBarVisibility="Auto"
                                      HorizontalScrollBarVisibility="Auto" Background="#1E1E1E" Foreground="#D4D4D4"/>
@@ -74,16 +81,17 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,8,0,8">
-                            <TextBlock Text="{DynamicResource Str_Ui_Crash_File}" VerticalAlignment="Center"/>
-                            <ComboBox x:Name="CrashFileCombo" Width="300" Margin="8,0,8,0"
-                                      SelectionChanged="CrashFileCombo_SelectionChanged"/>
-                            <Button Content="{DynamicResource Str_Ui_Rescan}" Style="{StaticResource SideNavButton}" Padding="10,4" Click="RescanCrash_Click"/>
-                            <Button Content="AI 分析崩溃报告" Style="{StaticResource PrimaryButton}" Padding="10,4" Margin="8,0,0,0"
-                                    ToolTip="需要先在 AI 助手设置中允许读取崩溃报告" Click="AnalyzeCrashLogWithAi_Click"/>
-                            <Button Content="复制" Style="{StaticResource SideNavButton}" Padding="10,4" Margin="8,0,0,0"
-                                    ToolTip="复制当前崩溃报告的完整内容" Click="CopyCrashLog_Click"/>
-                        </WrapPanel>
+                        <Grid Grid.Row="0" Margin="0,8,0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <ComboBox x:Name="CrashFileCombo" Grid.Column="0" MinWidth="120" Margin="0,0,8,0" SelectionChanged="CrashFileCombo_SelectionChanged"/>
+                                <Button Grid.Column="1" Content="刷新" Style="{StaticResource SideNavButton}" Padding="10,5" Click="RescanCrash_Click"/>
+                                <Button Grid.Column="2" Content="复制" ToolTip="复制脱敏后的内容" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="CopyCrashLog_Click"/>
+                                <Button Grid.Column="3" Content="更多 ▾" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="OpenButtonMenu_Click">
+                                    <Button.ContextMenu><ContextMenu>
+                                        <MenuItem Header="AI 分析崩溃报告" Click="AnalyzeCrashLogWithAi_Click"/>
+                                    </ContextMenu></Button.ContextMenu>
+                                </Button>
+                            </Grid>
                         <Border Grid.Row="1" Background="{DynamicResource WarningBannerBrush}" CornerRadius="6" Padding="10" Margin="0,0,0,8">
                             <TextBlock x:Name="CrashFindingsText" TextWrapping="Wrap" FontSize="13"
                                        Foreground="{DynamicResource TextPrimaryBrush}"
@@ -101,18 +109,17 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,8,0,8">
-                            <TextBlock Text="{DynamicResource Str_Ui_Select_A_Running_Game_Process}" VerticalAlignment="Center"/>
-                            <ComboBox x:Name="ScanProcessCombo" Width="220" Margin="8,0,8,0"/>
-                            <Button Content="{DynamicResource Str_Ui_Scan_Now}" Style="{StaticResource PrimaryButton}" Padding="12,4" Click="ScanNow_Click"/>
-                            <Button Content="AI 分析注入日志" Style="{StaticResource PrimaryButton}" Padding="10,4" Margin="8,0,0,0"
-                                    ToolTip="先执行注入检测，再将扫描结果提交给 AI 分析" Click="AnalyzeInjectionLogWithAi_Click"/>
-                            <!-- 这个 Tab 没有像其它几个一样的日志 TextBox（扫描结果是下面的 ListView），
-                                 复制的是跟"AI 分析注入日志"提交同一份内容——BuildInjectionScanSnapshot
-                                 生成的文本化扫描快照，而不是勾选/截取 ListView 里的某几行。 -->
-                            <Button Content="复制" Style="{StaticResource SideNavButton}" Padding="10,4" Margin="8,0,0,0"
-                                    ToolTip="复制当前注入扫描结果的完整内容" Click="CopyInjectionLog_Click"/>
-                        </WrapPanel>
+                        <Grid Grid.Row="0" Margin="0,8,0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <ComboBox x:Name="ScanProcessCombo" Grid.Column="0" MinWidth="120" Margin="0,0,8,0" />
+                                <Button Grid.Column="1" Content="扫描" Style="{StaticResource SideNavButton}" Padding="10,5" Click="ScanNow_Click"/>
+                                <Button Grid.Column="2" Content="复制" ToolTip="复制脱敏后的内容" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="CopyInjectionLog_Click"/>
+                                <Button Grid.Column="3" Content="更多 ▾" Style="{StaticResource SideNavButton}" Padding="10,5" Margin="8,0,0,0" Click="OpenButtonMenu_Click">
+                                    <Button.ContextMenu><ContextMenu>
+                                        <MenuItem Header="AI 分析扫描结果" Click="AnalyzeInjectionLogWithAi_Click"/>
+                                    </ContextMenu></Button.ContextMenu>
+                                </Button>
+                            </Grid>
                         <!-- 修复"注入检测结果列表不管深色/浅色主题永远是白底黑字"：ListView 在这个项目里
                              没有任何全局隐式样式（跟 Button/CheckBox/ComboBox 不一样，App.xaml 里没有
                              针对 ListView/GridView 的模板），所以走的是 WPF 默认的系统 Aero 白色列表样式，
@@ -165,20 +172,17 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,8,0,8">
-                            <Button Content="{DynamicResource Str_Common_Refresh}" Style="{StaticResource SideNavButton}" Padding="10,4"
-                                    Click="RefreshFullLauncherLog_Click"/>
-                            <!-- 需求："在选择完整启动器日志的页面，加入一个按钮，可以独立出一个启动器日志，
-                                 不依附于咱们的进程。这样的话，就可以在进行启动器操作的时候查看日志"。
-                                 见 LauncherLogWindowService 类头注释：这里弹出的是一个真正独立的 cmd 进程，
-                                 不是同进程内的第二个 WPF 窗口，主窗口卡死/被关闭都不会影响它。 -->
-                            <Button Content="{DynamicResource Str_Ui_Open_In_Independent_Window}" Style="{StaticResource SideNavButton}" Padding="10,4"
-                                    Margin="10,0,0,0" Click="OpenLauncherLogInIndependentWindow_Click"/>
-                            <Button Content="AI 分析完整日志" Style="{StaticResource PrimaryButton}" Padding="10,4" Margin="10,0,0,0"
-                                    ToolTip="汇总当前会话与磁盘日志，脱敏并提交给 AI 分析" Click="AnalyzeFullLauncherLogWithAi_Click"/>
-                            <Button Content="复制" Style="{StaticResource SideNavButton}" Padding="10,4" Margin="10,0,0,0"
-                                    ToolTip="复制完整启动器日志的完整内容" Click="CopyFullLauncherLog_Click"/>
-                        </StackPanel>
+                        <Grid Grid.Row="0" Margin="0,8,0,8">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Button Grid.Column="1" Content="刷新" Padding="10,5" Click="RefreshFullLauncherLog_Click"/>
+                            <Button Grid.Column="2" Content="复制" ToolTip="复制脱敏后的内容" Padding="10,5" Margin="8,0,0,0" Click="CopyFullLauncherLog_Click"/>
+                            <Button Grid.Column="3" Content="更多 ▾" Padding="10,5" Margin="8,0,0,0" Click="OpenButtonMenu_Click">
+                                <Button.ContextMenu><ContextMenu>
+                                    <MenuItem Header="AI 分析完整日志" Click="AnalyzeFullLauncherLogWithAi_Click"/>
+                                    <MenuItem Header="在独立窗口查看" Click="OpenLauncherLogInIndependentWindow_Click"/>
+                                </ContextMenu></Button.ContextMenu>
+                            </Button>
+                        </Grid>
                         <TextBox x:Name="FullLauncherLogBox" Grid.Row="1" IsReadOnly="True" TextWrapping="NoWrap"
                                  FontFamily="Consolas" FontSize="12" VerticalScrollBarVisibility="Auto"
                                  HorizontalScrollBarVisibility="Auto" Background="#1E1E1E" Foreground="#D4D4D4"/>
@@ -187,7 +191,7 @@
                 </TabControl>
             </Grid>
 
-            <TextBlock x:Name="HiddenHint" Grid.Row="1" Text="{DynamicResource Str_Ui_The_Log_Panel_Is_Hidden_Tick_The_Box_Abo}"
+            <TextBlock x:Name="HiddenHint" Grid.Row="2" Text="{DynamicResource Str_Ui_The_Log_Panel_Is_Hidden_Tick_The_Box_Abo}"
                        Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,20,0,0"/>
         </Grid>
     </Border>

@@ -28,12 +28,13 @@ public partial class CrashReportDialog : OverlayDialogControl
         InitializeComponent();
         _owner = owner;
         _processInfo = processInfo;
-        RequestClose += (_, _) =>
+        OverlayClosed += (_, _) =>
         {
             _closed = true;
             _aiLogReadCts?.Cancel();
         };
-        MessageText.Text = message;
+        MessageText.Text = DiagnosticRedactionService.Sanitize(message, 4000);
+        ErrorCodeText.Text = "错误编号：" + FriendlyErrorDialog.GetCode(message);
         if (!string.IsNullOrWhiteSpace(title)) TitleText.Text = title;
         if (!suppressAutomaticAnalysis && processInfo != null)
         {
@@ -114,6 +115,7 @@ public partial class CrashReportDialog : OverlayDialogControl
         var message = $"游戏没能启动：Java 虚拟机（JVM）的启动参数有问题（退出码 {exitCode}）。\n\n" +
                       "这类错误发生在游戏代码运行之前，所以不会有崩溃报告，也不需要提交崩溃报告。按下面的结论修改后重新启动即可。";
         var dlg = new CrashReportDialog(owner, message, processInfo, suppressAutomaticAnalysis: true, title: "JVM 参数错误");
+        dlg.ErrorCodeText.Text = "错误编号：XCL-JVM-ARGS";
         dlg.ShowJvmIssues(issues);
         OverlayDialogService.ShowNonModal(dlg);
     }
@@ -134,6 +136,7 @@ public partial class CrashReportDialog : OverlayDialogControl
         var dlg = new CrashReportDialog(owner, "可能是用户手动关闭了游戏", processInfo,
             suppressAutomaticAnalysis: true, title: "游戏已退出");
         dlg.AnalyzeCrashWithAiButton.Visibility = Visibility.Collapsed;
+        dlg.ErrorCodeText.Text = "记录：XCL-GAME-CLOSED";
         OverlayDialogService.ShowNonModal(dlg);
     }
 
@@ -176,56 +179,88 @@ public partial class CrashReportDialog : OverlayDialogControl
         }
     }
 
-    /// <summary>"在记事本中查看日志"：跟"查看完整日志"（其实是跳转到启动器内部的日志页）
-    /// 分开——那个按钮名字容易让人以为点了会拉起系统记事本，其实只是启动器自己的一个页面，
-    /// 存在误导。这里把 CrashLogExportService 组装的同一份合并日志（启动器日志+游戏崩溃前
-    /// 输出+游戏日志文件）写到临时文件，再真正用系统记事本（notepad.exe）打开它，做到
-    /// 名副其实：点了就是打开记事本，可以直接搜索/复制/另存/发给别人。
-    ///
-    /// 用临时文件而不是直接找一个已有的日志文件打开，是因为"合并日志"本身就是三段内容
-    /// 拼接出来的新文本，磁盘上并不存在这样一份现成文件——跟"导出完整日志"用的是同一个
-    /// BuildCombinedLog，只是这里不用用户手选保存位置，直接扔进临时目录即开即用。
-    /// 临时文件不做清理：内容量小、不敏感到需要即用即删的程度，且 Windows 会按自己的策略
-    /// 定期清理 %TEMP%，不需要这里额外操心生命周期。</summary>
-    private void OpenInNotepad_Click(object sender, RoutedEventArgs e)
+    /// <summary>Log tools remain contextual and open only on an explicit click.</summary>
+    private void OpenTools_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            var tempPath = Path.Combine(Path.GetTempPath(), $"XCL2_崩溃日志_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
-            File.WriteAllText(tempPath, CrashLogExportService.BuildCombinedLog(_processInfo));
-
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("notepad.exe", $"\"{tempPath}\"")
-            {
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex)
-        {
-            // 极少数情况下（比如系统记事本被彻底删除/替换、临时目录写不进去）打不开，
-            // 退化成友好错误提示，不影响弹窗其它按钮继续可用。
-            MessageBoxDialog.ShowError($"用记事本打开日志失败：{ex.Message}");
-        }
+        if (sender is System.Windows.Controls.Button { ContextMenu: { } menu } button)
+        { menu.PlacementTarget = button; menu.IsOpen = true; }
     }
 
-    private void ExportLog_Click(object sender, RoutedEventArgs e)
+    private void CopyExplanation_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new SaveFileDialog
-        {
-            Title = "导出完整日志",
-            Filter = "文本文件|*.txt|所有文件|*.*",
-            FileName = $"XCL2_崩溃日志_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
-        };
-        if (dialog.ShowDialog() != true) return;
-
         try
         {
-            CrashLogExportService.ExportTo(dialog.FileName, _processInfo);
-            MessageBoxDialog.ShowSuccess($"完整日志已导出到：\n{dialog.FileName}");
+            Clipboard.SetText(DiagnosticRedactionService.Sanitize(
+                ErrorCodeText.Text + "\n" + TitleText.Text + "\n" + MessageText.Text + "\n\n" + AnalysisText.Text, 12000));
+            ToastService.ShowSuccess("已复制脱敏后的错误说明。");
         }
-        catch (Exception ex)
+        catch { ToastService.ShowWarning("剪贴板暂时不可用，请重试。"); }
+    }
+
+    private IReadOnlyList<DiagnosticExportSource> CaptureDiagnosticSources()
+    {
+        var list = new List<DiagnosticExportSource>
         {
-            MessageBoxDialog.ShowError($"导出失败：{ex.Message}");
+            new("错误说明", ErrorCodeText.Text + "\n" + MessageText.Text + "\n" + AnalysisText.Text),
+            new("启动器会话日志（末尾）", LauncherLogService.GetBufferedTail())
+        };
+        if (_processInfo != null)
+        {
+            lock (_processInfo.OutputBuffer)
+            {
+                var count = Math.Min(_processInfo.OutputBuffer.Length, DiagnosticRedactionService.MaxEntryChars);
+                var text = _processInfo.OutputBuffer.ToString(_processInfo.OutputBuffer.Length - count, count);
+                if (_processInfo.OutputBuffer.Length > count) text = DiagnosticRedactionService.TrimPartialFirstLine(text);
+                list.Add(new("本次游戏输出（末尾）", text));
+            }
         }
+        return list;
+    }
+
+    private async Task<IReadOnlyList<DiagnosticExportSource>> ReadSourcesAsync(IReadOnlyList<DiagnosticExportSource> captured)
+    {
+        var process = _processInfo;
+        return await Task.Run(() =>
+        {
+            var sources = captured.ToList();
+            if (process != null)
+            {
+                foreach (var path in CrashAiLogService.GetCurrentIncidentFiles(process, _incidentObservedAt))
+                {
+                    try { sources.Add(new("本次日志 · " + Path.GetFileName(path), DiagnosticRedactionService.ReadTextTail(path))); }
+                    catch { sources.Add(new("本次游戏日志", "该日志暂时无法读取。")); }
+                }
+            }
+            return (IReadOnlyList<DiagnosticExportSource>)sources;
+        });
+    }
+
+    private async void OpenInNotepad_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var sources = await ReadSourcesAsync(CaptureDiagnosticSources());
+            if (_closed) return;
+            var text = string.Join("\n\n====================\n\n", DiagnosticsExportService.Prepare(sources)
+                .Select(x => x.Title + "\n\n" + x.SanitizedText));
+            var tempPath = Path.Combine(Path.GetTempPath(), $"XCL2-diagnostic-{Guid.NewGuid():N}.txt");
+            await File.WriteAllTextAsync(tempPath, text);
+            if (_closed) return;
+            var start = new System.Diagnostics.ProcessStartInfo("notepad.exe") { UseShellExecute = false };
+            start.ArgumentList.Add(tempPath);
+            System.Diagnostics.Process.Start(start);
+        }
+        catch (Exception ex) { ToastService.ShowWarning("打开失败：" + DiagnosticRedactionService.Sanitize(ex.Message, 1000)); }
+    }
+
+    private async void ExportLog_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var sources = await ReadSourcesAsync(CaptureDiagnosticSources());
+            if (!_closed) DiagnosticsExportDialog.Show(sources);
+        }
+        catch (Exception ex) { ToastService.ShowWarning("准备诊断失败：" + DiagnosticRedactionService.Sanitize(ex.Message, 1000)); }
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

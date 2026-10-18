@@ -6,7 +6,7 @@
               xmlns:views="clr-namespace:XCL2.App.Views"
               xmlns:services="clr-namespace:XCL2.App.Services"
               mc:Ignorable="d"
-              d:DesignWidth="760" d:DesignHeight="650"
+              d:DesignWidth="1040" d:DesignHeight="650"
               Loaded="UserControl_Loaded" Unloaded="UserControl_Unloaded">
     <UserControl.Resources>
         <Style x:Key="ActivityTextStyle" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
@@ -88,6 +88,8 @@
                 <ColumnDefinition Width="178"/>
                 <ColumnDefinition Width="1"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="1"/>
+                <ColumnDefinition Width="228"/>
             </Grid.ColumnDefinitions>
 
             <!-- ChatGPT 风格的左侧会话历史。 -->
@@ -196,6 +198,24 @@
                                 </Border>
                             </Grid>
                         </Grid>
+                        <Border x:Name="TaskSelectionBar" Margin="0,8,0,0" Padding="8,6" CornerRadius="6"
+                                Background="{DynamicResource SideBrush}">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="64"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="当前任务" FontSize="11" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="TaskSelectionCombo" Grid.Column="1" Height="30" FontSize="11"
+                                          DisplayMemberPath="Label" SelectedValuePath="Id"
+                                          DropDownOpened="TaskSelectionCombo_DropDownOpened"
+                                          SelectionChanged="TaskSelectionCombo_SelectionChanged"
+                                          ToolTip="这里只显示未完成的任务；已完成任务可从右侧入口查看或删除。运行中的任务会打开原会话。"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                    <Button Content="已完成" Padding="8,3" Margin="6,0,0,0"
+                                            FontSize="10" Click="CompletedTasksButton_Click"/>
+                                    <Button Content="刷新" Padding="8,3" Margin="6,0,0,0"
+                                            FontSize="10" Click="RefreshTasksButton_Click"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
                         <TextBlock x:Name="RoutingHintText" Margin="0,7,0,0" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
                                    Text="自动模式会按问题类型使用设置里的普通/专家默认模型。"/>
@@ -217,6 +237,17 @@
                                             <views:AiGenerationIndicator Width="32" Height="8" Margin="0,0,9,0"/>
                                             <TextBlock Text="正在生成…" FontSize="11" Foreground="{DynamicResource AccentBrush}"/>
                                         </StackPanel>
+                                        <ItemsControl ItemsSource="{Binding Attachments}" Margin="0,0,0,4">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Padding="8,5" Margin="0,0,0,4" CornerRadius="6"
+                                                            Background="{DynamicResource SideBrush}">
+                                                        <TextBlock Text="{Binding Name}" FontSize="10" TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding Name}"/>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                         <Expander Header="思考过程" IsExpanded="False" Visibility="{Binding ReasoningVisibility}" Margin="0,0,0,8">
                                             <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto">
                                                 <StackPanel><TextBlock Text="{Binding ThinkingStatusText}" TextWrapping="Wrap" FontSize="11"/>
@@ -380,10 +411,12 @@
                             <WrapPanel VerticalAlignment="Center">
                                 <TextBlock Text="工作模式" FontSize="10" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="WorkModeCombo" FontSize="10" MinWidth="112" Height="28" Margin="0,0,10,0"
-                                          ToolTip="Plan 只读调查并制定计划；Build 按已有权限执行任务。切换仅影响下一次发送，不会自动执行计划。"
+                                          ToolTip="纯聊天仅用于对话；Plan 只读调查并制定计划；Build 按已有权限执行；Agent 复杂任务建议保存计划，简单需求可直接处理。"
                                           SelectionChanged="WorkModeCombo_SelectionChanged">
                                     <ComboBoxItem Content="Build · 执行" Tag="Build"/>
                                     <ComboBoxItem Content="Plan · 规划" Tag="Plan"/>
+                                    <ComboBoxItem Content="Agent · 智能执行" Tag="Agent"/>
+                                    <ComboBoxItem Content="纯聊天模式" Tag="Chat"/>
                                 </ComboBox>
                                 <TextBlock Text="推理" FontSize="10" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                 <ComboBox x:Name="ReasoningLevelCombo" FontSize="10" MinWidth="124" Height="28" Margin="0,0,6,0"
@@ -399,6 +432,8 @@
                                 </ComboBox>
                                 <ToggleButton x:Name="WebSearchCheck" Content="联网搜索" FontSize="10" Padding="9,4"
                                               Style="{StaticResource GuestModeToggleStyle}" Click="QuickOption_Click"/>
+                                <Button x:Name="UploadAttachmentButton" Content="上传文件" FontSize="10" Padding="9,4" Margin="6,0,0,0"
+                                        Click="UploadAttachment_Click" ToolTip="支持图片和文件；图片分析需要当前模型支持视觉。ZIP 会安全解压到临时只读目录，上传不会授予命令权限。"/>
                             </WrapPanel>
 
                         </Grid>
@@ -406,7 +441,10 @@
                             <StackPanel>
                                 <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="TaskSummaryText" TextWrapping="Wrap" FontSize="11" Margin="6"/></ScrollViewer>
                                 <WrapPanel>
+                                    <Button x:Name="TaskTrackingButton" Content="设为非任务" Click="TaskTrackingButton_Click" Padding="10,5" Margin="0,4,8,0"
+                                            ToolTip="设为非任务后普通聊天不自动创建任务；已有任务记录和变更历史会保留。生成期间不能更改。"/>
                                     <Button x:Name="ResumeTaskButton" Content="跨会话续做" Click="ResumeTaskButton_Click" Padding="10,5" Margin="0,4,8,0"/>
+                                    <Button Content="已完成任务" Click="CompletedTasksButton_Click" Padding="10,5" Margin="0,4,8,0"/>
                                     <Button x:Name="ChangeHistoryButton" Content="变更历史 / 一键回滚" Click="ChangeHistoryButton_Click" Padding="10,5" Margin="0,4,0,0"/>
                                 </WrapPanel>
                             </StackPanel>
@@ -414,8 +452,29 @@
                         <TextBlock x:Name="WorkModeHintText" Margin="0,0,0,7" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
                                    Text="Build：按已有权限执行任务。已有计划可发送“按计划继续”开始执行。"/>
+                        <ItemsControl x:Name="PendingAttachmentsItemsControl" Margin="0,0,0,5">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="7"
+                                            Background="{DynamicResource SideBrush}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name}" FontSize="11" FontWeight="SemiBold"
+                                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}"/>
+                                                <TextBlock Text="{Binding Summary}" FontSize="9" TextWrapping="Wrap" Margin="0,2,0,0"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            </StackPanel>
+                                            <Button Grid.Column="1" Content="×" Width="24" Height="24" Padding="0" Margin="6,0,0,0"
+                                                    Click="RemoveAttachment_Click" CommandParameter="{Binding}" ToolTip="移除附件"
+                                                    Style="{DynamicResource IconButtonStyle}"/>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <TextBox x:Name="InputTextBox" Grid.Column="0" MinHeight="42" MaxHeight="120"
                                      TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
                                      Padding="11,9" PreviewKeyDown="InputTextBox_KeyDown" Text=""
@@ -429,6 +488,47 @@
                                     Click="SendButton_Click" Style="{DynamicResource IconButtonStyle}" ToolTip="发送 (Enter)">
                                 <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconSend}" Width="17" Height="17"/>
                             </Button>
+                            <Button x:Name="UsageIndicatorButton" Grid.Column="3" Width="34" Height="42" Margin="5,0,0,0" Padding="0"
+                                    Style="{DynamicResource IconButtonStyle}" Click="UsageIndicatorButton_Click"
+                                    MouseEnter="UsageIndicator_MouseEnter" MouseLeave="UsageIndicator_MouseLeave"
+                                    PreviewKeyDown="UsageIndicator_PreviewKeyDown"
+                                    AutomationProperties.Name="上下文占用及 Token 用量详情">
+                                <Viewbox Width="30" Height="30">
+                                    <Grid Width="40" Height="40">
+                                        <Ellipse Margin="3" Stroke="{DynamicResource BorderBrush2}" StrokeThickness="3"/>
+                                        <Path x:Name="UsageRemainingRing" Stroke="{DynamicResource AccentBrush}" StrokeThickness="3"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                        <TextBlock x:Name="UsageRingLabel" Text="—" FontSize="10" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Viewbox>
+                            </Button>
+                            <Popup x:Name="UsagePopup" PlacementTarget="{Binding ElementName=UsageIndicatorButton}"
+                                   Placement="Top" VerticalOffset="-6" AllowsTransparency="True" StaysOpen="True"
+                                   Closed="UsagePopup_Closed">
+                                <Border x:Name="UsagePopupContent" Width="340" Padding="13" CornerRadius="10"
+                                        Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
+                                        MouseEnter="UsagePopup_MouseEnter" MouseLeave="UsageIndicator_MouseLeave"
+                                        PreviewKeyDown="UsageIndicator_PreviewKeyDown">
+                                    <ScrollViewer MaxHeight="440" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel>
+                                        <TextBlock x:Name="TokenUsageText" Text="本对话 · 暂无用量" FontSize="12" FontWeight="SemiBold"/>
+                                        <TextBlock x:Name="UsageSummaryText" FontSize="10" Margin="0,4,0,6"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="ContextUsageText" FontSize="11" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="CacheUsageText" Text="当前缓存命中率：暂无数据" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="CostUsageText" Text="本对话估计成本：未配置单价" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="TotalUsageText" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="QuotaUsageText" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="UsageSourceText" Margin="0,7,0,0" FontSize="9" TextWrapping="Wrap"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        <Button Content="设置限额 / 单价" Click="UsageSettingsButton_Click"
+                                                HorizontalAlignment="Left" Padding="8,4" Margin="0,9,0,0" FontSize="10"/>
+                                        <TextBlock Text="点击圆圈固定详情；Esc 或点击外部关闭。" FontSize="9" Margin="0,7,0,0"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    </StackPanel>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
                         </Grid>
                         <Grid Margin="2,5,2,0">
                             <TextBlock Text="Enter 发送 · Shift+Enter 换行" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
@@ -437,38 +537,6 @@
                         </Grid>
                         <TextBlock x:Name="LongWaitHintText" Margin="2,7,2,0" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextSecondaryBrush}" Visibility="Collapsed"/>
-                        <Border Margin="0,9,0,0" CornerRadius="10" Padding="9,7"
-                                Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
-                            <Expander x:Name="UsageExpander" HorizontalContentAlignment="Stretch"
-                                      ToolTip="点击展开用量详情；圆环表示当前请求上下文的剩余比例。">
-                                <Expander.Header>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="44"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                        <Grid Width="40" Height="40" Margin="0,0,4,0">
-                                            <Ellipse Margin="3" Stroke="{DynamicResource BorderBrush2}" StrokeThickness="3"/>
-                                            <Path x:Name="UsageRemainingRing" Stroke="{DynamicResource AccentBrush}" StrokeThickness="3"
-                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-                                            <TextBlock x:Name="UsageRingLabel" Text="—" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                        </Grid>
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock x:Name="TokenUsageText" Text="本对话 · 暂无用量" FontSize="11" FontWeight="SemiBold"/>
-                                            <TextBlock x:Name="UsageSummaryText" Text="点击查看缓存命中率与估计成本" FontSize="9"
-                                                       Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
-                                        </StackPanel>
-                                    </Grid>
-                                </Expander.Header>
-                                <StackPanel Margin="4,10,4,2">
-                                    <TextBlock x:Name="CacheUsageText" Text="当前缓存命中率：暂无数据" FontSize="11" TextWrapping="Wrap"/>
-                                    <TextBlock x:Name="CostUsageText" Text="本对话估计成本：未配置单价" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"/>
-                                    <TextBlock x:Name="TotalUsageText" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"/>
-                                    <TextBlock x:Name="ContextUsageText" Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"/>
-                                    <TextBlock x:Name="UsageSourceText" Margin="0,7,0,0" FontSize="9" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                    <Button Content="设置上下文上限 / 单价 / 等待时间" Click="SettingsButton_Click"
-                                            HorizontalAlignment="Left" Padding="8,4" Margin="0,8,0,0" FontSize="10"/>
-                                </StackPanel>
-                            </Expander>
-                        </Border>
                         <TextBlock Margin="2,5,2,0" FontSize="9" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextSecondaryBrush}"
                                    Text="AI 可能会犯错，也都有知识截止日期。若它声称某个 MC / 模组版本‘不是正式版而是快照版’，请不要直接相信；版本状态请以官方发布页、Modrinth 或 CurseForge 为准。"/>
@@ -478,6 +546,63 @@
                                       Visibility="Collapsed"/>
                 </Grid>
             </Grid>
+            <Border Grid.Column="3" Background="{DynamicResource DividerBrush}"/>
+            <Border Grid.Column="4" Background="{DynamicResource PanelBrush}" Padding="12,13,12,12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0">
+                        <TextBlock Text="Plan" FontSize="14" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="PlanSummaryText" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}" Text="任务计划"/>
+                        <TextBlock Text="○ 正在进行   ✓ 已完成   – 未开始" FontSize="9" TextWrapping="Wrap" Margin="0,7,0,0"
+                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    </StackPanel>
+                    <Border Grid.Row="1" Height="1" Background="{DynamicResource DividerBrush}" Margin="0,11,0,9"/>
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <TextBlock x:Name="PlanEmptyText" FontSize="11" TextWrapping="Wrap" Margin="1,4,1,8"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       Text="复杂任务建议保存计划，步骤进度显示在这里；简单需求可直接处理。"/>
+                            <ItemsControl x:Name="PlanStepsItemsControl">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource SideBrush}" CornerRadius="9" Padding="9,9" Margin="0,0,0,7">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="23"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Symbol}" FontFamily="Segoe UI Symbol" FontSize="17"
+                                                           Foreground="{DynamicResource AccentBrush}" ToolTip="{Binding StatusLabel}"/>
+                                                <StackPanel Grid.Column="1">
+                                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" FontSize="11" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding StatusLabel}" FontSize="9" Margin="0,4,0,0"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                                    <TextBlock Text="{Binding Evidence}" FontSize="9" TextWrapping="Wrap" Margin="0,5,0,0"
+                                                               Foreground="{DynamicResource TextSecondaryBrush}"
+                                                               Visibility="{Binding EvidenceVisibility}"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                    <Border x:Name="PlanNextActionBorder" Grid.Row="3" Padding="9" Margin="0,9,0,0" CornerRadius="8"
+                            Background="{DynamicResource SideBrush}" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock Text="下一步" FontSize="10" FontWeight="SemiBold"/>
+                            <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <TextBlock x:Name="PlanNextActionText" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"
+                                           Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </Border>
         </Grid>
     </Grid>
 </UserControl>

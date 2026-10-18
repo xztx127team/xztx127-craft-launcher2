@@ -20,6 +20,7 @@
          MainWindow.xaml 里的 OverlayCard 统一提供，弹窗自己只关心内部布局。
          原来的 Width/Height 转成了 MinWidth/MaxWidth/MaxHeight：Overlay 是按内容
          自适应的，写死 Height 会把内容截断。 -->
+    <local:OverlayDialogControl.Resources><services:InstancePickerLabelConverter x:Key="InstanceFolderLabel"/></local:OverlayDialogControl.Resources>
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -90,7 +91,9 @@
                         <StackPanel>
                             <TextBlock Text="{DynamicResource Str_Ui_Choose_A_Folder_You_Have_Already_Added}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                             <ComboBox x:Name="SimpleFolderCombo" Style="{StaticResource FilterComboBox}" Height="34" Margin="0,0,0,10"
-                                      SelectionChanged="SimpleFolderCombo_SelectionChanged"/>
+                                      SelectionChanged="SimpleFolderCombo_SelectionChanged">
+                                <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Converter={StaticResource InstanceFolderLabel}}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/></DataTemplate></ComboBox.ItemTemplate>
+                            </ComboBox>
                             <TextBlock Text="{DynamicResource Str_Ui_Choose_A_Version_To_Launch}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                             <ComboBox x:Name="SimpleVersionCombo" Style="{StaticResource FilterComboBox}" Height="34" Margin="0,0,0,8"/>
                             <StackPanel x:Name="SimpleVersionsLoadingPanel" Orientation="Horizontal" Visibility="Collapsed" Margin="0,0,0,8">
@@ -130,7 +133,9 @@
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <ComboBox x:Name="ExistingFolderCombo" Grid.Column="0" Style="{StaticResource FilterComboBox}"
-                                          Height="34" SelectionChanged="ExistingFolderCombo_SelectionChanged"/>
+                                          Height="34" SelectionChanged="ExistingFolderCombo_SelectionChanged">
+                                    <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Converter={StaticResource InstanceFolderLabel}}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}"/></DataTemplate></ComboBox.ItemTemplate>
+                                </ComboBox>
                                 <Button Grid.Column="1" Content="{DynamicResource Str_Ui_Browse_Another_Location}" Margin="8,0,0,0" Padding="12,8" Click="BrowseExistingFolder_Click"/>
                             </Grid>
                             <TextBlock Text="{DynamicResource Str_Ui_Pick_A_Version_Already_Installed_In_This}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>

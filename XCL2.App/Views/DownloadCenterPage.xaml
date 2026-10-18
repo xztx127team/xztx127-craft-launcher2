@@ -134,6 +134,7 @@
              现在改为用一列宽度恰好 10 的空 Column 隔开两个面板，左右面板各自都不再带不对称 Margin，
              间距由 Grid 布局保证，不会再有像素级偏差。 -->
         <Border x:Name="ListRootLeft" Grid.Column="0" Background="{DynamicResource PanelBrush}" CornerRadius="14" Padding="12">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <TextBlock Text="{DynamicResource Str_Common_Download}" FontSize="18" FontWeight="Bold" Margin="8,4,0,16" Foreground="{DynamicResource AccentBrush}"/>
 
@@ -220,6 +221,7 @@
                     </StackPanel>
                 </RadioButton>
             </StackPanel>
+            </ScrollViewer>
         </Border>
 
         <!-- 右侧内容区 -->
@@ -276,7 +278,7 @@
                         </ComboBox>
                     </Grid>
 
-                    <ListBox x:Name="OnlineListBox" Grid.Row="2" BorderThickness="0" Background="Transparent"
+                    <ListBox x:Name="OnlineListBox" Tag="{Binding ElementName=VersionSearchBox}" Grid.Row="2" BorderThickness="0" Background="Transparent"
                              ItemContainerStyle="{StaticResource DownloadListItem}" SelectionChanged="OnlineListBox_SelectionChanged">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
@@ -294,7 +296,9 @@
                                         </ContextMenu>
                                     </Grid.ContextMenu>
                                     <StackPanel>
-                                        <TextBlock Text="{Binding Id}" FontSize="15"/>
+                                        <TextBlock services:SearchMatchText.Text="{Binding Id}" services:SearchMatchText.Query="{Binding Tag.Text, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                   services:SearchMatchText.Enabled="{Binding Tag.Tag, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                   ToolTip="{Binding Id}" services:LongPressToolTipBehavior.Enabled="True" TextTrimming="CharacterEllipsis" FontSize="15"/>
                                         <TextBlock Text="{Binding ReleaseTime}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
                                     </StackPanel>
                                     <!-- 第 1 列放成一排：「MC中文wiki」+「收藏」。
@@ -334,7 +338,9 @@
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" x:Name="VersionPrevPageButton" Content="{DynamicResource Str_Ui_Previous}" Style="{StaticResource SecondaryButton}"
                                 Padding="12,6" Click="VersionPrevPage_Click"/>
-                        <TextBlock Grid.Column="1" x:Name="VersionPageSummaryText" HorizontalAlignment="Center"
+                        <TextBlock Grid.Column="1" x:Name="VersionPageSummaryText" HorizontalAlignment="Stretch" TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="8,0"
+                                   ToolTip="{Binding RelativeSource={RelativeSource Self}, Path=Text}"
                                    VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         <Button Grid.Column="2" x:Name="VersionNextPageButton" Content="{DynamicResource Str_Ui_Next}" Style="{StaticResource SecondaryButton}"
                                 Padding="12,6" Click="VersionNextPage_Click"/>
@@ -492,7 +498,9 @@
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" x:Name="ResourcePrevPageButton" Content="{DynamicResource Str_Ui_Previous}" Style="{StaticResource SecondaryButton}"
                                 Padding="12,6" Click="ResourcePrevPage_Click"/>
-                        <TextBlock Grid.Column="1" x:Name="ResourcePageSummaryText" HorizontalAlignment="Center"
+                        <TextBlock Grid.Column="1" x:Name="ResourcePageSummaryText" HorizontalAlignment="Stretch" TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="8,0"
+                                   ToolTip="{Binding RelativeSource={RelativeSource Self}, Path=Text}"
                                    VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         <Button Grid.Column="2" x:Name="ResourceNextPageButton" Content="{DynamicResource Str_Ui_Next}" Style="{StaticResource SecondaryButton}"
                                 Padding="12,6" Click="ResourceNextPage_Click"/>
@@ -522,7 +530,7 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <StackPanel>
-                                                <TextBlock Text="{Binding Id}" FontSize="15"/>
+                                                <TextBlock Text="{Binding Id}" ToolTip="{Binding Id}" services:LongPressToolTipBehavior.Enabled="True" TextTrimming="CharacterEllipsis" FontSize="15"/>
                                                 <TextBlock Text="{Binding ReleaseTime}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
                                             </StackPanel>
                                             <Button Grid.Column="1" Content="{Binding FavoriteLabel}" Margin="0,0,8,0" Padding="10,6"
@@ -742,7 +750,9 @@
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" x:Name="MapPrevPageButton" Content="{DynamicResource Str_Ui_Previous}" Style="{StaticResource SecondaryButton}"
                                 Padding="12,6" Click="MapPrevPage_Click"/>
-                        <TextBlock Grid.Column="1" x:Name="MapPageSummaryText" HorizontalAlignment="Center"
+                        <TextBlock Grid.Column="1" x:Name="MapPageSummaryText" HorizontalAlignment="Stretch" TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="8,0"
+                                   ToolTip="{Binding RelativeSource={RelativeSource Self}, Path=Text}"
                                    VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         <Button Grid.Column="2" x:Name="MapNextPageButton" Content="{DynamicResource Str_Ui_Next}" Style="{StaticResource SecondaryButton}"
                                 Padding="12,6" Click="MapNextPage_Click"/>
@@ -763,12 +773,9 @@
 
                 <!-- ===== Mod 分类：综合搜索 Modrinth + CurseForge，来源可切换；右侧附 MC百科中文名搜索辅助 ===== -->
                 <Grid x:Name="ModPanel" services:PageTransitionBehavior.AnimateOnVisible="True" DockPanel.Dock="Top" Visibility="Collapsed" Background="{DynamicResource PanelBrush}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="220"/>
-                    </Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 
-                    <Grid Grid.Column="0" Margin="0,0,14,0">
+                    <Grid Grid.Column="0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
@@ -777,7 +784,13 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <TextBlock Grid.Row="0" Text="{DynamicResource Str_Ui_Mod_Downloads}" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <Grid Grid.Row="0" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="{DynamicResource Str_Ui_Mod_Downloads}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+                            <Button x:Name="ModWikiReferenceButton" Grid.Column="1" Content="百科参考" Visibility="Collapsed"
+                                    Padding="10,4" Style="{StaticResource SecondaryButton}" Click="ModWikiReference_Click"
+                                    ToolTip="当前关键词的 MC 百科参考链接，仅在点击后展开"/>
+                        </Grid>
 
                         <!-- 仿 PCL「搜索 Mod」筛选栏：名称/来源 一行，版本/类型(加载器) 一行，
                              两列网格布局，最后单独一行放"搜索"+"重置条件"两个按钮。
@@ -897,7 +910,9 @@
                             </Grid.ColumnDefinitions>
                             <Button Grid.Column="0" x:Name="ModPrevPageButton" Content="{DynamicResource Str_Ui_Previous}" Style="{StaticResource SecondaryButton}"
                                     Padding="12,6" Click="ModPrevPage_Click"/>
-                            <TextBlock Grid.Column="1" x:Name="ModPageSummaryText" HorizontalAlignment="Center"
+                            <TextBlock Grid.Column="1" x:Name="ModPageSummaryText" HorizontalAlignment="Stretch" TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Margin="8,0"
+                                   ToolTip="{Binding RelativeSource={RelativeSource Self}, Path=Text}"
                                        VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
                             <Button Grid.Column="2" x:Name="ModNextPageButton" Content="{DynamicResource Str_Ui_Next}" Style="{StaticResource SecondaryButton}"
                                     Padding="12,6" Click="ModNextPage_Click"/>
@@ -905,12 +920,15 @@
                     </Grid>
 
                     <!-- MC百科中文名搜索辅助：只提供百科页面链接，不参与下载（见 McModService 类注释） -->
-                    <Border Grid.Column="1" Background="{DynamicResource SideBrush}" CornerRadius="8" Padding="10">
+                    <Popup x:Name="McModReferencePopup" PlacementTarget="{Binding ElementName=ModWikiReferenceButton}"
+                           Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                    <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
+                            CornerRadius="8" Padding="12" Width="280" MaxHeight="340" PreviewKeyDown="McModReference_PreviewKeyDown">
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Top" Text="{DynamicResource Str_Ui_Mc_Wiki_Reference}" FontSize="14" FontWeight="Bold" Margin="0,0,0,4"/>
                             <TextBlock DockPanel.Dock="Top" Text="{DynamicResource Str_Ui_Reference_Material_Click_To_Open_The_Wik}" FontSize="11"
                                        Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                            <ListBox x:Name="McModListBox" BorderThickness="0" Background="Transparent">
+                            <ListBox x:Name="McModListBox" BorderThickness="0" Background="Transparent" MaxHeight="250">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <Button Content="{Binding Title}" Style="{StaticResource SideNavButton}"
@@ -922,6 +940,7 @@
                             </ListBox>
                         </DockPanel>
                     </Border>
+                    </Popup>
                 </Grid>
 
             </DockPanel>

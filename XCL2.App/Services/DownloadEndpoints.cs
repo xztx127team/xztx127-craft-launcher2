@@ -121,6 +121,9 @@ public static class DownloadEndpoints
         CancellationToken ct = default, string? expectedSha1 = null, string? expectedSha512 = null,
         string? expectedMd5 = null, long? expectedSize = null, string? userAgent = null, string? expectedSha256 = null)
     {
+        using var targetLease = await DownloadTargetLock.AcquireAsync(destPath, ct);
+        ct.ThrowIfCancellationRequested();
+        DownloadTransferPolicy.TrackTarget(destPath);
         var parent = Path.GetDirectoryName(Path.GetFullPath(destPath))!;
         Directory.CreateDirectory(parent);
         var name = Path.GetFileName(destPath);
@@ -130,14 +133,15 @@ public static class DownloadEndpoints
         var candidates = OrderCandidates(expanded);
         if (candidates.Count == 0) throw new InvalidOperationException("没有可用的下载地址。");
         Exception? lastError = null;
-        var speedLimit = Math.Max(0, ConfigService.Active?.Config.DownloadSpeedLimitKBps ?? 0) * 1024L;
+        DownloadTransferPolicy.EnsureDiskSpace(destPath, expectedSize ?? 0);
         // 首轮迅速换源，全部失败后再进行一次有限重试；不对同一个坏源连续请求三次。
         for (var round = 0; round < 2; round++)
         {
-            if (round > 0) await Task.Delay(500, ct);
+            if (round > 0) await DownloadTransferPolicy.WaitRetryAsync(TimeSpan.FromMilliseconds(500), ct);
             foreach (var url in OrderCandidates(candidates))
             {
                 var temporary = destPath + ".fbpart-" + Guid.NewGuid().ToString("N");
+                DownloadTransferPolicy.TrackTemporary(temporary, resumable: false);
                 using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 attempt.CancelAfter(TimeSpan.FromSeconds(45));
                 try
@@ -145,17 +149,22 @@ public static class DownloadEndpoints
                     var resolved = await Plugins.PluginInterceptionRegistry.PrepareDownloadAsync(url, name, expectedSha1, attempt.Token);
                     using var request = new HttpRequestMessage(HttpMethod.Get, resolved);
                     if (!string.IsNullOrWhiteSpace(userAgent)) request.Headers.TryAddWithoutValidation("User-Agent", userAgent);
+                    using var connecting = DownloadTransferPolicy.BeginPhase("连接");
                     using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, attempt.Token);
+                    connecting.Dispose();
                     response.EnsureSuccessStatusCode();
+                    if (response.StatusCode == System.Net.HttpStatusCode.PartialContent)
+                        throw new InvalidDataException("服务端返回了未请求的部分文件，正在尝试其他下载源。");
                     var length = response.Content.Headers.ContentLength;
                     if (expectedSize is > 0 && length is > 0 && expectedSize != length)
                         throw new InvalidDataException("下载大小与资源清单不一致。");
+                    DownloadTransferPolicy.EnsureDiskSpace(destPath, expectedSize is > 0 ? expectedSize.Value : length ?? 0);
+                    using (DownloadTransferPolicy.BeginPhase("传输"))
                     await using (var input = await response.Content.ReadAsStreamAsync(attempt.Token))
                     await using (var output = File.Create(temporary))
                     {
                         var buffer = new byte[81920];
                         long done = 0;
-                        var watch = Stopwatch.StartNew();
                         int read;
                         while (true)
                         {
@@ -164,32 +173,27 @@ public static class DownloadEndpoints
                             if (read == 0) break;
                             await output.WriteAsync(buffer.AsMemory(0, read), attempt.Token);
                             done += read;
-                            if (speedLimit > 0)
-                            {
-                                var delay = done * 1000.0 / speedLimit - watch.Elapsed.TotalMilliseconds;
-                                if (delay > 0)
-                                {
-                                    // 自身的限速等待不应被误判为网络无响应。
-                                    attempt.CancelAfter(Timeout.InfiniteTimeSpan);
-                                    await Task.Delay(TimeSpan.FromMilliseconds(delay), ct);
-                                }
-                            }
+                            // 限速等待不计作服务器无响应，用户取消仍立即生效。
+                            attempt.CancelAfter(Timeout.InfiniteTimeSpan);
+                            await DownloadTransferPolicy.ConsumeAsync(read, ct);
                             var total = expectedSize is > 0 ? expectedSize.Value : length ?? 0;
                             progress?.Report(new ProgressInfo("正在下载 " + name, Kilobytes(done), Kilobytes(total),
-                                $"{done / 1048576.0:F1} MB · {HostOf(url)}"));
+                                $"{DownloadTransferPolicy.FormatCapacity(done)} · {HostOf(url)}") { Unit = "KiB" });
                         }
                         if (length is >= 0 && done != length.Value) throw new InvalidDataException("下载连接提前结束，文件不完整。");
                     }
                     attempt.CancelAfter(Timeout.InfiniteTimeSpan);
                     ct.ThrowIfCancellationRequested();
-                    await Task.Run(() => VerifyFile(temporary, expectedSha1, expectedSha512, expectedMd5, expectedSize, expectedSha256, ct), ct);
+                    using (DownloadTransferPolicy.BeginPhase("校验"))
+                        await Task.Run(() => VerifyFile(temporary, expectedSha1, expectedSha512, expectedMd5, expectedSize, expectedSha256, ct), ct);
                     ct.ThrowIfCancellationRequested();
                     File.Move(temporary, destPath, overwrite: true);
+                    DownloadTransferPolicy.TrackCompleted(destPath);
                     ReportSuccess(url);
                     return destPath;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                catch (Exception ex) when (ex is not Plugins.PluginFlowCanceledException)
+                catch (Exception ex) when (ex is not (Plugins.PluginFlowCanceledException or DownloadDiskSpaceException))
                 {
                     ReportFailure(url);
                     lastError = ex;

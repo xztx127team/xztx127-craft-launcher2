@@ -58,7 +58,7 @@ public partial class ChangelogWindow : OverlayDialogControl
         ErrorText.Text = source.FailureHint;
 
         Loaded += (_, _) => Navigate();
-        RequestClose += (_, _) => DisposeBrowser();
+        OverlayClosed += (_, _) => DisposeBrowser();
     }
 
     private async void Navigate()

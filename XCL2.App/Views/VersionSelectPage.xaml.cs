@@ -70,6 +70,7 @@ public partial class VersionSelectPage : UserControl
         InstalledListBox.ItemsSource = _installed;
 
         LoadFolders();
+        InitializeInstanceUx();
         // 首次扫描由 Loaded 发起。构造期间只创建控件，不能重复同步扫描版本目录。
     }
 
@@ -108,6 +109,8 @@ public partial class VersionSelectPage : UserControl
             InstalledListBox.IsEnabled = true;
             ShowHiddenInstancesBtn.Visibility = Visibility.Collapsed;
             RefreshIncompleteVersionsButtonVisibility();
+            InstanceEmptyMessage.Text = "还没有游戏文件夹。请先在左侧添加已有文件夹。";
+            InstanceEmptyMessage.Visibility = Visibility.Visible;
             return;
         }
         using var cancellation = new CancellationTokenSource();
@@ -163,6 +166,7 @@ public partial class VersionSelectPage : UserControl
 
     private void ApplyScannedVersions(string folderPath, List<GameVersion> versions)
     {
+        SwitchInstanceBrowseFolder(folderPath);
         var cfg = _owner.ConfigService.Config;
         var visible = versions.Where(v => !InstanceDeletionService.IsHidden(cfg, folderPath, v.Id)).ToList();
         _incompleteVersions = visible.Where(v => !v.IsInstalled).ToList();
@@ -178,10 +182,8 @@ public partial class VersionSelectPage : UserControl
             if (!unchanged)
             {
                 _installed = visible;
-                InstalledListBox.ItemsSource = _installed;
             }
-            InstalledListBox.SelectedItem = _installed.FirstOrDefault(v =>
-                string.Equals(v.Id, selectedId, StringComparison.OrdinalIgnoreCase));
+            ApplyInstanceFilter(restoreScroll: true, selectedId: selectedId);
         }
         finally { _refreshingItems = false; }
 
@@ -338,6 +340,7 @@ public partial class VersionSelectPage : UserControl
         if (_loadingFolders) return;
         if (FolderListBox.SelectedItem is GameFolder folder)
         {
+            SwitchInstanceBrowseFolder(folder.Path);
             _owner.ConfigService.Config.SelectedFolderPath = folder.Path;
             _owner.ConfigService.Save();
             RefreshInstalledVersions();
@@ -406,6 +409,7 @@ public partial class VersionSelectPage : UserControl
 
         try
         {
+            if (!await ImportPreviewDialog.ConfirmAsync(sourceFolder, InstanceUxService.GetVersionDirectory(folder.Path, nameDialog.NewName), nameDialog.NewName, ImportPreviewKind.InstanceFolder)) return;
             await _folderService.ImportVersionFolderAsync(folder.Path, sourceFolder, nameDialog.NewName);
             _owner.NotifyInstanceImported(folder.Path, nameDialog.NewName);
             ToastService.ShowSuccess($"已导入实例「{nameDialog.NewName}」");
@@ -439,6 +443,7 @@ public partial class VersionSelectPage : UserControl
 
         var nameDialog = new RenameInstanceDialog(suggested, n => existingNames.Contains(n), "导入实例文件");
         if (OverlayDialogService.ShowModal(nameDialog) != true) return;
+        if (!await ImportPreviewDialog.ConfirmAsync(pickDialog.FileName, InstanceUxService.GetVersionDirectory(folder.Path, nameDialog.NewName), nameDialog.NewName, ImportPreviewKind.InstanceZip)) return;
 
         var pd = new ProgressDialog($"正在导入实例文件「{Path.GetFileName(pickDialog.FileName)}」...");
         pd.Show();
@@ -566,7 +571,10 @@ public partial class VersionSelectPage : UserControl
 
         try
         {
+            if (_owner.ConfigService.Config.Ux50RenamePreview && !MessageBoxDialog.ShowConfirm(
+                $"原名称：{v.Id}\n新名称：{dlg.NewName}\n目标目录：{InstanceUxService.GetVersionDirectory(folderPath, dlg.NewName)}\n\n确认后才会重命名实例。", "重命名预览")) return;
             InstanceDeletionService.Rename(_owner.ConfigService.Config, folderPath, v.Id, dlg.NewName);
+            InstanceUxService.Rename(_owner.ConfigService.Config, folderPath, v.Id, dlg.NewName);
             _owner.ConfigService.Save();
             await RefreshInstalledVersionsAsync();
             if (!IsLoaded || !string.Equals(GetSelectedFolderPath(), folderPath, StringComparison.OrdinalIgnoreCase)) return;
@@ -712,6 +720,7 @@ public partial class VersionSelectPage : UserControl
     private void InstalledListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_refreshingItems) return;
+        RefreshBackgroundTaskOwnership();
         if (InstalledListBox.SelectedItem is GameVersion v)
         {
             _owner.ConfigService.Config.SelectedVersionId = v.Id;

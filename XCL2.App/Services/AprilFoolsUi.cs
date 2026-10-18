@@ -1,404 +1,370 @@
 using System;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using XCL2.App.Views;
+using Screen = System.Windows.Forms.Screen;
+using Box = XCL2.App.Services.AprilFoolsMotionPolicy.Box;
+using MotionPoint = XCL2.App.Services.AprilFoolsMotionPolicy.Point;
 
 namespace XCL2.App.Services;
 
-/// <summary>
-/// <see cref="AprilFoolsService"/> 的 WPF 落地层：具体"怎么弹窗、怎么挪按钮、怎么改窗口位置"
-/// 都在这里，AprilFoolsService 本身不引用任何 WPF 类型。
-///
-/// 彩蛋的激活状态由 AprilFoolsService 决定，窗口、按钮和磁贴移动同时遵守统一动画设置。
-/// 动效定时器只在对应效果激活、界面已加载且可见时运行；业务提醒倒计时保持原有行为。
-/// </summary>
+/// <summary>视觉彩蛋与真实启动分离：点到真实启动入口就认输，下载不误判为启动。</summary>
 public static class AprilFoolsUi
 {
-    private static readonly ConditionalWeakTable<MainWindow, object> WindowAttachments = new();
+    private sealed class WindowAttachment
+    {
+        public bool TemporaryGeometry;
+        public WINDOWPLACEMENT? OriginalPlacement;
+        public WindowState? OriginalState;
+        public RECT? MovementOrigin;
+        public int Generation;
+    }
+    private static readonly ConditionalWeakTable<MainWindow, WindowAttachment> WindowAttachments = new();
     private static readonly ConditionalWeakTable<Panel, object> HomeAttachments = new();
-    private static DispatcherTimer? _recoveryNotificationTimer;
-    private static DispatcherTimer? _recoveryWin32Timer;
     private static readonly Random Rng = new();
-
+    private static DispatcherTimer? _recoveryTimer;
     private const string RickRoll1Url = "https://www.bilibili.com/video/BV1GJ411x7h7/";
     private const string RickRoll2Url = "https://www.bilibili.com/video/BV12rMQ6yEP2";
 
-    /// <summary>MainWindow 构造函数里调用一次：挂上小白旗的显隐监听、窗口乱窜效果、
-    /// F1 紧急关闭热键以及 10 秒/60 秒恢复提示。首页磁贴相关的效果（3 号鼠标躲避、8 号磁贴乱跳）由 HomePage 自己
-    /// 在构造函数里调用 <see cref="AttachHomeTileEffects"/>，不在这里处理
-    /// （HomePage 是后创建的 UserControl，这里拿不到它的控件引用）。</summary>
+    public static bool IsWindowGeometryTemporary(Window window) => window is MainWindow main
+        && WindowAttachments.TryGetValue(main, out var attachment) && attachment.TemporaryGeometry;
+    public static WindowState? OriginalWindowState(Window window) => window is MainWindow main
+        && WindowAttachments.TryGetValue(main, out var attachment) ? attachment.OriginalState : null;
+    private static bool CanInteract(Window? window) => window is { IsLoaded: true, IsVisible: true, IsActive: true, IsEnabled: true }
+        && window.WindowState != WindowState.Minimized && !OverlayDialogService.HasActiveOverlay
+        && !window.OwnedWindows.Cast<Window>().Any(child => child.IsVisible);
+    public static bool IsWindowMotionEnabled => AprilFoolsService.Has(AprilFoolsService.Effect.WindowChaos)
+        && AnimationSettingsService.IsEnabled(AnimationKind.WindowFullscreen);
+    private static int Interval => Math.Clamp(ConfigService.Active?.Config.AprilFoolsMoveIntervalMs ?? 150, 100, 1000);
+
     public static void Attach(MainWindow owner)
     {
         if (WindowAttachments.TryGetValue(owner, out _)) return;
-        WindowAttachments.Add(owner, new object());
+        var attachment = new WindowAttachment();
+        WindowAttachments.Add(owner, attachment);
         var closed = false;
         var subscribed = false;
-        var watchdog = new DispatcherTimer(DispatcherPriority.Background, owner.Dispatcher)
-            { Interval = TimeSpan.FromSeconds(2) };
-        var windowChaos = new DispatcherTimer(DispatcherPriority.Background, owner.Dispatcher)
-            { Interval = TimeSpan.FromSeconds(3) };
+        var watchdog = new DispatcherTimer(DispatcherPriority.Background, owner.Dispatcher) { Interval = TimeSpan.FromSeconds(2) };
+        var movement = new DispatcherTimer(DispatcherPriority.Background, owner.Dispatcher) { Interval = TimeSpan.FromMilliseconds(Interval) };
+        var config = ConfigService.Active;
 
-        bool CanMove() => !closed && subscribed && owner.IsLoaded && owner.IsVisible
-            && owner.WindowState != WindowState.Minimized
-            && AnimationSettingsService.IsEnabled(AnimationKind.WindowFullscreen)
-            && AprilFoolsService.Has(AprilFoolsService.Effect.WindowChaos);
-
+        void RestoreGeometry()
+        {
+            if (attachment.OriginalPlacement is not { } placement) return;
+            attachment.OriginalPlacement = null;
+            attachment.MovementOrigin = null;
+            // 抑制恢复产生的 Location/StateChanged，直到布局处理完毕才让正常位置记忆继续。
+            attachment.TemporaryGeometry = true;
+            // 隐藏/最小化时恢复布局不能把启动器重新弹到前台。
+            if (!owner.IsVisible) placement.ShowCmd = 0; // SW_HIDE
+            else if (owner.WindowState == WindowState.Minimized) placement.ShowCmd = 2; // SW_SHOWMINIMIZED
+            SetWindowPlacement(new WindowInteropHelper(owner).Handle, ref placement);
+            var generation = ++attachment.Generation;
+            owner.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+            {
+                if (attachment.Generation != generation || attachment.OriginalPlacement != null) return;
+                attachment.TemporaryGeometry = false;
+                attachment.OriginalState = null;
+            }));
+        }
+        bool Eligible() => IsWindowMotionEnabled;
         void UpdateMotion()
         {
-            if (CanMove()) windowChaos.Start();
-            else windowChaos.Stop();
+            movement.Interval = TimeSpan.FromMilliseconds(Interval);
+            if (!Eligible()) { movement.Stop(); RestoreGeometry(); }
+            else if (!closed && subscribed && CanInteract(owner)) movement.Start();
+            else movement.Stop();
         }
         void Dispatch(Action action)
         {
             if (closed || owner.Dispatcher.HasShutdownStarted) return;
             if (owner.Dispatcher.CheckAccess()) action();
-            else owner.Dispatcher.BeginInvoke(new Action(() => { if (!closed && subscribed) action(); }));
+            else owner.Dispatcher.BeginInvoke(new Action(() => { if (!closed) action(); }));
         }
-        void StateChanged() => Dispatch(() =>
+        void StateChanged() => Dispatch(() => { RefreshFlagVisibility(owner); UpdateMotion(); ScheduleRecoveryPrompt(); });
+        var storageWarningShown = false;
+        void StorageWarning(string message) => Dispatch(() =>
         {
-            if (!subscribed) return;
-            RefreshFlagVisibility(owner);
-            UpdateMotion();
-            ScheduleRecoveryPrompts(owner);
+            if (storageWarningShown) return;
+            storageWarningShown = true;
+            LauncherLogService.AppendLine("[AprilFools] " + message);
+            ToastService.ShowWarning(message);
         });
-        void SettingsChanged() => Dispatch(UpdateMotion);
+        void PreferencesSaved() => Dispatch(AprilFoolsService.RefreshPreferences);
+        void AnimationChanged() => Dispatch(UpdateMotion);
         void VisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) => UpdateMotion();
-        void WindowStateChanged(object? sender, EventArgs e) => UpdateMotion();
-        void Loaded(object sender, RoutedEventArgs e)
+        void WindowChanged(object? sender, EventArgs e) => UpdateMotion();
+        void Closing(object? sender, CancelEventArgs e)
         {
-            if (closed || subscribed) return;
-            subscribed = true;
-            AprilFoolsService.StateChanged += StateChanged;
-            AnimationSettingsService.Changed += SettingsChanged;
-            watchdog.Start();
-            RefreshFlagVisibility(owner);
-            UpdateMotion();
-            ScheduleRecoveryPrompts(owner);
-        }
-        void Unloaded(object sender, RoutedEventArgs e)
-        {
-            subscribed = false;
-            AprilFoolsService.StateChanged -= StateChanged;
-            AnimationSettingsService.Changed -= SettingsChanged;
-            watchdog.Stop();
-            windowChaos.Stop();
-            _recoveryNotificationTimer?.Stop();
-            _recoveryWin32Timer?.Stop();
-            _recoveryNotificationTimer = null;
-            _recoveryWin32Timer = null;
+            // MainWindow 可先将关闭转成最小化/托盘；遵守已取消的关闭结果。
+            if (e.Cancel) { UpdateMotion(); return; }
+            movement.Stop(); RestoreGeometry();
         }
         void PreviewKeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key != Key.F1 || !AprilFoolsService.IsActive) return;
             e.Handled = true;
             AprilFoolsService.DismissForToday();
-            owner.AprilFoolsFlagButton.Visibility = Visibility.Collapsed;
+        }
+        void Loaded(object sender, RoutedEventArgs e)
+        {
+            if (closed || subscribed) return;
+            subscribed = true;
+            AprilFoolsService.StateChanged += StateChanged;
+            AprilFoolsService.PersistenceWarningRaised += StorageWarning;
+            if (AprilFoolsService.PersistenceWarning is { } warning) StorageWarning(warning);
+            AnimationSettingsService.Changed += AnimationChanged;
+            if (config != null) config.Saved += PreferencesSaved;
+            watchdog.Start();
+            StateChanged();
+        }
+        void Unloaded(object sender, RoutedEventArgs e)
+        {
+            subscribed = false;
+            AprilFoolsService.StateChanged -= StateChanged;
+            AprilFoolsService.PersistenceWarningRaised -= StorageWarning;
+            AnimationSettingsService.Changed -= AnimationChanged;
+            if (config != null) config.Saved -= PreferencesSaved;
+            watchdog.Stop(); movement.Stop(); RestoreGeometry();
+            _recoveryTimer?.Stop(); _recoveryTimer = null;
         }
         void Closed(object? sender, EventArgs e)
         {
             closed = true;
             Unloaded(owner, new RoutedEventArgs());
-            owner.Loaded -= Loaded;
-            owner.Unloaded -= Unloaded;
+            owner.Loaded -= Loaded; owner.Unloaded -= Unloaded;
             owner.IsVisibleChanged -= VisibilityChanged;
-            owner.StateChanged -= WindowStateChanged;
-            owner.PreviewKeyDown -= PreviewKeyDown;
-            owner.Closed -= Closed;
-            WindowAttachments.Remove(owner);
+            owner.StateChanged -= WindowChanged; owner.Activated -= WindowChanged; owner.Deactivated -= WindowChanged;
+            owner.Closing -= Closing; owner.PreviewKeyDown -= PreviewKeyDown; owner.Closed -= Closed;
+            // WindowPlacementService 的 Closed 订阅可能排在后面，仍需读取原最大化状态。
+            // 弱键表不会延长窗口生命期；所有事件和计时器已经在上面解绑。
         }
-
-        // 跨日复查是状态维护，保持两秒周期；只有窗口实际移动受动画开关约束。
         watchdog.Tick += (_, _) =>
         {
-            if (!closed && subscribed) { RefreshFlagVisibility(owner); UpdateMotion(); }
+            if (closed || !subscribed) return;
+            AprilFoolsService.EnsureTodaysStateLoaded();
+            RefreshFlagVisibility(owner); UpdateMotion();
         };
-        windowChaos.Tick += (_, _) =>
+        movement.Tick += (_, _) =>
         {
-            if (!CanMove()) { UpdateMotion(); return; }
-            if (owner.WindowState == WindowState.Maximized) owner.WindowState = WindowState.Normal;
-            var screenWidth = SystemParameters.PrimaryScreenWidth;
-            var screenHeight = SystemParameters.PrimaryScreenHeight;
+            if (!Eligible() || !CanInteract(owner)) { UpdateMotion(); return; }
+            var hwnd = new WindowInteropHelper(owner).Handle;
+            if (hwnd == IntPtr.Zero) return;
+            if (attachment.OriginalPlacement == null)
+            {
+                var original = new WINDOWPLACEMENT { Length = Marshal.SizeOf<WINDOWPLACEMENT>() };
+                if (!GetWindowPlacement(hwnd, ref original)) return;
+                attachment.OriginalPlacement = original;
+                attachment.OriginalState = owner.WindowState;
+                attachment.TemporaryGeometry = true;
+                attachment.Generation++;
+                if (owner.WindowState == WindowState.Maximized) owner.WindowState = WindowState.Normal;
+            }
+            if (!GetWindowRect(hwnd, out var rectangle)) return;
+            attachment.MovementOrigin ??= rectangle;
+            var area = Screen.FromHandle(hwnd).WorkingArea;
+            var width = Math.Min(rectangle.Right - rectangle.Left, area.Width);
+            var height = Math.Min(rectangle.Bottom - rectangle.Top, area.Height);
             var intensity = AnimationSettingsService.Intensity(AnimationKind.WindowFullscreen);
-            var targetLeft = Rng.NextDouble() * Math.Max(0, screenWidth - owner.Width);
-            var targetTop = Rng.NextDouble() * Math.Max(0, screenHeight - owner.Height);
-            owner.Left += (targetLeft - owner.Left) * intensity;
-            owner.Top += (targetTop - owner.Top) * intensity;
+            var targetX = area.Left + Rng.NextDouble() * Math.Max(0, area.Width - width);
+            var targetY = area.Top + Rng.NextDouble() * Math.Max(0, area.Height - height);
+            var origin = attachment.MovementOrigin.Value;
+            var fitted = AprilFoolsMotionPolicy.Fit(new Box(
+                origin.Left + (targetX - origin.Left) * intensity,
+                origin.Top + (targetY - origin.Top) * intensity, width, height),
+                new Box(area.Left, area.Top, area.Width, area.Height));
+            SetWindowPos(hwnd, IntPtr.Zero, (int)Math.Round(fitted.X), (int)Math.Round(fitted.Y),
+                (int)Math.Round(fitted.Width), (int)Math.Round(fitted.Height), 0x0014); // NOZORDER | NOACTIVATE
         };
-        owner.Loaded += Loaded;
-        owner.Unloaded += Unloaded;
+        owner.Loaded += Loaded; owner.Unloaded += Unloaded;
         owner.IsVisibleChanged += VisibilityChanged;
-        owner.StateChanged += WindowStateChanged;
-        owner.PreviewKeyDown += PreviewKeyDown;
-        owner.Closed += Closed;
+        owner.StateChanged += WindowChanged; owner.Activated += WindowChanged; owner.Deactivated += WindowChanged;
+        owner.Closing += Closing; owner.PreviewKeyDown += PreviewKeyDown; owner.Closed += Closed;
         RefreshFlagVisibility(owner);
         if (owner.IsLoaded) Loaded(owner, new RoutedEventArgs());
     }
 
-    private static void ScheduleRecoveryPrompts(MainWindow owner)
-    {
-        _recoveryNotificationTimer?.Stop();
-        _recoveryWin32Timer?.Stop();
-        _recoveryNotificationTimer = null;
-        _recoveryWin32Timer = null;
-
-        if (!AprilFoolsService.IsActive) return;
-
-        // 10 秒提醒：需求原话是"如果用户 10 秒内没有关闭这个彩蛋，就会弹窗提示点击右下角
-        // 小白旗来关闭彩蛋"——所以这条提醒必须明确指向小白旗，不能只说 F1（F1 是额外补的
-        // 紧急恢复键，按钮点不到时的兜底，但不是用户被告知的主要恢复方式）。
-        _recoveryNotificationTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
-        _recoveryNotificationTimer.Tick += (_, _) =>
-        {
-            _recoveryNotificationTimer?.Stop();
-            if (AprilFoolsService.IsActive)
-                MessageBoxDialog.ShowInfo("点击右下角的白旗🏳️就可以关闭这个彩蛋，恢复正常啦。\n\n（如果按钮一直点不到，按 F1 也能立刻恢复。）", "愚人节彩蛋");
-        };
-        _recoveryNotificationTimer.Start();
-
-        // 60 秒兜底：万一 10 秒那次提醒被用户不小心划走/没注意到，用系统原生 MessageBox
-        // 再提醒一次——用原生弹窗而不是启动器自己皮肤化的对话框，是为了在"3/5/8 号效果
-        // 正在乱窜/乱跳"的极端情况下，这条提醒本身也不会被牵连着一起变得点不到。
-        _recoveryWin32Timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
-        _recoveryWin32Timer.Tick += (_, _) =>
-        {
-            _recoveryWin32Timer?.Stop();
-            if (!AprilFoolsService.IsActive) return;
-            System.Windows.MessageBox.Show(
-                "点击右下角的白旗就可以关闭这个彩蛋，恢复正常。按不到的话，按 F1 也可以。",
-                "XCL2 愚人节彩蛋",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
-        };
-        _recoveryWin32Timer.Start();
-    }
-
     private static void RefreshFlagVisibility(MainWindow owner)
+        => owner.AprilFoolsFlagButton.Visibility = AprilFoolsService.IsActive ? Visibility.Visible : Visibility.Collapsed;
+    private static void ScheduleRecoveryPrompt()
     {
-        // AprilFoolsService.IsActive 内部第一步就是"今天是不是 4 月 1 日"，
-        // 平时（其余 364 天）这里恒为 false，小白旗恒为 Collapsed——不需要在这个方法里
-        // 再额外写一次日期判断。
-        owner.AprilFoolsFlagButton.Visibility = AprilFoolsService.IsActive ? Visibility.Visible : Visibility.Collapsed;
-        if (!AprilFoolsService.IsActive)
+        if (!AprilFoolsService.IsActive) { _recoveryTimer?.Stop(); _recoveryTimer = null; return; }
+        if (_recoveryTimer != null) return;
+        _recoveryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        _recoveryTimer.Tick += (_, _) =>
         {
-            owner.WindowState = owner.WindowState; // no-op，保留位置；乱窜已经被 Timer 里的 Has() 判断挡住
-        }
+            _recoveryTimer?.Stop();
+            if (AprilFoolsService.IsActive)
+                ReminderCenterService.Publish("april-fools-recovery", "愚人节彩蛋", "点击右下角白旗或按 F1 可立即结束今天的整蛊；设置 → 趣味与彩蛋关闭总开关会打开确认挑战，输入彩蛋码可跳过。");
+        };
+        _recoveryTimer.Start();
     }
 
-    /// <summary>小白旗点击：恢复 + 弹说明 + （AprilFoolsService 内部）落盘，一次性做完。</summary>
+    /// <summary>白旗直接结束当天整蛊，不进入文字游戏或闯关。</summary>
     public static void OnWhiteFlagClicked(MainWindow owner)
     {
-        var descriptions = AprilFoolsService.ClickWhiteFlag();
-        owner.AprilFoolsFlagButton.Visibility = Visibility.Collapsed;
-        if (descriptions.Count == 0) return;
-
-        var text = "今天的整蛊到此为止，刚才你遇到的是：\n\n" + string.Join("\n\n", descriptions);
-        MessageBoxDialog.ShowInfo(text, "愚人节彩蛋");
+        if (!AprilFoolsService.IsActive) return;
+        AprilFoolsService.ClickWhiteFlag();
+        ToastService.ShowInfo("今天的整蛊已经结束。");
     }
 
-    /// <summary>「启动游戏」「下载」类按钮的统一钩子。返回 true 表示这次点击已经被彩蛋
-    /// 劫持（跳转恶搞视频 / 弹假报错 / 提示拒绝启动），调用方应直接 return，不再执行
-    /// 原本的启动/下载逻辑。</summary>
+    /// <returns>仅显式允许的非视觉彩蛋可能拦截；视觉整蛊中真正调用启动入口则结束整蛊并继续。</returns>
+    public static bool NotifyLaunchRequested(Window owner)
+    {
+        if (AprilFoolsService.HasMotionEffects)
+        {
+            AprilFoolsService.DismissForToday();
+            ToastService.ShowSuccess("哇哇哇，你竟然点到了！今天不整蛊你了。");
+            return false;
+        }
+        return TryInterceptLaunchOrDownload(owner);
+    }
+
+    /// <summary>旧名称保留兼容下载调用点；这里不将下载误判成成功启动。</summary>
     public static bool TryInterceptLaunchOrDownload(Window owner)
     {
-        if (!AprilFoolsService.TryGetLaunchOrDownloadInterception(out var which)) return false;
-
-        switch (which)
+        if (!AprilFoolsService.TryGetLaunchOrDownloadInterception(out var effect)) return false;
+        switch (effect)
         {
-            case AprilFoolsService.Effect.RickRoll1:
-                OpenUrl(RickRoll1Url);
-                break;
-            case AprilFoolsService.Effect.RickRoll2:
-                OpenUrl(RickRoll2Url);
-                break;
+            case AprilFoolsService.Effect.RickRoll1: OpenUrl(RickRoll1Url); break;
+            case AprilFoolsService.Effect.RickRoll2: OpenUrl(RickRoll2Url); break;
             case AprilFoolsService.Effect.FakeWin32Error:
-                ShowFakeWin32Error();
+                MessageBoxDialog.ShowInfo("这是已开启的愚人节模拟报错彩蛋，并非真实故障。\n\n模拟错误：launcher.dll 第 41 行出现意料之外的橡皮鸭。按 F1 可恢复。", "愚人节模拟报错");
                 break;
             case AprilFoolsService.Effect.LauncherRefuses:
-                MessageBoxDialog.ShowInfo(AprilFoolsService.RandomRefusalText(), "提示");
+                MessageBoxDialog.ShowInfo(AprilFoolsService.RandomRefusalText() + "\n\n这是已开启的愚人节彩蛋；按 F1 可恢复。", "愚人节彩蛋");
                 break;
-            // 修复：3/8/5 号效果原本只在"鼠标碰到按钮/磁贴"这个交互路径里表现（躲避、
-            // 乱跳），从来没处理过"点击本身被劫持"这一步——只要这次点击是从不经过鼠标
-            // 交互的入口（典型如托盘菜单"启动游戏"）打进来的，之前会直接放过去正常启动。
-            // 这里补上对应的提示文案，跟 AprilFoolsService.Catalog 里的效果描述保持
-            // 语气一致，同时也保证调用方 return 后确实没有执行真正的启动逻辑。
-            case AprilFoolsService.Effect.DodgeLaunchButton:
-                MessageBoxDialog.ShowInfo("按钮好像又躲开了，你好像没点到「启动游戏」。", "提示");
-                break;
-            case AprilFoolsService.Effect.TileChaos:
-                MessageBoxDialog.ShowInfo("磁贴今天不开心，很不高兴为你启动游戏。", "提示");
-                break;
-            case AprilFoolsService.Effect.WindowChaos:
-                MessageBoxDialog.ShowInfo("窗口今天坐不住，先别急着启动游戏。", "提示");
-                break;
+            default: return false;
         }
         return true;
     }
-
     private static void OpenUrl(string url)
     {
-        try
-        {
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        }
-        catch
-        {
-            // 用户环境没有默认浏览器之类的极端情况，静默失败即可，不应该在愚人节彩蛋
-            // 这种非核心功能上抛出未处理异常影响主流程。
-        }
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch (Exception ex) { LauncherLogService.AppendLine("[AprilFools] 无法打开已允许的视频：" + ex.GetType().Name); }
     }
 
-    /// <summary>2 号手段：假的 Win32 错误弹窗——文案模仿"某文件某行某列出现语法错误"这种
-    /// 常见的编译器/脚本报错措辞，配上原生 MessageBox（故意用最朴素的系统对话框风格，
-    /// 制造"像是真的系统报错"的错觉，跟启动器自己皮肤化的 MessageBoxDialog 刻意区分开）。</summary>
-    private static void ShowFakeWin32Error()
-    {
-        string[] files = ["launcher.dll", "minecraft_launcher_core.dll", "xcl2_native.dll", "game_profile.json"];
-        var file = files[Rng.Next(files.Length)];
-        var line = Rng.Next(1, 9999);
-        var col = Rng.Next(1, 200);
-        var message = $"应用程序错误\n\n文件 {file} 第 {line} 行，第 {col} 列出现异常：\n0xC0000005: 无法读取位于 0x{Rng.Next(0x10000000, 0x7FFFFFFF):X8} 的内存。\n\n程序将继续运行，但相关功能可能不可用。";
-        System.Windows.MessageBox.Show(message, "XCL2.App - 应用程序错误", MessageBoxButton.OK, MessageBoxImage.Error);
-    }
-
-    /// <summary>3 号（鼠标靠近就乱窜）+ 8 号（磁贴乱跳 + 磁贴点击台词）在首页构造函数里调用。
-    /// <paramref name="launchTile"/> 是"启动游戏"磁贴，<paramref name="quickStartTile"/> 是
-    /// "一键开始游戏"磁贴（普通模式下两者在磁贴总控台里可能互换位置，这里按传入的控件本身
-    /// 操作，不关心当前具体排在第几格）。</summary>
     public static void AttachHomeTileEffects(Panel tileGrid, Button launchTile, Button quickStartTile)
     {
         if (HomeAttachments.TryGetValue(tileGrid, out _)) return;
         HomeAttachments.Add(tileGrid, new object());
         var subscribed = false;
-        Window? homeWindow = null;
+        Window? window = null;
+        var transforms = new Dictionary<Button, (Transform Original, TransformGroup Group, TranslateTransform Offset, int Z)>();
+        var dodgeTimer = new DispatcherTimer(DispatcherPriority.Input, tileGrid.Dispatcher) { Interval = TimeSpan.FromMilliseconds(16) };
+        var tileTimer = new DispatcherTimer(DispatcherPriority.Background, tileGrid.Dispatcher) { Interval = TimeSpan.FromMilliseconds(120) };
+        var activityTimer = new DispatcherTimer(DispatcherPriority.Background, tileGrid.Dispatcher) { Interval = TimeSpan.FromMilliseconds(200) };
         bool CanAnimate(AnimationKind kind) => subscribed && tileGrid.IsLoaded && tileGrid.IsVisible
-            && homeWindow is { IsVisible: true } && homeWindow.WindowState != WindowState.Minimized
-            && AnimationSettingsService.IsEnabled(kind);
-
-        EnsureTransform(launchTile);
-        EnsureTransform(quickStartTile);
-
-        // 3 号：鼠标靠近按钮就持续躲避，模拟"永远点不到"。
-        //
-        // ===== 修复：原来只在 MouseEnter 那一瞬间跳一次 =====
-        // 问题在于 MouseEnter 只会在鼠标"从外面移进按钮范围"这个边界穿越的瞬间触发一次；
-        // 跳开之后鼠标继续朝新位置移动，只要中途没有真的先离开再进入（而是直接划过去、
-        // 或者本来移动速度就快到一步到位），下一次 MouseEnter 根本不会触发，按钮会安安静静
-        // 待在原地任由用户点——这就是"移速并不快，并非宣传中的'点不到'"的根本原因：
-        // 不是跳得慢，是压根没有持续跟踪鼠标、只跳了那一下。
-        //
-        // 现在改成一个 16ms 一次的高频 Timer（接近一帧的量级），持续算"鼠标当前位置"到
-        // "按钮当前（含偏移后）中心点"的距离——只要进入警戒半径，立刻往鼠标反方向跳开一大段
-        // 距离，且每次跳的角度带一点随机扰动，避免被"预判跳跃方向"套路化。这样不管鼠标怎么
-        // 移动、多快移动，按钮都会在用户手指按下去之前的每一帧持续重新判定并躲开，
-        // 真正做到"点不到"。
-        var launchOriginalCenter = (Point?)null;
-        launchTile.Loaded += (_, _) =>
+            && CanInteract(window) && AnimationSettingsService.IsEnabled(kind);
+        bool DodgeEnabled() => AprilFoolsService.Has(AprilFoolsService.Effect.DodgeLaunchButton)
+            && AnimationSettingsService.IsEnabled(AnimationKind.ControlFeedback);
+        bool ChaosEnabled() => AprilFoolsService.Has(AprilFoolsService.Effect.TileChaos)
+            && AnimationSettingsService.IsEnabled(AnimationKind.Page);
+        TranslateTransform Offset(Button button)
         {
-            var transform = (TranslateTransform)launchTile.RenderTransform;
-            var savedX = transform.X;
-            var savedY = transform.Y;
-            transform.X = 0;
-            transform.Y = 0;
-            var topLeft = launchTile.TranslatePoint(new Point(0, 0), tileGrid);
-            launchOriginalCenter = new Point(topLeft.X + launchTile.ActualWidth / 2, topLeft.Y + launchTile.ActualHeight / 2);
-            transform.X = savedX;
-            transform.Y = savedY;
-        };
-
-        var dodgeTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        dodgeTimer.Tick += (_, _) =>
+            if (transforms.TryGetValue(button, out var existing) && ReferenceEquals(button.RenderTransform, existing.Group)) return existing.Offset;
+            var original = button.RenderTransform ?? Transform.Identity;
+            var offset = new TranslateTransform();
+            var group = new TransformGroup(); group.Children.Add(original); group.Children.Add(offset);
+            transforms[button] = (original, group, offset, Panel.GetZIndex(button));
+            button.SetCurrentValue(UIElement.RenderTransformProperty, group);
+            return offset;
+        }
+        void Reset(Button button)
         {
-            var transform = (TranslateTransform)launchTile.RenderTransform;
-            if (!CanAnimate(AnimationKind.ControlFeedback) || !AprilFoolsService.Has(AprilFoolsService.Effect.DodgeLaunchButton))
+            if (!transforms.Remove(button, out var saved)) return;
+            saved.Offset.X = saved.Offset.Y = 0;
+            if (ReferenceEquals(button.RenderTransform, saved.Group)) button.SetCurrentValue(UIElement.RenderTransformProperty, saved.Original);
+            Panel.SetZIndex(button, saved.Z);
+        }
+        Rect VisibleArea()
+        {
+            var area = new Rect(0, 0, Math.Max(0, tileGrid.ActualWidth), Math.Max(0, tileGrid.ActualHeight));
+            for (DependencyObject? ancestor = VisualTreeHelper.GetParent(tileGrid); ancestor != null; ancestor = VisualTreeHelper.GetParent(ancestor))
             {
-                dodgeTimer.Stop();
-                transform.X = 0;
-                transform.Y = 0;
-                return;
+                if (ancestor is not FrameworkElement element || (!element.ClipToBounds && element is not ScrollContentPresenter)) continue;
+                var topLeft = element.TranslatePoint(new Point(), tileGrid);
+                area.Intersect(new Rect(topLeft, new Size(Math.Max(0, element.ActualWidth), Math.Max(0, element.ActualHeight))));
+                if (area.IsEmpty) break;
             }
-            if (launchOriginalCenter == null) return;
-
-            var mouse = Mouse.GetPosition(tileGrid);
-            var currentCenter = new Point(launchOriginalCenter.Value.X + transform.X, launchOriginalCenter.Value.Y + transform.Y);
-            var dx = currentCenter.X - mouse.X;
-            var dy = currentCenter.Y - mouse.Y;
-            const double DangerRadius = 90; // 鼠标进入这个半径就判定为"要点到了"，必须立刻跳开
-            if (dx * dx + dy * dy > DangerRadius * DangerRadius) return;
-
-            // 往远离鼠标的方向跳开一大步，角度加一点随机扰动，防止被"卡在角落等它跳"这种
-            // 固定套路破解；默认强度的跳跃距离大于警戒半径，降低强度时按比例减小。
-            var angle = Math.Atan2(dy, dx) + (Rng.NextDouble() - 0.5) * 0.6;
-            var intensity = AnimationSettingsService.Intensity(AnimationKind.ControlFeedback);
-            var jumpDistance = 150 * intensity;
-            var newX = transform.X + Math.Cos(angle) * jumpDistance;
-            var newY = transform.Y + Math.Sin(angle) * jumpDistance;
-
-            // 限制偏移范围，别把按钮跳到 tileGrid 可见区域外面去，那样反而找不到它，
-            // 也失去了"看得见点不到"的整蛊效果。
-            // 同时缩小累计活动范围，避免低强度连续跳动后仍跑到满幅度的位置。
-            var maxOffsetX = Math.Max(40, tileGrid.ActualWidth / 2 - launchTile.ActualWidth / 2) * intensity;
-            var maxOffsetY = Math.Max(40, tileGrid.ActualHeight / 2 - launchTile.ActualHeight / 2) * intensity;
-            transform.X = Math.Clamp(newX, -maxOffsetX, maxOffsetX);
-            transform.Y = Math.Clamp(newY, -maxOffsetY, maxOffsetY);
-        };
-
-        // 8 号：磁贴乱跳，用一个定时器随机给磁贴总控台里的每个磁贴一个小幅度随机偏移；
-        // 点击"启动游戏"磁贴时不再走正常启动，改成弹一句台词。
-        var tileChaosTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
-        tileChaosTimer.Tick += (_, _) =>
+            return area;
+        }
+        bool Bounds(Button button, out Rect rectangle)
         {
-            if (!CanAnimate(AnimationKind.Page) || !AprilFoolsService.Has(AprilFoolsService.Effect.TileChaos))
-            {
-                tileChaosTimer.Stop();
-                foreach (var child in tileGrid.Children.OfType<Button>())
-                {
-                    EnsureTransform(child);
-                    var t = (TranslateTransform)child.RenderTransform;
-                    t.X = 0;
-                    t.Y = 0;
-                }
-                return;
-            }
-            var intensity = AnimationSettingsService.Intensity(AnimationKind.Page);
-            foreach (var child in tileGrid.Children.OfType<Button>())
-            {
-                EnsureTransform(child);
-                var t = (TranslateTransform)child.RenderTransform;
-                t.X = (Rng.NextDouble() - 0.5) * 24 * intensity;
-                t.Y = (Rng.NextDouble() - 0.5) * 24 * intensity;
-            }
-        };
-
-        void ResetTransform(Button button)
-        {
-            if (button.RenderTransform is not TranslateTransform transform) return;
-            transform.X = 0;
-            transform.Y = 0;
+            rectangle = Rect.Empty;
+            if (!button.IsVisible || button.ActualWidth <= 0 || button.ActualHeight <= 0) return false;
+            try { rectangle = button.TransformToAncestor(tileGrid).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight)); return true; }
+            catch (InvalidOperationException) { return false; }
         }
         void UpdateTimers()
         {
-            var dodge = CanAnimate(AnimationKind.ControlFeedback)
-                && AprilFoolsService.Has(AprilFoolsService.Effect.DodgeLaunchButton);
-            var chaos = CanAnimate(AnimationKind.Page)
-                && AprilFoolsService.Has(AprilFoolsService.Effect.TileChaos);
-            if (dodge) dodgeTimer.Start();
-            else dodgeTimer.Stop();
-            if (chaos) tileChaosTimer.Start();
-            else
-            {
-                tileChaosTimer.Stop();
-                foreach (var child in tileGrid.Children.OfType<Button>())
-                    if (!dodge || child != launchTile) ResetTransform(child);
-            }
-            if (!dodge && !chaos) ResetTransform(launchTile);
+            tileTimer.Interval = TimeSpan.FromMilliseconds(Math.Max(100, Interval * .8));
+            // 弹窗暂停后由低频检查恢复，不留下已经停止却永远无法重新启动的避让计时器。
+            if (subscribed && tileGrid.IsLoaded && tileGrid.IsVisible && window is { IsVisible: true, IsActive: true }
+                && window.WindowState != WindowState.Minimized && (DodgeEnabled() || ChaosEnabled())) activityTimer.Start();
+            else activityTimer.Stop();
+            if (DodgeEnabled() && CanAnimate(AnimationKind.ControlFeedback)) dodgeTimer.Start(); else dodgeTimer.Stop();
+            if (ChaosEnabled() && CanAnimate(AnimationKind.Page)) tileTimer.Start(); else tileTimer.Stop();
+            foreach (var button in transforms.Keys.ToArray())
+                if (!ChaosEnabled() && (!DodgeEnabled() || (button != launchTile && button != quickStartTile))) Reset(button);
         }
+        activityTimer.Tick += (_, _) => UpdateTimers();
+        dodgeTimer.Tick += (_, _) =>
+        {
+            if (!DodgeEnabled() || !CanAnimate(AnimationKind.ControlFeedback)) { UpdateTimers(); return; }
+            var area = VisibleArea();
+            if (area.IsEmpty) return;
+            var intensity = AnimationSettingsService.Intensity(AnimationKind.ControlFeedback);
+            var gap = Math.Clamp(ConfigService.Active?.Config.AprilFoolsMouseAvoidanceDistance ?? 100, 40, 200) * intensity;
+            var mouse = Mouse.GetPosition(tileGrid);
+            foreach (var button in new[] { launchTile, quickStartTile })
+            {
+                if (!Bounds(button, out var bounds)) continue;
+                if (bounds.Width > area.Width || bounds.Height > area.Height) { Reset(button); continue; }
+                var current = new Box(bounds.X, bounds.Y, bounds.Width, bounds.Height);
+                if (AprilFoolsMotionPolicy.Distance(new(mouse.X, mouse.Y), current) > gap) continue;
+                var offset = Offset(button);
+                var originX = bounds.X - offset.X; var originY = bounds.Y - offset.Y;
+                var minX = Math.Max(area.Left, originX - area.Width * intensity);
+                var minY = Math.Max(area.Top, originY - area.Height * intensity);
+                var maxX = Math.Min(area.Right - bounds.Width, originX + area.Width * intensity);
+                var maxY = Math.Min(area.Bottom - bounds.Height, originY + area.Height * intensity);
+                if (maxX < minX || maxY < minY) continue;
+                var allowed = new Box(minX, minY, maxX - minX + bounds.Width, maxY - minY + bounds.Height);
+                var target = AprilFoolsMotionPolicy.Evade(current, allowed, new MotionPoint(mouse.X, mouse.Y), gap, Rng);
+                offset.X += target.X - bounds.X; offset.Y += target.Y - bounds.Y;
+                Panel.SetZIndex(button, 5);
+            }
+        };
+        tileTimer.Tick += (_, _) =>
+        {
+            if (!ChaosEnabled() || !CanAnimate(AnimationKind.Page)) { UpdateTimers(); return; }
+            var area = VisibleArea(); if (area.IsEmpty) return;
+            var intensity = AnimationSettingsService.Intensity(AnimationKind.Page);
+            foreach (var button in tileGrid.Children.OfType<Button>())
+            {
+                // 两种效果同时启用时，启动入口的位置完全由避让定时器管理。
+                if (DodgeEnabled() && (button == launchTile || button == quickStartTile)) continue;
+                if (!Bounds(button, out var bounds)) continue;
+                if (bounds.Width > area.Width || bounds.Height > area.Height) { Reset(button); continue; }
+                var offset = Offset(button);
+                var originX = bounds.X - offset.X; var originY = bounds.Y - offset.Y;
+                var target = AprilFoolsMotionPolicy.Fit(new Box(originX + (Rng.NextDouble() - .5) * 60 * intensity,
+                    originY + (Rng.NextDouble() - .5) * 60 * intensity, bounds.Width, bounds.Height),
+                    new Box(area.X, area.Y, area.Width, area.Height));
+                offset.X += target.X - bounds.X; offset.Y += target.Y - bounds.Y;
+            }
+        };
         void PreferencesChanged()
         {
             if (!subscribed || tileGrid.Dispatcher.HasShutdownStarted) return;
@@ -406,20 +372,19 @@ public static class AprilFoolsUi
             else tileGrid.Dispatcher.BeginInvoke(new Action(() => { if (subscribed) UpdateTimers(); }));
         }
         void VisibilityChanged(object sender, DependencyPropertyChangedEventArgs e) => UpdateTimers();
-        void WindowStateChanged(object? sender, EventArgs e) => UpdateTimers();
+        void WindowChanged(object? sender, EventArgs e) => UpdateTimers();
+        void SizeChanged(object sender, SizeChangedEventArgs e) { foreach (var button in transforms.Keys.ToArray()) Reset(button); UpdateTimers(); }
         void OwnerClosed(object? sender, EventArgs e) => Unloaded(tileGrid, new RoutedEventArgs());
         void Loaded(object sender, RoutedEventArgs e)
         {
             if (subscribed) return;
-            subscribed = true;
-            homeWindow = Window.GetWindow(tileGrid);
+            subscribed = true; window = Window.GetWindow(tileGrid);
             AprilFoolsService.StateChanged += PreferencesChanged;
             AnimationSettingsService.Changed += PreferencesChanged;
-            if (homeWindow != null)
+            if (window != null)
             {
-                homeWindow.IsVisibleChanged += VisibilityChanged;
-                homeWindow.StateChanged += WindowStateChanged;
-                homeWindow.Closed += OwnerClosed;
+                window.IsVisibleChanged += VisibilityChanged; window.StateChanged += WindowChanged;
+                window.Activated += WindowChanged; window.Deactivated += WindowChanged; window.Closed += OwnerClosed;
             }
             UpdateTimers();
         }
@@ -428,36 +393,26 @@ public static class AprilFoolsUi
             subscribed = false;
             AprilFoolsService.StateChanged -= PreferencesChanged;
             AnimationSettingsService.Changed -= PreferencesChanged;
-            dodgeTimer.Stop();
-            tileChaosTimer.Stop();
-            foreach (var child in tileGrid.Children.OfType<Button>()) ResetTransform(child);
-            ResetTransform(launchTile);
-            if (homeWindow != null)
+            dodgeTimer.Stop(); tileTimer.Stop(); activityTimer.Stop();
+            foreach (var button in transforms.Keys.ToArray()) Reset(button);
+            if (window != null)
             {
-                homeWindow.IsVisibleChanged -= VisibilityChanged;
-                homeWindow.StateChanged -= WindowStateChanged;
-                homeWindow.Closed -= OwnerClosed;
-                homeWindow = null;
+                window.IsVisibleChanged -= VisibilityChanged; window.StateChanged -= WindowChanged;
+                window.Activated -= WindowChanged; window.Deactivated -= WindowChanged; window.Closed -= OwnerClosed;
+                window = null;
             }
         }
-        tileGrid.Loaded += Loaded;
-        tileGrid.Unloaded += Unloaded;
+        tileGrid.Loaded += Loaded; tileGrid.Unloaded += Unloaded; tileGrid.SizeChanged += SizeChanged;
         tileGrid.IsVisibleChanged += VisibilityChanged;
         if (tileGrid.IsLoaded) Loaded(tileGrid, new RoutedEventArgs());
-
-        launchTile.PreviewMouseLeftButtonDown += (_, e) =>
-        {
-            if (!AprilFoolsService.Has(AprilFoolsService.Effect.TileChaos)) return;
-            e.Handled = true;
-            MessageBoxDialog.ShowInfo("磁贴今天不开心，很不高兴为你启动游戏。", "提示");
-        };
     }
 
-    private static void EnsureTransform(Button button)
-    {
-        if (button.RenderTransform is not TranslateTransform)
-        {
-            button.RenderTransform = new TranslateTransform();
-        }
-    }
+    [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct WINDOWPLACEMENT
+    { public int Length, Flags, ShowCmd; public POINT MinPosition, MaxPosition; public RECT NormalPosition; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rectangle);
+    [DllImport("user32.dll")] private static extern bool GetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
+    [DllImport("user32.dll")] private static extern bool SetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 }

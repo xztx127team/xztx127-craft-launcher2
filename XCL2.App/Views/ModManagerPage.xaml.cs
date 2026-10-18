@@ -40,6 +40,7 @@ public partial class ModManagerPage : UserControl
     private bool _updatingSelection;
     private bool _isLoadingVersions;
     private bool _isLoadingMods;
+    private bool _checkingBatchUpdates;
 
     // 监视当前实例的 mods 文件夹：不管是拖拽导入、下载、还是用户手动往文件夹里丢文件，
     // 只要内容变了就自动刷新列表。防抖是因为复制一个 jar 会连续触发好几次文件事件。
@@ -163,7 +164,7 @@ public partial class ModManagerPage : UserControl
     {
         // 一次更换数据源，避免每个模组分别触发集合通知/布局；列表仍使用虚拟化。
         _mods = mods.Select(m => new LocalModDisplayItem(m)).ToArray();
-        ModsListBox.ItemsSource = _mods;
+        ApplyModExperience();
     }
 
     private void CancelVersionScan()
@@ -334,6 +335,7 @@ public partial class ModManagerPage : UserControl
             ? "请先选择一个文件夹和版本。"
             : "这个版本还没有安装任何 Mod，去「下载」页的 Mod 分类搜索安装吧。";
         ModsListBox.Visibility = isLoading || _mods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (!isLoading) ApplyModFilter();
     }
 
     private void FolderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -355,6 +357,32 @@ public partial class ModManagerPage : UserControl
     }
 
     private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshMods();
+
+    private void MoreActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.ContextMenu != null)
+        { button.ContextMenu.PlacementTarget = button; button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom; button.ContextMenu.IsOpen = true; }
+    }
+
+    private async void PreviewCompatibility_Click(object sender, RoutedEventArgs e)
+    {
+        var gameDir = GetEffectiveGameDir(); var version = VersionCombo.SelectedItem as GameVersion;
+        if (gameDir == null || version == null) { ToastService.ShowInfo("请先选择游戏目录和实例。"); return; }
+        CancelDependencyAnalysis(); var generation = _dependencyAnalysisGeneration; var cancellation = new CancellationTokenSource(); _dependencyAnalysisCancellation = cancellation;
+        var button = sender as Button; if (button != null) button.IsEnabled = false;
+        var id = version.Id; var mc = version.McVersion; var loader = version.ModLoader;
+        try
+        {
+            var report = await Task.Run(() => ModCompatibilityPreviewService.Analyze(_localModService.ScanMods(gameDir, cancellation.Token), mc, loader, cancellation.Token), cancellation.Token);
+            if (!IsLoaded || cancellation.IsCancellationRequested || generation != _dependencyAnalysisGeneration
+                || (VersionCombo.SelectedItem as GameVersion)?.Id != id || !string.Equals(GetEffectiveGameDir(), gameDir, StringComparison.OrdinalIgnoreCase)) return;
+            var dialog = new ModCompatibilityPreviewDialog(_owner, report); dialog.ShowDialog();
+            if (dialog.OpenUpdateCheckRequested && !cancellation.IsCancellationRequested) BatchUpdateMods_Click(sender, e);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex) { ToastService.ShowWarning("兼容性预览未完成：" + ex.Message); }
+        finally { if (ReferenceEquals(_dependencyAnalysisCancellation, cancellation)) _dependencyAnalysisCancellation = null; cancellation.Dispose(); if (button != null) button.IsEnabled = true; }
+    }
 
     /// <summary>
     /// 交接文档需求：前置模组分析。手动点"检查前置模组"按钮触发（不做成每次刷新都自动弹窗——
@@ -435,6 +463,7 @@ public partial class ModManagerPage : UserControl
     /// </summary>
     private async void BatchUpdateMods_Click(object sender, RoutedEventArgs e)
     {
+        if (_checkingBatchUpdates) { ToastService.ShowInfo("正在检查或更新模组，请稍候。"); return; }
         var gameDir = GetEffectiveGameDir();
         var version = VersionCombo.SelectedItem as GameVersion;
         if (gameDir == null || version == null)
@@ -443,6 +472,9 @@ public partial class ModManagerPage : UserControl
             return;
         }
 
+        if (!_owner.ConfigService.Config.AllowManualModUpdateNetworkChecks)
+        { ToastService.ShowInfo("手动联网检查已关闭，可在“兼容性预览 → 联网检查设置”中开启。"); return; }
+
         var modsDir = Path.Combine(gameDir, "mods");
         if (!Directory.Exists(modsDir))
         {
@@ -450,6 +482,9 @@ public partial class ModManagerPage : UserControl
             return;
         }
 
+        _checkingBatchUpdates = true;
+        try
+        {
         using var batchUpdate = new BatchUpdateService();
         List<UpdateCandidate> candidates;
         try
@@ -466,9 +501,14 @@ public partial class ModManagerPage : UserControl
             return;
         }
 
+        if (!IsLoaded || !string.Equals(GetEffectiveGameDir(), gameDir, StringComparison.OrdinalIgnoreCase) || (VersionCombo.SelectedItem as GameVersion)?.Id != version.Id) return;
+        ModUpdatePreferenceService.Remember(gameDir, candidates);
+        RefreshModMetadataStatus();
+        var ignoredCount = candidates.Count(candidate => ModUpdatePreferenceService.IsIgnored(_owner.ConfigService.Config, gameDir, candidate));
+        candidates = candidates.Where(candidate => !ModUpdatePreferenceService.IsIgnored(_owner.ConfigService.Config, gameDir, candidate)).ToList();
         if (candidates.Count == 0)
         {
-            MessageBoxDialog.ShowInfo("没有发现可升级的模组（可能都已是最新版本，或者这些 mod 无法通过 Modrinth 识别）。", "检查完成");
+            MessageBoxDialog.ShowInfo(ignoredCount > 0 ? $"本次发现的 {ignoredCount} 个更新版本已被你忽略。可在“更多 → 已忽略的更新版本”恢复提醒。" : "没有发现可升级的模组（可能都已是最新版本，或者这些 mod 无法通过 Modrinth 识别）。", "检查完成");
             return;
         }
 
@@ -476,12 +516,30 @@ public partial class ModManagerPage : UserControl
         // 两个选项。默认全部勾选，维持"一键全部升级"这个最常见场景的操作习惯，需要跳过
         // 某几个的时候用户自己取消勾选即可。ModUpdateSelectionDialog 关闭时会把用户的勾选
         // 结果写回每个 candidate.Selected，ApplyAsync 内部本来就只处理 Selected=true 的项。
-        var selectionDlg = new ModUpdateSelectionDialog(candidates);
+        var selectionDlg = new ModUpdateSelectionDialog(candidates, candidate =>
+        {
+            var before = _owner.ConfigService.Config.Ux50IgnoredModUpdateVersions.ToArray();
+            ModUpdatePreferenceService.Ignore(_owner.ConfigService.Config, gameDir, candidate);
+            try { _owner.ConfigService.Save(); }
+            catch { _owner.ConfigService.Config.Ux50IgnoredModUpdateVersions = before.ToList(); throw; }
+        });
         if (selectionDlg.ShowDialog() != true) return;
 
-        var (succeeded, failed) = await batchUpdate.ApplyAsync(modsDir, candidates, progress: null, ct: default);
+        List<string> succeeded;
+        List<(string name, string error)> failed;
+        try { (succeeded, failed) = await batchUpdate.ApplyAsync(modsDir, candidates, progress: null, ct: default); }
+        catch (OperationCanceledException) { TaskResultHistoryService.Record(TaskResultKind.ModUpdate, TaskResultOutcome.Canceled); ToastService.ShowInfo("模组更新已取消，原文件快照仍可查看。"); return; }
+        catch (Exception ex)
+        {
+            TaskResultHistoryService.Record(TaskResultKind.ModUpdate, TaskResultOutcome.Failed);
+            ErrorPresenter.ShowFriendlyError("更新已停止：" + ex.Message + "\n可在设置的「提醒、启动检查与恢复」中查看快照或调整保留空间。",
+                ex.ToString(), "模组更新未完成");
+            RefreshMods();
+            return;
+        }
 
         RefreshMods();
+        TaskResultHistoryService.Record(TaskResultKind.ModUpdate, failed.Count == 0 ? TaskResultOutcome.Completed : TaskResultOutcome.Failed);
 
         if (failed.Count == 0)
         {
@@ -494,6 +552,8 @@ public partial class ModManagerPage : UserControl
                 $"成功升级 {succeeded.Count} 个，{failed.Count} 个失败：\n\n{failText}",
                 "升级完成（部分失败）");
         }
+        }
+        finally { _checkingBatchUpdates = false; }
     }
 
     private void EnableMod_Click(object sender, RoutedEventArgs e)
@@ -643,13 +703,14 @@ public partial class ModManagerPage : UserControl
         var isMrpack = string.Equals(Path.GetExtension(dialog.FileName), ".mrpack", StringComparison.OrdinalIgnoreCase)
             || ModpackService.IsMrpack(dialog.FileName);
 
+        if (!await ImportPreviewDialog.ConfirmAsync(dialog.FileName, gameDir, (VersionCombo.SelectedItem as GameVersion)?.Id ?? "当前实例", ImportPreviewKind.ModpackArchive)) return;
         var confirmMsg = isMrpack
             ? "这是一个 Modrinth 整合包(.mrpack)。导入会解压其中的附带文件(config/资源包等)，\n" +
               "并按清单逐个下载 mod 到当前选中的版本目录，同名文件会被覆盖。\n" +
               "部分 mod 下载源如果暂时不可用，会跳过并在导入完成后提示，不影响其余内容导入。确定要继续吗？"
             : "导入会把整合包内的 mods/config/resourcepacks/shaderpacks 合并覆盖到当前选中的版本目录，\n" +
               "同名文件会被整合包内容覆盖。确定要继续吗？";
-        var confirm = MessageBoxDialog.ShowConfirm(confirmMsg, Loc.T("Str_Cs_Confirm_Import", Loc.T("Str_Cs_Confirm_Import", "确认导入")));
+        var confirm = _owner.ConfigService.Config.Ux50ImportPreview || MessageBoxDialog.ShowConfirm(confirmMsg, Loc.T("Str_Cs_Confirm_Import", Loc.T("Str_Cs_Confirm_Import", "确认导入")));
         if (!confirm) return;
 
         var progressWin = new ProgressDialog("正在导入整合包 ...");
@@ -692,8 +753,14 @@ public partial class ModManagerPage : UserControl
 
 /// <summary>本地 Mod 列表项的显示包装：根据启用/禁用状态决定"启用"/"禁用"两个按钮谁可见，
 /// 避免在一个已启用的 mod 上还显示多余的"启用"按钮造成困惑。</summary>
-public class LocalModDisplayItem
+public class LocalModDisplayItem : System.ComponentModel.INotifyPropertyChanged
 {
+    private bool _isBatchSelected;
+    public bool IsBatchSelected { get => _isBatchSelected; set { if (_isBatchSelected == value) return; _isBatchSelected = value; PropertyChanged?.Invoke(this, new(nameof(IsBatchSelected))); } }
+    private bool _batchToolsVisible;
+    public bool BatchToolsVisible { get => _batchToolsVisible; set { _batchToolsVisible = value; PropertyChanged?.Invoke(this, new(nameof(BatchSelectionVisibility))); } }
+    public Visibility BatchSelectionVisibility => BatchToolsVisible ? Visibility.Visible : Visibility.Collapsed;
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     public LocalModInfo Info { get; }
     public string DisplayName => Info.DisplayName;
     public string FileName => Info.FileName;

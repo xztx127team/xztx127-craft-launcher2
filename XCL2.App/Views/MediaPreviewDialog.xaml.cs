@@ -30,7 +30,7 @@ public partial class MediaPreviewDialog : OverlayDialogControl
     {
         InitializeComponent();
         FileNameText.Text = Path.GetFileName(path);
-        RequestClose += (_, _) => StopPlayback();
+        OverlayClosed += (_, _) => StopPlayback();
 
         var ext = Path.GetExtension(path).ToLowerInvariant();
         try

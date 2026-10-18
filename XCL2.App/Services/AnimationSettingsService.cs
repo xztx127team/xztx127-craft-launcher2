@@ -1,3 +1,4 @@
+using System.Windows;
 using XCL2.App.Models;
 
 namespace XCL2.App.Services;
@@ -25,6 +26,21 @@ public enum AnimationKind
 public static class AnimationSettingsService
 {
     private static readonly string[] OptionKeys = Enum.GetNames<AnimationKind>();
+
+    static AnimationSettingsService()
+    {
+        SystemParameters.StaticPropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName != nameof(SystemParameters.ClientAreaAnimation)) return;
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.HasShutdownStarted) return;
+            if (dispatcher.CheckAccess()) NotifyChanged();
+            else dispatcher.BeginInvoke(new Action(NotifyChanged));
+        };
+    }
+
+    private static bool SystemRequestsReducedMotion
+        => (ConfigService.Active?.Config.FollowSystemReducedMotion ?? true) && !SystemParameters.ClientAreaAnimation;
 
     public static readonly IReadOnlyList<(AnimationKind Kind, string Label)> Options =
         new (AnimationKind Kind, string Label)[]
@@ -59,7 +75,8 @@ public static class AnimationSettingsService
     public static event Action? Changed;
 
     public static bool NoAnimationModeEnabled
-        => _preview?.NoAnimations ?? ConfigService.Active?.Config.CompletelyDisableAnimations ?? false;
+        => App.StartupArgs.DisableAnimations || SystemRequestsReducedMotion ||
+           (_preview?.NoAnimations ?? ConfigService.Active?.Config.CompletelyDisableAnimations ?? false);
 
     public static NoAnimationOptimization OptimizationPreference
         => _preview?.Optimization ?? ConfigService.Active?.Config.NoAnimationOptimization ?? NoAnimationOptimization.Balanced;

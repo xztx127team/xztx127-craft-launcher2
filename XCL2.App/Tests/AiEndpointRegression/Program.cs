@@ -8,6 +8,30 @@ void Check(bool condition, string name)
     if (!condition) throw new InvalidOperationException("FAIL: " + name);
     checks++;
 }
+// Pasted endpoint URLs and tenant/version query strings must produce the same API root.
+foreach (var (input, chat, models) in new[]
+{
+    ("https://api.example/v1", "https://api.example/v1/chat/completions", "https://api.example/v1/models"),
+    ("https://api.example/v1/chat/completions?tenant=demo#x", "https://api.example/v1/chat/completions?tenant=demo", "https://api.example/v1/models?tenant=demo"),
+    ("https://api.example/v1/models/", "https://api.example/v1/chat/completions", "https://api.example/v1/models"),
+    ("http://localhost:1234/custom/v1/?api-version=2024-06-01", "http://localhost:1234/custom/v1/chat/completions?api-version=2024-06-01", "http://localhost:1234/custom/v1/models?api-version=2024-06-01"),
+    ("https://api.example/custom%2Fprefix/v1/chat/completions?tenant=a%2Fb", "https://api.example/custom%2Fprefix/v1/chat/completions?tenant=a%2Fb", "https://api.example/custom%2Fprefix/v1/models?tenant=a%2Fb")
+})
+{
+    Check(AiEndpointRouting.BuildChatCompletionsUrl(input) == chat, "chat URL: " + input);
+    Check(AiEndpointRouting.BuildModelsUrl(input) == models, "models URL: " + input);
+}
+foreach (var invalid in new[] { "", "api.example/v1", "file:///tmp/models", "https://user:secret@api.example/v1" })
+{
+    var rejected = false;
+    try { AiEndpointRouting.BuildChatCompletionsUrl(invalid); } catch (ArgumentException) { rejected = true; }
+    Check(rejected, "invalid API URL rejected");
+}
+Check(AiEndpointRouting.NormalizeBaseUrl("https://api.example/v1/models?tenant=demo#x") == "https://api.example/v1?tenant=demo", "shared normalization preserves query");
+Check(AiEndpointRouting.ShouldRetryWithNextKey(403, "invalid_api_key"), "explicit invalid-key 403 may rotate");
+Check(!AiEndpointRouting.ShouldRetryWithNextKey(403, "model access forbidden"), "model permission 403 does not rotate keys");
+Check(!AiEndpointRouting.ShouldRetryWithNextKey(500, "upstream insufficient_quota"), "gateway failure does not exhaust keys");
+Check(!AiEndpointRouting.ShouldRetryWithNextKey(400, "unsupported model parameter temperature"), "parameter errors do not exhaust keys");
 var config = new AiAssistantConfig
 {
     UseCustomApiKey = true, BaseUrl = "https://one.example/v1", ApiKey = "first-test-only",
@@ -87,4 +111,11 @@ Check(AiModelIds.FindInCatalog(restored, secondaryKey)?.Id == "same-model" && re
 var oldDefault = new AiAssistantConfig();
 AiEndpointRouting.NormalizeConfig(oldDefault);
 Check(!oldDefault.EnableEndpointFailover && !oldDefault.MixBuiltInApi && oldDefault.ReasoningLevel == AiReasoningLevel.Off, "migration does not silently enable optional modes");
+var localConfig = new AiAssistantConfig
+{
+    UseCustomApiKey = true, BaseUrl = "http://localhost:1234/v1", CustomModels = new() { new() { Id = "local-model" } }
+};
+var localTarget = AiEndpointRouting.GetCandidates(localConfig, "local-model").Single();
+Check((await AiEndpointRouting.ResolveApiKeysAsync(localTarget)).SequenceEqual(new[] { "" }), "unauthenticated custom endpoint never borrows another key");
+checks += await ModelFetchChecks.RunAsync();
 Console.WriteLine($"PASS: {checks} endpoint and quota regression checks");

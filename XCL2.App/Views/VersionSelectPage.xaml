@@ -14,7 +14,7 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
                 <StackPanel>
                     <TextBlock Text="{DynamicResource Str_Ui_Folders}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="13" Margin="0,0,0,8"/>
-                    <ListBox x:Name="FolderListBox" BorderThickness="0" Background="Transparent"
+                    <ListBox x:Name="FolderListBox" BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch"
                              SelectionChanged="FolderListBox_SelectionChanged" MaxHeight="260">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
@@ -23,13 +23,15 @@
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding Name}" FontSize="15" Foreground="{DynamicResource AccentBrush}"/>
-                                            <TextBlock Text="（默认）" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
-                                                       Margin="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed">
+                                    <StackPanel Grid.Column="0" ToolTip="{Binding Path}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" services:LongPressToolTipBehavior.Enabled="True" FontSize="15" Foreground="{DynamicResource AccentBrush}"/>
+                                            <TextBlock Grid.Column="1" Text="（默认）" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       Margin="6,0,0,0" VerticalAlignment="Center">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsDefault}" Value="True">
                                                                 <Setter Property="Visibility" Value="Visible"/>
@@ -38,8 +40,8 @@
                                                     </Style>
                                                 </TextBlock.Style>
                                             </TextBlock>
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding Path}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                        </Grid>
+                                        <TextBlock Text="{Binding Path}" ToolTip="{Binding Path}" services:LongPressToolTipBehavior.Enabled="True" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
                                     </StackPanel>
 
                                     <!-- 每个文件夹右侧的设置按钮：点击弹出二级菜单（打开/重命名/设为默认/删除）。
@@ -111,17 +113,32 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="{DynamicResource Str_Ui_Installed_Versions}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                        <Button Grid.Column="1" Content="{DynamicResource Str_Ui_Install_New_Version}" Style="{StaticResource PrimaryButton}"
+                        <TextBlock Grid.Column="0" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" Text="{DynamicResource Str_Ui_Installed_Versions}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                        <Button Grid.Column="1" Content="筛选" Padding="10,6" Margin="0,0,8,0" ToolTip="按名称、备注、标签或收藏筛选实例" Click="ToggleInstanceFilter_Click"/>
+                        <Button Grid.Column="2" Content="{DynamicResource Str_Ui_Install_New_Version}" Style="{StaticResource PrimaryButton}"
                                 Padding="12,6" Click="InstallNewVersion_Click"/>
                     </Grid>
 
+                    <Grid x:Name="InstanceFilterRow" DockPanel.Dock="Top" Margin="0,0,0,10" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="112"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="InstanceFilterBox" MinWidth="80" MinHeight="32" VerticalContentAlignment="Center" Margin="0,0,8,0"
+                                 ToolTip="搜索实例名称、版本、标签和备注" AutomationProperties.Name="搜索实例名称、版本、标签和备注" TextChanged="InstanceFilter_Changed"/>
+                        <ComboBox x:Name="InstanceScopeBox" Grid.Column="1" MinHeight="32" SelectedIndex="0" ToolTip="显示全部、收藏或最近启动的实例" AutomationProperties.Name="实例筛选范围" SelectionChanged="InstanceFilter_Changed">
+                            <ComboBoxItem Content="全部实例"/><ComboBoxItem Content="已收藏"/><ComboBoxItem Content="最近使用"/>
+                        </ComboBox>
+                        <Button Grid.Column="2" Content="清除" Margin="8,0,0,0" Padding="10,5" ToolTip="清除筛选条件" Click="ClearInstanceFilter_Click"/>
+                    </Grid>
+                    <TextBlock x:Name="InstanceEmptyMessage" DockPanel.Dock="Top" Visibility="Collapsed" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,12"/>
+                    <TextBlock x:Name="BackgroundTaskOwnership" DockPanel.Dock="Top" Visibility="Collapsed" TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,8"/>
                     <TextBlock DockPanel.Dock="Top" Text="{DynamicResource Str_Ui_Installed_On_This_Pc}" FontWeight="Bold" Margin="0,0,0,6" Foreground="{DynamicResource TextPrimaryBrush}"/>
 
                     <!-- ListBox 撑满剩余空间，内容比这一行还高时用自己的 ScrollViewer（ListBox 默认自带）单独滚动。 -->
                     <ListBox x:Name="InstalledListBox" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource DividerBrush}"
-                             ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True"
+                             ScrollViewer.CanContentScroll="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch" VirtualizingPanel.IsVirtualizing="True"
                              VirtualizingPanel.VirtualizationMode="Recycling"
                              SelectionChanged="InstalledListBox_SelectionChanged">
                         <ListBox.ItemTemplate>
@@ -144,11 +161,29 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
 
-                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <TextBlock Text="🧊" FontSize="18" Margin="0,0,10,0"/>
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Id}" FontSize="15" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                                            <TextBlock Text="{Binding SubTitle}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <Grid Grid.Column="0" VerticalAlignment="Center" ToolTip="{Binding FullDisplayToolTip}" services:LongPressToolTipBehavior.Enabled="True">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="36"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                        <Grid Width="28" Height="28" Margin="0,0,8,0">
+                                            <TextBlock Text="🧊" FontSize="22" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasCustomIcon}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                                </Style.Triggers></Style></TextBlock.Style>
+                                            </TextBlock>
+                                            <Image Source="{Binding CustomIconPath}" Stretch="UniformToFill"/>
+                                        </Grid>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding DisplayTitle}" TextTrimming="CharacterEllipsis" FontSize="15" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                                            <TextBlock Text="{Binding Details}" TextTrimming="CharacterEllipsis" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBlock Text="共享游戏目录" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" ToolTip="这个实例与其他实例共用游戏目录，模组和存档可能共用。此标记不会修改隔离设置。">
+                                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SharesGameDirectory}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger>
+                                                </Style.Triggers></Style></TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding MetadataSummary}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}">
+                                                <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+                                                    <DataTrigger Binding="{Binding MetadataSummary}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                                </Style.Triggers></Style></TextBlock.Style>
+                                            </TextBlock>
                                             <TextBlock Text="实例文件不完整，需要修复" FontSize="12"
                                                        Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,0">
                                                 <TextBlock.Style>
@@ -163,7 +198,7 @@
                                                 </TextBlock.Style>
                                             </TextBlock>
                                         </StackPanel>
-                                    </StackPanel>
+                                    </Grid>
 
                                     <!-- 每个实例条目右侧的单独设置入口：点击弹出二级菜单（版本设置/重命名/删除），
                                         不再直接进入设置——版本设置统一从菜单进。

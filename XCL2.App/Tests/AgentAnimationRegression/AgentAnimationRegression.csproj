@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AiAgentSettings.cs" Link="AiAgentSettings.cs" />
+    <Compile Include="../../Models/AnimationOption.cs" Link="AnimationOption.cs" />
+    <Compile Include="../../Services/AiAgentAnimationService.cs" Link="AiAgentAnimationService.cs" />
+  </ItemGroup>
+</Project>

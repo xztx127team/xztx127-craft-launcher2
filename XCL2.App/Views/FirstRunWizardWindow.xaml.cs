@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -59,12 +59,12 @@ public partial class FirstRunWizardWindow : OverlayDialogControl
         // 遗留 bug。这里用 Closing 事件兜底：不管用户是点 Skip、点完成，还是直接点 ×
         // 关闭，只要窗口关闭这一步就必然会执行到这里，统一保证标记为已完成
         // （_completed 幂等标志避免重复保存；已经手动走完 Complete() 的路径会在此处跳过）。
-        // Window.Closing → IOverlayDialog.RequestClose。原来靠 Closing 兜底"不管怎么关都要
-        // 标记为已完成"，Overlay 下 RequestClose 同样在每一条关闭路径上都会触发
+        // Window.Closing → OverlayDialogControl.OverlayClosed。原来靠 Closing 兜底"不管怎么关都要
+        // 标记为已完成"，实际关闭通知在宿主的每一条关闭路径上都会触发
         // （点跳过/点完成/按 Esc/点遮罩），兜底效果一致。
         // 另外 Overlay 没有 WPF"窗口关闭期间不能再 Close()"那条限制，
         // 但下面仍然保留 _completed 幂等标志，避免重复保存配置。
-        RequestClose += (_, _) =>
+        OverlayClosed += (_, _) =>
         {
             if (!_completed)
             {
@@ -180,11 +180,10 @@ public partial class FirstRunWizardWindow : OverlayDialogControl
     private async void AutoInstallJava_Click(object sender, RoutedEventArgs e)
     {
         AutoInstallJavaBtn.IsEnabled = false;
-        var progressWin = new ProgressDialog("正在下载 Java 运行时...");
-        progressWin.Show();
+        JavaStatusText.Text = "Java 下载已加入右上角下载列表。";
         try
         {
-            var path = await JavaDownloadQueueService.DownloadRecommendedAsync(_javaService, progressWin.Progress);
+            var path = await JavaDownloadQueueService.DownloadRecommendedAsync(_javaService);
             _resolvedJavaPath = path;
             _javaStepDone = true;
             JavaStatusText.Text = $"Java 安装完成：{path}";
@@ -199,7 +198,6 @@ public partial class FirstRunWizardWindow : OverlayDialogControl
         }
         finally
         {
-            progressWin.Close();
             AutoInstallJavaBtn.IsEnabled = true;
         }
     }

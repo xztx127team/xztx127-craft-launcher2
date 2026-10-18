@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -60,6 +60,11 @@ public partial class SettingsPage : UserControl
     private bool _suppressAccentPickerSync;
     // 选择“自定义”本身只表示展开调色抽屉；在用户真正选定/应用颜色前，不应被视为一次设置修改。
     private bool _customThemeSelectionPending;
+    private bool _accentInputPending;
+    private string _committedUiSkin = ThemeService.SkinWhite;
+    private string? _committedCustomAccentColor;
+    private List<string> _pendingSkinCandidates = new();
+    private bool _backgroundOptionControlsInitialized;
     private string _lastSavedUiFingerprint = "";
     private bool _uiFingerprintReady;
     // 兜底轮询：ComboBox 的 DropDownClosed/SelectionChanged 事件在部分环境下排查下来
@@ -94,6 +99,11 @@ public partial class SettingsPage : UserControl
         InitializeComponent();
         InitializePluginSettings();
         var cfg = _owner.ConfigService.Config;
+        InitializePerformanceOverlaySettings(cfg);
+        InitializeRecoverySettings(cfg);
+        _committedUiSkin = cfg.UiSkin;
+        _committedCustomAccentColor = NormalizeAccentColor(cfg.CustomAccentColor) ?? (cfg.UiSkin == ThemeService.SkinCustom ? "#4C9AFF" : null);
+        _pendingSkinCandidates = (cfg.UiSkinCandidates ?? new List<string>()).Distinct(StringComparer.Ordinal).ToList();
         _pendingHiddenFeatureKeys = new HashSet<string>(cfg.HiddenFeatureKeys, StringComparer.OrdinalIgnoreCase);
         _pendingHiddenSettingKeys = new HashSet<string>(cfg.HiddenSettingKeys, StringComparer.OrdinalIgnoreCase);
 
@@ -105,10 +115,13 @@ public partial class SettingsPage : UserControl
         // 300ms 后旧页面的计时器仍会突然改全局主题，看起来像“切页后按钮自己变色”。
         Unloaded += (_, _) =>
         {
+            UnsubscribeAgentAnimationUpdates();
+            UnsubscribePerformanceOverlayUpdates();
             _pageLoadCancellation?.Cancel();
             _pageLoadCancellation?.Dispose();
             _pageLoadCancellation = null;
             _accentApplyDebounceTimer?.Stop();
+            _editDebounceTimer?.Stop();
             StopAnimationPreviews();
             AnimationSettingsService.ClearPreview();
             // F10 的"临时显示"只对当前这一次停留在设置页有效：切走页面就复位，
@@ -121,6 +134,8 @@ public partial class SettingsPage : UserControl
         };
         Loaded += async (_, _) =>
         {
+            SubscribeAgentAnimationUpdates();
+            SubscribePerformanceOverlayUpdates();
             _pageLoadCancellation?.Cancel();
             _pageLoadCancellation?.Dispose();
             var cancellation = new CancellationTokenSource();
@@ -154,6 +169,7 @@ public partial class SettingsPage : UserControl
         HighPerformanceGpuLaunchCheck.IsChecked = cfg.UseHighPerformanceGpuForGame;
         MinMemBox.Text = cfg.MinMemoryMb.ToString();
         MaxMemBox.Text = cfg.MaxMemoryMb.ToString();
+        InitializeMemorySettings(cfg);
         WidthBox.Text = cfg.WindowWidth.ToString();
         HeightBox.Text = cfg.WindowHeight.ToString();
         SourceCombo.SelectedIndex = cfg.Source == DownloadSource.Official ? 1 : 0;
@@ -200,6 +216,9 @@ public partial class SettingsPage : UserControl
         ShowModIconsCheck.IsChecked = cfg.ShowModIcons;
         ShowServerNetworkGuideCheck.IsChecked = cfg.ShowServerNetworkGuideOnStart;
         ShowUpdateChangelogPopupCheck.IsChecked = cfg.ShowUpdateChangelogPopup;
+        CheckLauncherUpdatesOnStartupCheck.IsChecked = cfg.CheckLauncherUpdatesOnStartup;
+        EnableLauncherUpdatesCheck.IsChecked = cfg.EnableLauncherUpdates;
+        UpdateLauncherUpdateControls(resetStatus: true);
         IsolateVersionsCheck.IsChecked = cfg.IsolateVersionsByDefault;
 
         // 外观与视觉效果：Win11 新光效 + 窗口透明度，均默认关闭，见 AppConfig 对应字段注释。
@@ -306,6 +325,7 @@ public partial class SettingsPage : UserControl
             if ((string?)item.Tag == cfg.FeatureSearchStyle) FeatureSearchStyleCombo.SelectedItem = item;
         if (FeatureSearchStyleCombo.SelectedItem == null) FeatureSearchStyleCombo.SelectedIndex = 0;
         _featureSearchStyleInitializing = false;
+        InitializeFeatureSearchSettings(cfg);
 
         // 窗口与托盘：下拉框选项顺序跟 XAML 里四个 ComboBoxItem 的声明顺序一一对应
         // （DirectClose=0，MinimizeToTray=1，Minimize=2，AskEachTime=3），初始化时按当前
@@ -377,6 +397,8 @@ public partial class SettingsPage : UserControl
         }
         SelectComboByTag(UiSkinRotationModeCombo, cfg.UiSkinRotationMode.ToString());
         if (UiSkinRotationModeCombo.SelectedItem == null) UiSkinRotationModeCombo.SelectedIndex = 0;
+        if (cfg.UiSkinRotationMode == AppearanceRotationMode.Fixed)
+            _pendingSkinCandidates = ThemeSelectionPolicy.FixedCandidates(_pendingSkinCandidates, _committedUiSkin);
         RefreshSkinCandidateUi();
 
         // Win11 高级特效开启时锁定为"水"主题（见 ThemeService.SkinAquatic 类注释）：
@@ -435,7 +457,14 @@ public partial class SettingsPage : UserControl
         // 所有加载初始值的代码到这里结束，之后任何控件值变化都应该视为"用户真的动了一下"，
         // 从这里开始挂编辑追踪、并放开 _suppressDirtyTracking。
         LauncherLogService.AppendLine("[设置未保存诊断] 构造函数：即将调用 HookDirtyTracking()。");
+        InitializeExperienceSettings(cfg);
+        InitializeUxSettings();
         HookDirtyTracking();
+        // 用逻辑树采集设置控件，构造完成时即可建立稳定基线；不等待首帧后的空闲回调，
+        // 避免用户抢在回调前选色、该变化反而被记作“初始值”。
+        _lastSavedUiFingerprint = BuildSettingsUiFingerprint();
+        _lastPolledFingerprint = _lastSavedUiFingerprint;
+        _uiFingerprintReady = true;
         LauncherLogService.AppendLine("[设置未保存诊断] 构造函数：HookDirtyTracking() 已返回，即将放开 _suppressDirtyTracking。");
         _suppressDirtyTracking = false;
 
@@ -444,10 +473,12 @@ public partial class SettingsPage : UserControl
         // 控件重新套主题、程序性重选同一个项目）就不会再误弹“设置已修改”。
         Loaded += (_, _) => Dispatcher.BeginInvoke(new Action(() =>
         {
+            if (_uiFingerprintReady) return;
             _lastSavedUiFingerprint = BuildSettingsUiFingerprint();
             _lastPolledFingerprint = _lastSavedUiFingerprint;
             _uiFingerprintReady = true;
             _hasUnsavedChanges = false;
+            MarkUxValuesAsSaved();
         }), DispatcherPriority.ContextIdle);
 
         // 见字段注释：不依赖任何控件事件的兜底轮询。只在页面还挂在可视化树上时跑，
@@ -455,7 +486,7 @@ public partial class SettingsPage : UserControl
         _dirtyPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _dirtyPollTimer.Tick += (_, _) =>
         {
-            if (_suppressDirtyTracking || !_uiFingerprintReady) return;
+            if (_suppressDirtyTracking || !_uiFingerprintReady || IsBrowsingSettingOptions()) return;
             string current;
             try { current = BuildSettingsUiFingerprint(); }
             catch (Exception ex)
@@ -509,25 +540,28 @@ public partial class SettingsPage : UserControl
         // 没真的换选项时指纹相同，自然什么都不会发生。
         try
         {
-            foreach (var combo in FindVisualChildren<ComboBox>(this))
+            foreach (var combo in FindSettingsControls<ComboBox>(this))
             {
                 var comboRef = combo;
                 combo.DropDownClosed += (_, _) =>
                 {
                     LauncherLogService.AppendLine($"[设置未保存诊断] ComboBox '{comboRef.Name}' 触发 DropDownClosed，suppressDirtyTracking={_suppressDirtyTracking}");
-                    if (!_suppressDirtyTracking) OnSettingsEdited();
+                    if (!_suppressDirtyTracking && !comboRef.IsDropDownOpen)
+                    {
+                        if (ReferenceEquals(comboRef, UiSkinCombo)) CompletePresetThemeSelection();
+                        OnSettingsEdited();
+                    }
                 };
 
                 // 补充兜底：DropDownClosed 在自定义 ComboBox 模板下是否稳定触发，
                 // 排查下来并不可靠（哪怕模板里 Popup 命名正确）。SelectionChanged 是
                 // Selector 的核心事件，只要 SelectedItem/SelectedIndex 真的变了就一定
                 // 会触发，不依赖任何模板部件命名，用它做主要检测手段更稳妥。
-                // 即使下拉还开着、用户正用键盘上下浏览也没关系——防抖 + 后面的指纹比较
-                // 本来就是按"400ms 内没有再变化"才最终判定，不会因为提前触发就误报。
+                // 下拉还开着时只浏览；关闭后再统一比较真实值，避免导航途中自动保存。
                 combo.AddHandler(Selector.SelectionChangedEvent, new SelectionChangedEventHandler((_, _) =>
                 {
                     LauncherLogService.AppendLine($"[设置未保存诊断] ComboBox '{comboRef.Name}' 触发 SelectionChanged(AddHandler,handledEventsToo)，suppressDirtyTracking={_suppressDirtyTracking}，当前选中={comboRef.SelectedItem}");
-                    if (!_suppressDirtyTracking) OnSettingsEdited();
+                    if (!_suppressDirtyTracking && !comboRef.IsDropDownOpen) OnSettingsEdited();
                 }), handledEventsToo: true);
             }
         }
@@ -595,7 +629,7 @@ public partial class SettingsPage : UserControl
     /// </summary>
     private void OnSettingsEdited()
     {
-        if (_suppressDirtyTracking) return;
+        if (_suppressDirtyTracking || _featureSearchControlsSync || _uxResetInProgress) return;
         LauncherLogService.AppendLine("[设置未保存诊断] OnSettingsEdited：重启 400ms 防抖计时器。");
 
         _editDebounceTimer?.Stop();
@@ -615,10 +649,16 @@ public partial class SettingsPage : UserControl
             _lastSavedUiFingerprint = BuildSettingsUiFingerprint();
             _uiFingerprintReady = true;
             _hasUnsavedChanges = false;
+            MarkUxValuesAsSaved();
         }), DispatcherPriority.ContextIdle);
     }
 
-    private void HandleDebouncedEdit() => ProcessCurrentUiEdit(showManualPrompt: true, showAutoSavePrompt: true);
+    private void HandleDebouncedEdit()
+    {
+        if (IsBrowsingSettingOptions()) return;
+        UpdateUxChangeSummary();
+        ProcessCurrentUiEdit(showManualPrompt: true, showAutoSavePrompt: true);
+    }
 
     /// <summary>
     /// 真正执行一次“界面值 vs 最近保存值”的比较。两个 show*Prompt 参数分别控制手动保存卡和
@@ -649,6 +689,7 @@ public partial class SettingsPage : UserControl
         if (string.Equals(currentFingerprint, _lastSavedUiFingerprint, StringComparison.Ordinal))
         {
             _hasUnsavedChanges = false;
+            ToastService.DismissActionPrompt("settings-dirty");
             LauncherLogService.AppendLine("[设置未保存诊断] 界面指纹跟上次保存时一致，判定为没有真实改动，不弹提示。");
             return;
         }
@@ -661,6 +702,7 @@ public partial class SettingsPage : UserControl
             // 自动保存分支：先把保存前的完整配置快照下来（供"回退"按钮用），
             // 再走跟点击"保存设置"按钮完全相同的落盘逻辑。正常编辑时显示“回退”操作卡；
             // 关闭/切页前的同步 flush 不再额外闪一张卡片，避免模态确认与操作卡叠在一起。
+            if (!ValidateExperienceSettings()) { _hasUnsavedChanges = true; return; }
             _preAutoSaveSnapshotJson = System.Text.Json.JsonSerializer.Serialize(cfg);
             PerformSave();
             _hasUnsavedChanges = false;
@@ -700,6 +742,8 @@ public partial class SettingsPage : UserControl
     public void FlushPendingEditsForLeave(bool preserveAutoSaveRollbackPrompt = false)
     {
         if (_suppressDirtyTracking) return;
+        CompletePresetThemeSelection();
+        CommitPendingAccentInput();
         _editDebounceTimer?.Stop();
         // 离页时如果自动保存已开启，仍保留“回退”卡片供用户在其它页面撤销；
         // 真正关闭窗口时则没有显示它的意义，调用方传 false 即可。手动保存分支不在这里
@@ -730,23 +774,23 @@ public partial class SettingsPage : UserControl
             return fallback;
         }
 
-        foreach (var tb in FindVisualChildren<TextBox>(this))
+        foreach (var tb in FindSettingsControls<TextBox>(this))
         {
             // 搜索框不属于配置内容；否则只输入搜索关键字也会改变指纹，被误判成设置修改。
-            if (tb.IsReadOnly || ReferenceEquals(tb, SettingsSearchBox)) continue;
-            parts.Add($"T|{Key(tb, "TextBox")}|{tb.Text}");
+            if (tb.IsReadOnly || InputExperienceService.GetIsAuxiliary(tb) || ReferenceEquals(tb, SettingsSearchBox) || ReferenceEquals(tb, CustomAccentColorBox)) continue;
+            parts.Add($"T|{Key(tb, "TextBox")}|{System.Text.Json.JsonSerializer.Serialize(MeaningfulInputValue(tb))}");
         }
-        foreach (var cb in FindVisualChildren<CheckBox>(this))
+        foreach (var cb in FindSettingsControls<CheckBox>(this).Where(cb => !ReferenceEquals(cb, FeatureSearchEditCheck)))
             parts.Add($"C|{Key(cb, "CheckBox")}|{cb.IsChecked}");
-        foreach (var rb in FindVisualChildren<RadioButton>(this))
+        foreach (var rb in FindSettingsControls<RadioButton>(this))
             parts.Add($"R|{Key(rb, "RadioButton")}|{rb.IsChecked}");
-        foreach (var combo in FindVisualChildren<ComboBox>(this))
+        foreach (var combo in FindSettingsControls<ComboBox>(this))
         {
             string value;
-            if (ReferenceEquals(combo, UiSkinCombo) && _customThemeSelectionPending)
+            if (ReferenceEquals(combo, UiSkinCombo))
             {
-                // 只展开“自定义”调色抽屉时，指纹仍按当前已保存主题计算。
-                value = _owner.ConfigService.Config.UiSkin;
+                // 只展开调色区域或浏览下拉时，仍按最后一次已提交的配色决定计算。
+                value = _committedUiSkin;
             }
             else
             {
@@ -759,12 +803,17 @@ public partial class SettingsPage : UserControl
             }
             parts.Add($"S|{Key(combo, "ComboBox")}|{value}");
         }
-        foreach (var slider in FindVisualChildren<Slider>(this))
+        foreach (var slider in FindSettingsControls<Slider>(this))
         {
             if (ReferenceEquals(slider, AccentRSlider) || ReferenceEquals(slider, AccentGSlider) || ReferenceEquals(slider, AccentBSlider))
                 continue;
             parts.Add($"V|{Key(slider, "Slider")}|{Math.Round(slider.Value, 3)}");
         }
+
+        parts.Add($"A|CustomAccentColor|{_committedCustomAccentColor ?? ""}");
+        parts.Add($"L|UiSkinCandidates|{string.Join(",", _pendingSkinCandidates)}");
+        parts.Add($"H|Features|{string.Join(",", _pendingHiddenFeatureKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase))}");
+        parts.Add($"H|Settings|{string.Join(",", _pendingHiddenSettingKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase))}");
 
         // 自定义窗口背景现在由“导入/清除”按钮立即应用并立即持久化，
         // 因此只读路径框不属于批量保存内容，也不参与未保存设置指纹。
@@ -785,6 +834,7 @@ public partial class SettingsPage : UserControl
         EndEditingForReload();
 
         _owner.ConfigService.ReplaceConfigFieldsFrom(snapshot);
+        foreach (Window window in Application.Current.Windows) InputExperienceService.RefreshSecretControls(window);
         _owner.ConfigService.Save();
 
         // 回退不能只改 config.json：自动保存时已经同步过的系统/运行时副作用也必须一起恢复，
@@ -828,9 +878,12 @@ public partial class SettingsPage : UserControl
     {
         // 恢复/撤销后旧控件即将被替换；离页结算不能再把旧值保存回刚恢复的配置。
         _suppressDirtyTracking = true;
+        _owner.EndFeatureSearchPreview();
         _hasUnsavedChanges = false;
         _editDebounceTimer?.Stop();
         _dirtyPollTimer?.Stop();
+        _accentApplyDebounceTimer?.Stop();
+        _accentInputPending = false;
         ToastService.DismissActionPrompt("settings-dirty");
     }
 
@@ -840,7 +893,8 @@ public partial class SettingsPage : UserControl
     private void ApplyAllVisualEffectsFromConfig()
     {
         var cfg = _owner.ConfigService.Config;
-        _owner.ApplyFeatureSearchVisibility();
+        PerformanceOverlayService.ApplySettings();
+        _owner.EndFeatureSearchPreview();
         AnimationSettingsService.ClearPreview();
         AnimationSettingsService.NotifyChanged();
         ThemeService.ApplyForCurrentState(cfg.GuestModeEnabled, cfg.UiSkin, cfg.IsDarkMode, cfg.CustomAccentColor);
@@ -1313,11 +1367,10 @@ public partial class SettingsPage : UserControl
     private bool _featureSearchStyleInitializing;
     private void FeatureSearchStyleCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_featureSearchStyleInitializing) return;
-        if (FeatureSearchStyleCombo.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
-        _owner.ConfigService.Config.FeatureSearchStyle = tag;
-        _owner.ConfigService.Save();
-        _owner.ApplyFeatureSearchVisibility();
+        if (_featureSearchStyleInitializing || _suppressDirtyTracking) return;
+        _owner.SetFeatureSearchEditMode(false);
+        FeatureSearchEditCheck.IsChecked = false;
+        PreviewFeatureSearchSettings();
     }
 
     /// <summary>
@@ -1427,12 +1480,13 @@ public partial class SettingsPage : UserControl
         var advanced = AdvancedModeCheck.IsChecked == true;
         var javaService = new JavaService();
 
-        var progressWin = new ProgressDialog("正在下载 Java 运行时...");
-        progressWin.Show();
+        DownloadJavaBtn.IsEnabled = false;
+        StatusText.Text = "Java 下载已加入右上角下载列表，可继续使用其它页面。";
         try
         {
             string path;
             int? simpleVersion = null;
+            int downloadedMajor;
             if (!advanced)
             {
                 // 普通模式：版本号由上方的简化下拉框（8/17/21/25）决定，架构/安装方式仍然走
@@ -1442,22 +1496,22 @@ public partial class SettingsPage : UserControl
                     ? sv
                     : 21;
                 var simpleArch = simpleVersion == 8 ? "x86" : (Environment.Is64BitOperatingSystem ? "x64" : "x86");
+                downloadedMajor = simpleVersion.Value;
                 path = await JavaDownloadQueueService.DownloadAsync(javaService, 
-                    new JavaDownloadRequest(simpleVersion.Value, simpleArch, JavaInstallMode.Portable),
-                    progressWin.Progress);
+                    new JavaDownloadRequest(simpleVersion.Value, simpleArch, JavaInstallMode.Portable));
             }
             else
             {
                 var version = (JavaVersionCombo.SelectedItem as ComboBoxItem)?.Tag is int v ? v : 21;
+                downloadedMajor = version;
                 var arch = (JavaArchCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "x64";
                 var modeTag = (JavaInstallModeCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "Portable";
                 var mode = modeTag == "System" ? JavaInstallMode.System : JavaInstallMode.Portable;
 
-                path = await JavaDownloadQueueService.DownloadAsync(javaService, new JavaDownloadRequest(version, arch, mode), progressWin.Progress);
+                path = await JavaDownloadQueueService.DownloadAsync(javaService, new JavaDownloadRequest(version, arch, mode));
             }
 
             // 下载完成的 Java 自动登记进 Java 列表，省得用户下载完还要再手动点一次"添加"。
-            var downloadedMajor = advanced ? ((JavaVersionCombo.SelectedItem as ComboBoxItem)?.Tag as int?) : simpleVersion;
             var entry = _owner.ConfigService.RegisterJava(path, downloadedMajor, "Downloaded");
             _owner.ConfigService.Save();
             RefreshJavaList();
@@ -1475,7 +1529,7 @@ public partial class SettingsPage : UserControl
         }
         finally
         {
-            progressWin.Close();
+            DownloadJavaBtn.IsEnabled = true;
         }
     }
 
@@ -1601,7 +1655,9 @@ public partial class SettingsPage : UserControl
     private void AddJavaByBrowse_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog { Filter = "javaw.exe|javaw.exe|所有文件|*.*", Title = "选择要添加到 Java 列表的 javaw.exe" };
+        FilePickerExperience.Prepare(dialog, "settings-java");
         if (dialog.ShowDialog() != true) return;
+        FilePickerExperience.Remember(dialog, "settings-java");
 
         AddJavaPathToList(dialog.FileName);
     }
@@ -1744,6 +1800,15 @@ public partial class SettingsPage : UserControl
         cfg.FirstRunWizardCompleted = false;
         cfg.MinMemoryMb = 1024;
         cfg.MaxMemoryMb = 4096;
+        cfg.EnableMemoryOptimization = false;
+        cfg.MemoryAllocationMode = MemoryAllocationMode.FixedRange;
+        cfg.DynamicMemoryMinimumMb = 500;
+        cfg.DynamicMemoryMaximumMb = 8192;
+        cfg.DynamicMemoryMinimumPercent = 5;
+        cfg.DynamicMemoryMaximumPercent = 70;
+        cfg.FixedMemoryAllocationMb = null;
+        cfg.MemoryDisplayBasis = MemoryDisplayBasis.Total;
+        cfg.MemoryOptimizationTiming = MemoryOptimizationTiming.BeforeGameLaunch;
         cfg.WindowWidth = 854;
         cfg.WindowHeight = 480;
         cfg.Source = DownloadSource.Official;
@@ -1760,6 +1825,12 @@ public partial class SettingsPage : UserControl
         cfg.AlwaysOnTop = false;
         cfg.EnableWinUi3Design = false;
         cfg.ShowFeatureSearch = true;
+        cfg.FeatureSearchStyle = "Floating";
+        cfg.FeatureSearchWidth = FeatureSearchLayout.Default.Width;
+        cfg.FeatureSearchHeight = FeatureSearchLayout.Default.Height;
+        cfg.FeatureSearchOffsetX = 0;
+        cfg.FeatureSearchOffsetY = 0;
+        cfg.FeatureSearchOpacityPercent = FeatureSearchLayout.Default.OpacityPercent;
         cfg.EnableWin11VisualEffects = false;
         cfg.EnableWindowTransparency = false;
         cfg.EnableGlobalWindowTransparency = false;
@@ -1805,8 +1876,8 @@ public partial class SettingsPage : UserControl
 
     /// <summary>
     /// 设置搜索：每敲一个字符防抖 300ms，然后在 SettingsRootPanel 整棵可视化树里查找
-    /// TextBlock/CheckBox/Button/RadioButton 的文字内容，命中就给它套一层高亮边框
-    /// （不改变原有布局，只是叠加一个 Border 提示），并把第一个匹配项滚动到可视区域。
+    /// TextBlock/CheckBox/Button/RadioButton 的文字内容，命中后用清晰的 Adorner 边框标记
+    /// （不改变原有布局，不叠加文字阴影），并把第一个匹配项滚动到可视区域。
     /// 不做"隐藏不匹配项"——这个页面控件之间有大量联动（比如高手模式开关影响下面几个
     /// 控件的显隐），贸然按搜索结果隐藏容易跟这些既有的显隐逻辑打架，只做"帮你找到在哪"
     /// 已经能大幅减少手动上下滚动查找的成本。
@@ -1890,7 +1961,15 @@ public partial class SettingsPage : UserControl
         _searchMatchIndex = index;
 
         var target = _searchMatches[index];
-        target.BringIntoView();
+        for (DependencyObject? parent = System.Windows.LogicalTreeHelper.GetParent(target); parent != null;
+             parent = System.Windows.LogicalTreeHelper.GetParent(parent))
+            if (parent is Expander expander) expander.IsExpanded = true;
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_searchMatchIndex != index || !_searchMatches.Contains(target)) return;
+            ApplySearchHighlightStrength(target, isCurrent: true);
+            target.BringIntoView();
+        }), DispatcherPriority.Loaded);
 
         // 当前这一项额外加粗一点高亮，跟其它同样命中但不是"当前项"的区分开——否则一页上
         // 好几处都亮着金色，点了"下"之后根本看不出跳到哪了。
@@ -1923,76 +2002,60 @@ public partial class SettingsPage : UserControl
         return true;
     }
 
-    /// <summary>递归遍历可视化树，收集文字内容包含关键字（不区分大小写）的元素。</summary>
-    private static void CollectSettingsSearchMatches(DependencyObject root, string keyword, System.Collections.Generic.List<FrameworkElement> result)
+    /// <summary>Logical controls remain searchable while an expander is closed. Template labels
+    /// are excluded, so one setting produces one match instead of duplicate text and shadows.</summary>
+    private static void CollectSettingsSearchMatches(DependencyObject root, string keyword, List<FrameworkElement> result)
     {
-        var count = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
-        for (var i = 0; i < count; i++)
+        foreach (var child in System.Windows.LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
         {
-            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
-
             var text = child switch
             {
-                TextBlock tb => tb.Text,
-                CheckBox cb => cb.Content as string,
-                RadioButton rb => rb.Content as string,
-                Button btn => btn.Content as string,
+                TextBlock block => block.Text,
+                CheckBox check => check.Content as string,
+                RadioButton radio => radio.Content as string,
+                Button button => button.Content as string,
+                Expander expander => expander.Header as string,
                 _ => null
             };
-
-            if (!string.IsNullOrEmpty(text) && text.Contains(keyword, StringComparison.OrdinalIgnoreCase)
-                && child is FrameworkElement fe)
-            {
-                result.Add(fe);
-            }
-
+            if (!string.IsNullOrEmpty(text) && text.Contains(keyword, StringComparison.OrdinalIgnoreCase) && child is FrameworkElement element)
+                result.Add(element);
             CollectSettingsSearchMatches(child, keyword, result);
         }
     }
 
-    /// <summary>用一层半透明强调色 Border 包住命中的元素外面，达到"高亮"效果；
-    /// 不直接改元素自身 Background，避免跟控件自带的模板样式互相覆盖。</summary>
     private void HighlightSettingsSearchMatch(FrameworkElement element)
     {
-        // 简化实现：直接给元素叠加一个短暂的黄色描边效果，通过 Tag 记录以便后续清除。
-        // WPF 里给任意元素"套外框"最稳妥的方式是找它的直接可视化父级里能接受
-        // BorderBrush 的容器；这里图简单，改成直接调它自身的 Effect（DropShadowEffect
-        // 模拟高亮描边），对 TextBlock/CheckBox/Button 都适用，不需要关心具体是什么控件。
-        element.Effect = new System.Windows.Media.Effects.DropShadowEffect
-        {
-            Color = System.Windows.Media.Colors.Gold,
-            ShadowDepth = 0,
-            BlurRadius = 12,
-            Opacity = 0.9
-        };
-        _searchHighlightedElements.Add(element);
+        if (_uxSearchOutlines.ContainsKey(element)) return;
+        var layer = System.Windows.Documents.AdornerLayer.GetAdornerLayer(element);
+        if (layer == null) return;
+        var outline = new SettingsSearchOutline(element);
+        layer.Add(outline);
+        _uxSearchOutlines[element] = outline;
     }
 
-    /// <summary>区分"当前停留的那一个命中项"和"其它命中项"：当前项用更亮更粗的橙色描边，
-    /// 其它项保持原来的淡金色，这样点「上/下」跳转时一眼能看出跳到哪去了。</summary>
-    private static void ApplySearchHighlightStrength(FrameworkElement element, bool isCurrent)
+    private void ApplySearchHighlightStrength(FrameworkElement element, bool isCurrent)
     {
-        element.Effect = new System.Windows.Media.Effects.DropShadowEffect
-        {
-            Color = isCurrent ? System.Windows.Media.Colors.OrangeRed : System.Windows.Media.Colors.Gold,
-            ShadowDepth = 0,
-            BlurRadius = isCurrent ? 20 : 12,
-            Opacity = isCurrent ? 1.0 : 0.65
-        };
+        // Collapsed content gains an adorner layer after its section is opened.
+        HighlightSettingsSearchMatch(element);
+        if (!_uxSearchOutlines.TryGetValue(element, out var outline)) return;
+        outline.IsCurrent = isCurrent;
+        outline.InvalidateVisual();
     }
-
-    private readonly System.Collections.Generic.List<FrameworkElement> _searchHighlightedElements = new();
 
     private void ClearSettingsSearchHighlight()
     {
-        foreach (var el in _searchHighlightedElements) el.Effect = null;
-        _searchHighlightedElements.Clear();
+        foreach (var (element, outline) in _uxSearchOutlines)
+            System.Windows.Documents.AdornerLayer.GetAdornerLayer(element)?.Remove(outline);
+        _uxSearchOutlines.Clear();
     }
 
     #endregion
 
     private void PerformSave()
     {
+        if (!ValidateExperienceSettings()) return;
+        CompletePresetThemeSelection();
+        CommitPendingAccentInput();
         // 注意：cfg.JavaPath 这个字段本身没有删除（仍然被 FindJava 当兜底路径使用，
         // MainWindow/FirstRunWizardWindow 等处在自动探测/下载成功后会自动写入它），
         // 但本页已经去掉了对应的独立输入框（见 Java 列表区块的说明），所以这里不再读取
@@ -2016,6 +2079,10 @@ public partial class SettingsPage : UserControl
             3 => Models.PostGameLaunchAction.Close,
             _ => Models.PostGameLaunchAction.KeepAsIs
         };
+        SavePerformanceOverlaySettings(cfg);
+        SaveRecoverySettings(cfg);
+        SaveUxOptions(cfg);
+        SaveExperienceSettings(cfg);
         cfg.AutoStartOnBoot = AutoStartOnBootCheck.IsChecked == true;
         cfg.AutoStartBehavior = AutoStartLaunchBehaviorCombo.SelectedIndex switch
         {
@@ -2033,8 +2100,9 @@ public partial class SettingsPage : UserControl
         cfg.MouseWheelSensitivityPercent = ScrollWheelBehavior.ClampSensitivityPercent((int)Math.Round(MouseWheelSensitivitySlider.Value));
 
         cfg.UseHighPerformanceGpuForGame = HighPerformanceGpuLaunchCheck.IsChecked == true;
-        cfg.MinMemoryMb = int.TryParse(MinMemBox.Text, out var min) ? min : cfg.MinMemoryMb;
-        cfg.MaxMemoryMb = int.TryParse(MaxMemBox.Text, out var max) ? max : cfg.MaxMemoryMb;
+        cfg.MinMemoryMb = InputExperiencePolicy.TryParseMemoryMb(MinMemBox.Text, cfg.Ux50InputMemoryUnits, out var min) ? min : cfg.MinMemoryMb;
+        cfg.MaxMemoryMb = InputExperiencePolicy.TryParseMemoryMb(MaxMemBox.Text, cfg.Ux50InputMemoryUnits, out var max) ? max : cfg.MaxMemoryMb;
+        SaveMemorySettings(cfg);
         cfg.WindowWidth = int.TryParse(WidthBox.Text, out var w) ? w : cfg.WindowWidth;
         cfg.WindowHeight = int.TryParse(HeightBox.Text, out var h) ? h : cfg.WindowHeight;
         cfg.Source = SourceCombo.SelectedIndex == 1 ? DownloadSource.Official : DownloadSource.BMCLAPI;
@@ -2079,18 +2147,21 @@ public partial class SettingsPage : UserControl
         cfg.ShowModIcons = ShowModIconsCheck.IsChecked == true;
         cfg.ShowServerNetworkGuideOnStart = ShowServerNetworkGuideCheck.IsChecked == true;
         cfg.ShowUpdateChangelogPopup = ShowUpdateChangelogPopupCheck.IsChecked == true;
+        cfg.CheckLauncherUpdatesOnStartup = CheckLauncherUpdatesOnStartupCheck.IsChecked == true;
+        cfg.EnableLauncherUpdates = EnableLauncherUpdatesCheck.IsChecked == true;
+        UpdateLauncherUpdateControls();
         cfg.IsolateVersionsByDefault = IsolateVersionsCheck.IsChecked == true;
 
         cfg.EnableWin11VisualEffects = Win11EffectsCheck.IsChecked == true;
         cfg.EnableWinUi3Design = WinUi3DesignCheck.IsChecked == true;
         cfg.ShowFeatureSearch = ShowFeatureSearchCheck.IsChecked == true;
-        _owner.ApplyFeatureSearchVisibility();
+        SaveFeatureSearchSettings(cfg);
         cfg.AppFontFamily = (AppFontCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
         cfg.AppFontFamily_TitleBar = (TitleBarFontCombo.SelectedItem as ComboBoxItem)?.Tag as string;
         cfg.AppFontFamily_Sidebar = (SidebarFontCombo.SelectedItem as ComboBoxItem)?.Tag as string;
         cfg.AppFontFamily_Content = (ContentFontCombo.SelectedItem as ComboBoxItem)?.Tag as string;
         cfg.BrightnessPercent = (int)BrightnessSlider.Value;
-        var newCustomAccentColor = string.IsNullOrWhiteSpace(CustomAccentColorBox.Text) ? null : CustomAccentColorBox.Text.Trim();
+        var newCustomAccentColor = _committedCustomAccentColor;
         var customAccentChanged = !string.Equals(cfg.CustomAccentColor, newCustomAccentColor, StringComparison.OrdinalIgnoreCase);
         cfg.CustomAccentColor = newCustomAccentColor;
         cfg.Win11BackdropMaterial = (BackdropMaterialCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "Mica";
@@ -2098,7 +2169,21 @@ public partial class SettingsPage : UserControl
         // 背景图片：候选池/当前选中的那一张在导入、删除、点列表时就已经即时写进 cfg 并
         // 落盘了（跟老版本"导入即保存"的行为一致，用户不会导入完忘了点保存就白导）。
         // 这里只负责保存"选择方式"这个纯设置项，不再从任何控件文本反推路径。
-        cfg.BackgroundRotationMode = ParseRotationMode(BackgroundRotationModeCombo);
+        var backgroundMode = ParseRotationMode(BackgroundRotationModeCombo);
+        var intervalMinutes = int.TryParse(BackgroundRotationIntervalBox.Text, out var enteredMinutes) ? Math.Max(1, enteredMinutes) : cfg.BackgroundRotationIntervalMinutes;
+        var fixedTime = NormalizeBackgroundTime(BackgroundRotationFixedTimeBox.Text, cfg.BackgroundRotationFixedTime);
+        if (cfg.BackgroundRotationMode != backgroundMode || cfg.BackgroundRotationIntervalMinutes != intervalMinutes
+            || !string.Equals(cfg.BackgroundRotationFixedTime, fixedTime, StringComparison.Ordinal))
+        {
+            cfg.BackgroundRotationLastDate = null;
+            cfg.BackgroundRotationLastTimestamp = null;
+        }
+        cfg.BackgroundRotationMode = backgroundMode;
+        cfg.BackgroundRotationIntervalMinutes = intervalMinutes;
+        cfg.BackgroundRotationFixedTime = fixedTime;
+        cfg.CustomBackgroundVideoSoundEnabled = CustomBackgroundVideoSoundCheck.IsChecked == true;
+        if (Enum.TryParse<VideoBackgroundFitMode>((CustomBackgroundVideoFitModeCombo.SelectedItem as ComboBoxItem)?.Tag as string, out var videoFit))
+            cfg.CustomBackgroundVideoFitMode = videoFit;
         cfg.CustomBackgroundFrostPercent = Math.Clamp((int)CustomBackgroundFrostSlider.Value, 25, 100);
         cfg.WindowOpacityPercent = (int)WindowOpacitySlider.Value;
         // 跟其它设置不同，这两项一保存就应该立刻能在已打开的窗口上看到效果，不用重启/切页——
@@ -2192,19 +2277,18 @@ public partial class SettingsPage : UserControl
         // 配色皮肤：同样只是先写回配置，实际应用画刷的动作跟访客模式共用下面
         // RefreshGuestModeState/ThemeService.ApplyForCurrentState 那一次调用，
         // 不需要在这里单独再调一次 ThemeService，避免访客模式和皮肤同时变化时重复刷新两次。
-        var selectedSkinFromUi = (UiSkinCombo.SelectedItem as ComboBoxItem)?.Tag as string;
         // 如果“自定义”只是被打开、用户还没真正选定颜色，就保持原主题不变；这时即使因为
         // 其它设置点击了“保存”，也不能顺手把 Custom 当成已经确认的选择写进配置。
-        var skinToSave = _customThemeSelectionPending ? cfg.UiSkin : (selectedSkinFromUi ?? cfg.UiSkin);
+        var skinToSave = _committedUiSkin;
         var uiSkinChanged = !string.Equals(cfg.UiSkin, skinToSave, StringComparison.Ordinal);
         cfg.UiSkin = skinToSave;
 
-        // 配色的"固定 / 每天轮换"和候选池。这两项在用户操作控件时其实已经即时写进 cfg 了
-        // （见 UiSkinRotationModeCombo_SelectionChanged / UiSkinCandidateList_SelectionChanged），
-        // 这里再写一次是幂等的兜底：万一某次操作因为 _suppressDirtyTracking 之类的原因被跳过，
-        // 点保存仍然能把界面上看到的状态落盘，不会出现"界面勾着、配置里没有"的不一致。
-        cfg.UiSkinRotationMode = ParseRotationMode(UiSkinRotationModeCombo);
-        cfg.UiSkinCandidates = CollectSelectedSkinCandidates();
+        // 轮换设置与候选池只在统一保存时写回，手动撤销与自动保存回退才能保持一致。
+        var skinRotationMode = ParseRotationMode(UiSkinRotationModeCombo);
+        if (cfg.UiSkinRotationMode != skinRotationMode || !cfg.UiSkinCandidates.SequenceEqual(_pendingSkinCandidates))
+            cfg.UiSkinRotationLastDate = null;
+        cfg.UiSkinRotationMode = skinRotationMode;
+        cfg.UiSkinCandidates = _pendingSkinCandidates.ToList();
 
         var skinApiRoot = SkinApiRootBox.Text?.Trim();
         cfg.SkinApiRoot = string.IsNullOrEmpty(skinApiRoot) ? SkinService.DefaultSkinApiRoot : skinApiRoot;
@@ -2248,8 +2332,12 @@ public partial class SettingsPage : UserControl
         // 隐藏设置项同理，两个集合各存各的。
         cfg.HiddenSettingKeys = _pendingHiddenSettingKeys.ToList();
 
-        _owner.ConfigService.Save();
+        _uxSavingSettings = true;
+        try { _owner.ConfigService.Save(); }
+        finally { _uxSavingSettings = false; }
+        PresentationPreferencesService.NotifyChanged();
         AutoStartService.Apply(cfg.AutoStartOnBoot);
+        PerformanceOverlayService.ApplySettings();
         ScrollWheelBehavior.SetSensitivityPercent(cfg.MouseWheelSensitivityPercent);
         UiZoomService.PreviewPercent(cfg.UiZoomPercent);
 
@@ -2276,8 +2364,15 @@ public partial class SettingsPage : UserControl
         // 背景/配色的候选池或"选择方式"可能刚被改过，立即按新设置重新解析一次，
         // 保证"保存后一秒内看到效果"，不用等下一次定时器 Tick、更不用重启启动器。
         _owner.ReevaluateAppearanceRotation();
+        _owner.ApplyCustomBackgroundVideoSound();
+        _owner.ApplyCustomBackgroundVideoFitMode();
         RunWithoutDirtyTracking(() =>
         {
+            _committedUiSkin = cfg.UiSkin;
+            // 只展开了自定义调色区域时，保存其他设置不应把区域自动收回。
+            if (!_customThemeSelectionPending) SelectComboByTag(UiSkinCombo, cfg.UiSkin);
+            BackgroundRotationIntervalBox.Text = cfg.BackgroundRotationIntervalMinutes.ToString();
+            BackgroundRotationFixedTimeBox.Text = cfg.BackgroundRotationFixedTime;
             RefreshBackgroundCandidateUi();
             RefreshSkinCandidateUi();
         });
@@ -2304,7 +2399,9 @@ public partial class SettingsPage : UserControl
         // 旧的“设置已修改”卡片也应立即消失，避免保存后还挂着一张过期提示。
         ToastService.DismissActionPrompt("settings-dirty");
         _lastSavedUiFingerprint = BuildSettingsUiFingerprint();
+        _lastPolledFingerprint = _lastSavedUiFingerprint;
         _uiFingerprintReady = true;
+        MarkUxValuesAsSaved();
 
         if (enableGuestModeByRestart)
         {
@@ -2359,7 +2456,9 @@ public partial class SettingsPage : UserControl
             Filter = "注册表文件|*.reg|所有文件|*.*",
             FileName = $"XCL2_{DateTime.Now:yyyyMMdd_HHmmss}.reg"
         };
+        FilePickerExperience.Prepare(dialog, "settings-reg-export");
         if (dialog.ShowDialog() != true) return;
+        FilePickerExperience.Remember(dialog, "settings-reg-export");
 
         try
         {
@@ -2384,7 +2483,9 @@ public partial class SettingsPage : UserControl
             Filter = "XCL2 配置归档|*.xclconfig.json|所有文件|*.*",
             FileName = $"XCL2_配置备份_{DateTime.Now:yyyyMMdd_HHmmss}.xclconfig.json"
         };
+        FilePickerExperience.Prepare(dialog, "settings-config-export");
         if (dialog.ShowDialog() != true) return;
+        FilePickerExperience.Remember(dialog, "settings-config-export");
 
         try
         {
@@ -2402,7 +2503,9 @@ public partial class SettingsPage : UserControl
     private void ImportConfig_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog { Title = "导入配置", Filter = "XCL2 配置归档|*.json;*.xclconfig.json|所有文件|*.*" };
+        FilePickerExperience.Prepare(dialog, "settings-import");
         if (dialog.ShowDialog() != true) return;
+        FilePickerExperience.Remember(dialog, "settings-import");
         ImportConfigArchiveFile(dialog.FileName);
     }
 
@@ -2737,20 +2840,21 @@ public partial class SettingsPage : UserControl
             var selectedSkin = (UiSkinCombo?.SelectedItem as ComboBoxItem)?.Tag as string;
             if (!string.Equals(selectedSkin, ThemeService.SkinCustom, StringComparison.Ordinal)) return;
 
-            // 输入到合法颜色即视为已经做出自定义颜色决定；在此之前仅展开面板不算修改。
-            CommitCustomThemeSelection();
+            // 合法输入等防抖结束后才提交；非法/未完成输入不改配置，不进 dirty 指纹。
+            _accentInputPending = true;
             _accentApplyDebounceTimer?.Stop();
             _accentApplyDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
             _accentApplyDebounceTimer.Tick += (_, _) =>
             {
                 _accentApplyDebounceTimer!.Stop();
-                ThemeService.ApplyCustomAccent(color);
-                OnSettingsEdited();
+                CommitCustomAccent(color);
             };
             _accentApplyDebounceTimer.Start();
         }
         catch
         {
+            _accentInputPending = false;
+            _accentApplyDebounceTimer?.Stop();
             CustomAccentColorPreview.Background = System.Windows.Media.Brushes.Transparent;
         }
     }
@@ -2765,16 +2869,20 @@ public partial class SettingsPage : UserControl
         {
             // 关键修复：点“自定义”仅展开调色区域。若当前保存的主题本来不是 Custom，
             // 此时不要预览/保存/弹回退气泡；等用户真正点色块、使用 RGB 或输入合法颜色后再提交。
-            _customThemeSelectionPending = !string.Equals(cfg.UiSkin, ThemeService.SkinCustom, StringComparison.Ordinal);
-            if (!_customThemeSelectionPending && !string.IsNullOrWhiteSpace(cfg.CustomAccentColor))
-                ThemeService.ApplyForCurrentState(cfg.GuestModeEnabled, ThemeService.SkinCustom, cfg.IsDarkMode, cfg.CustomAccentColor);
+            _customThemeSelectionPending = !string.Equals(_committedUiSkin, ThemeService.SkinCustom, StringComparison.Ordinal);
+            if (!_customThemeSelectionPending && !string.IsNullOrWhiteSpace(_committedCustomAccentColor))
+                ThemeService.ApplyForCurrentState(cfg.GuestModeEnabled, ThemeService.SkinCustom, cfg.IsDarkMode, _committedCustomAccentColor);
             return;
         }
 
         // 从自定义切回任一预设时应当立即能看到预设配色，不能继续残留 Custom 强调色造成
         // “怎么选预设都没切回去”的错觉。真正落盘仍走本页统一保存/自动保存流程。
+        _accentApplyDebounceTimer?.Stop();
+        _accentInputPending = false;
         _customThemeSelectionPending = false;
-        ThemeService.ApplyForCurrentState(cfg.GuestModeEnabled, selectedSkin, cfg.IsDarkMode, cfg.CustomAccentColor);
+        if (UiSkinCombo.IsDropDownOpen)
+            ThemeService.ApplyForCurrentState(cfg.GuestModeEnabled, selectedSkin, cfg.IsDarkMode, _committedCustomAccentColor);
+        else CommitThemeChoice(selectedSkin);
 
         // 鼠标打开下拉框后，SelectionChanged 可能在 Popup 仍展开、用户还在浏览候选项时先触发。
         // 预览颜色可以立即做，但此时不能进入自动保存/回退提示，否则气泡会打断尚未结束的选择。
@@ -2782,11 +2890,6 @@ public partial class SettingsPage : UserControl
         // 没有打开下拉 Popup 的交互仍可直接记为编辑。
         if (!UiSkinCombo.IsDropDownOpen)
             OnSettingsEdited();
-    }
-
-    private void CommitCustomThemeSelection()
-    {
-        _customThemeSelectionPending = false;
     }
 
     private void UpdateCustomThemePanelVisibility()
@@ -2804,11 +2907,7 @@ public partial class SettingsPage : UserControl
         try
         {
             var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)!;
-            CommitCustomThemeSelection();
-            SetAccentPickerColor(color);
-            CustomAccentColorBox.Text = hex;
-            ThemeService.ApplyCustomAccent(color);
-            OnSettingsEdited();
+            CommitCustomAccent(color);
         }
         catch { }
     }
@@ -2843,11 +2942,7 @@ public partial class SettingsPage : UserControl
     private void AccentPickerUse_Click(object sender, RoutedEventArgs e)
     {
         var color = System.Windows.Media.Color.FromRgb((byte)AccentRSlider.Value, (byte)AccentGSlider.Value, (byte)AccentBSlider.Value);
-        CommitCustomThemeSelection();
-        CustomAccentColorBox.Text = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
-        ThemeService.ApplyCustomAccent(color);
-        OnSettingsEdited();
-        ToastService.ShowSuccess("已预览自定义主题颜色，保存设置后会持久生效");
+        CommitCustomAccent(color, showSuccess: true);
     }
 
     private void CustomAccentColorApply_Click(object sender, RoutedEventArgs e)
@@ -2856,10 +2951,7 @@ public partial class SettingsPage : UserControl
         {
             var text = CustomAccentColorBox.Text.Trim();
             var color = (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(text)!;
-            CommitCustomThemeSelection();
-            ThemeService.ApplyCustomAccent(color);
-            OnSettingsEdited();
-            ToastService.ShowSuccess("已预览自定义主题颜色，保存设置后会持久生效");
+            CommitCustomAccent(color, showSuccess: true);
         }
         catch
         {
@@ -2889,7 +2981,9 @@ public partial class SettingsPage : UserControl
             Filter = "图片、GIF 或视频|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.mp4;*.wmv;*.webm;*.avi",
             Multiselect = true
         };
+        FilePickerExperience.Prepare(dialog, "settings-background");
         if (dialog.ShowDialog() != true) return;
+        FilePickerExperience.Remember(dialog, "settings-background");
         if (dialog.FileNames.Any(p => new[] { ".gif", ".mp4", ".wmv", ".webm", ".avi" }.Contains(Path.GetExtension(p).ToLowerInvariant())) &&
             !MessageBoxDialog.ShowConfirm(
                 "GIF 动图和视频背景属于实验性功能，可能不稳定，也会增加启动器内存占用。一般不建议启用它。是否启动？",
@@ -3162,26 +3256,12 @@ public partial class SettingsPage : UserControl
         ToastService.ShowInfo("已取消选择，当前不使用背景图片");
     }
 
-    /// <summary>「背景选择方式」下拉框：改完立即解析并应用一次，不用等点保存——
-    /// 跟项目里「自动循环」「跟随系统」这些自动化开关的一贯行为保持一致。</summary>
+    /// <summary>背景轮换模式进入统一设置保存流程；这里只显示对应的附加设置。</summary>
     private void BackgroundRotationModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressDirtyTracking) return;
-        var cfg = _owner.ConfigService.Config;
-        var mode = ParseRotationMode(BackgroundRotationModeCombo);
-        if (cfg.BackgroundRotationMode == mode) return;
-
-        cfg.BackgroundRotationMode = mode;
-        // 切换模式等于重新开始计时：把三种计时依据（自然日、挂钟时间戳）都清掉，这样
-        // Resolve 会重新认领"现在"作为起点、本次不换，从下一个完整周期开始才真正轮换
-        // （见 AppearanceRotationService 里的注释），不管新模式是按天、按固定时刻还是
-        // 按分钟/小时/自定义间隔计时。
-        cfg.BackgroundRotationLastDate = null;
-        cfg.BackgroundRotationLastTimestamp = null;
         RefreshBackgroundRotationExtraPanels();
-        // ApplyResolvedBackground 内部已经 Save 过了，这里不再调 OnSettingsEdited 标脏——
-        // 标了会让用户看到"有未保存的更改"，但其实已经写盘了，反而误导。
-        ApplyResolvedBackground();
+        OnSettingsEdited();
     }
 
     /// <summary>根据当前选中的"背景选择方式"，显示/隐藏"自定义分钟数"或"固定时刻"这两个
@@ -3190,14 +3270,14 @@ public partial class SettingsPage : UserControl
     private void RefreshBackgroundRotationExtraPanels()
     {
         var cfg = _owner.ConfigService.Config;
-        var mode = cfg.BackgroundRotationMode;
+        var mode = ParseRotationMode(BackgroundRotationModeCombo);
 
         BackgroundRotationIntervalPanel.Visibility = mode == AppearanceRotationMode.CustomInterval
             ? Visibility.Visible : Visibility.Collapsed;
         BackgroundRotationFixedTimePanel.Visibility = mode == AppearanceRotationMode.FixedTime
             ? Visibility.Visible : Visibility.Collapsed;
 
-        RunWithoutDirtyTracking(() =>
+        if (!_backgroundOptionControlsInitialized) RunWithoutDirtyTracking(() =>
         {
             BackgroundRotationIntervalBox.Text = Math.Max(1, cfg.BackgroundRotationIntervalMinutes).ToString();
             BackgroundRotationFixedTimeBox.Text = string.IsNullOrWhiteSpace(cfg.BackgroundRotationFixedTime)
@@ -3212,45 +3292,29 @@ public partial class SettingsPage : UserControl
         e.Handled = !e.Text.All(char.IsDigit);
     }
 
-    /// <summary>失焦时才真正落盘并重新解析一次——跟着每个字符敲击都存一遍没有必要，
-    /// 而且用户删空重打的中间状态（比如从"30"删成""）不应该被当成有效值存下去。</summary>
+    /// <summary>失焦时规范分钟数，再走统一保存；不提前修改 config 破坏撤销快照。</summary>
     private void BackgroundRotationIntervalBox_LostFocus(object sender, RoutedEventArgs e)
     {
         if (_suppressDirtyTracking) return;
-        var cfg = _owner.ConfigService.Config;
         if (!int.TryParse(BackgroundRotationIntervalBox.Text, out var minutes) || minutes < 1)
             minutes = 1;
-        if (cfg.BackgroundRotationIntervalMinutes == minutes)
-        {
-            RunWithoutDirtyTracking(() => BackgroundRotationIntervalBox.Text = minutes.ToString());
-            return;
-        }
-        cfg.BackgroundRotationIntervalMinutes = minutes;
         RunWithoutDirtyTracking(() => BackgroundRotationIntervalBox.Text = minutes.ToString());
-        ApplyResolvedBackground();
+        OnSettingsEdited();
     }
 
-    /// <summary>固定时刻输入框失焦时校验并落盘。校验不通过（格式不对）就原样退回上一个
+    /// <summary>固定时刻输入框失焦时校验。校验不通过（格式不对）就原样退回上一个
     /// 合法值——不弹错误对话框打断用户，静默纠正即可，反正输入框会立刻显示纠正后的样子。</summary>
     private void BackgroundRotationFixedTimeBox_LostFocus(object sender, RoutedEventArgs e)
     {
         if (_suppressDirtyTracking) return;
         var cfg = _owner.ConfigService.Config;
-        var text = BackgroundRotationFixedTimeBox.Text?.Trim() ?? "";
-        if (!TimeSpan.TryParseExact(text, "hh\\:mm", null, out var parsed) &&
-            !TimeSpan.TryParse(text, out parsed))
-        {
-            parsed = TimeSpan.TryParse(cfg.BackgroundRotationFixedTime, out var fallback) ? fallback : TimeSpan.Zero;
-        }
-        var normalized = $"{(int)parsed.TotalHours:D2}:{parsed.Minutes:D2}";
+        var normalized = NormalizeBackgroundTime(BackgroundRotationFixedTimeBox.Text, cfg.BackgroundRotationFixedTime);
         RunWithoutDirtyTracking(() => BackgroundRotationFixedTimeBox.Text = normalized);
-        if (string.Equals(cfg.BackgroundRotationFixedTime, normalized, StringComparison.Ordinal)) return;
-        cfg.BackgroundRotationFixedTime = normalized;
-        ApplyResolvedBackground();
+        OnSettingsEdited();
     }
 
     /// <summary>重新解析一次"现在该显示哪张背景"，落盘并套到主窗口上。
-    /// 移除/清空/切换模式三处都要做同样的事，抽出来避免写三遍。</summary>
+    /// 供背景文件导入、移除、清空这些即时动作调用。</summary>
     private void ApplyResolvedBackground()
     {
         var cfg = _owner.ConfigService.Config;
@@ -3291,7 +3355,7 @@ public partial class SettingsPage : UserControl
         {
             0 => "还没有导入任何背景图片/视频。导入后可以选择固定用某一个，或者按时间自动轮换。",
             1 => "只有一个背景（图片或视频），会直接使用它；再导入至少一个之后，自动轮换才有意义。",
-            _ => cfg.BackgroundRotationMode switch
+            _ => ParseRotationMode(BackgroundRotationModeCombo) switch
             {
                 AppearanceRotationMode.Daily =>
                     $"共 {candidates.Count} 个，每天按列表顺序自动换下一个（跨过零点时自动生效，不用重启启动器）。",
@@ -3313,40 +3377,35 @@ public partial class SettingsPage : UserControl
         var isCurrentVideo = !string.IsNullOrWhiteSpace(cfg.CustomBackgroundImagePath)
             && new[] { ".mp4", ".wmv", ".webm", ".avi" }.Contains(Path.GetExtension(cfg.CustomBackgroundImagePath).ToLowerInvariant());
         CustomBackgroundVideoSoundCheck.IsEnabled = isCurrentVideo;
-        CustomBackgroundVideoSoundCheck.IsChecked = cfg.CustomBackgroundVideoSoundEnabled;
+        if (!_backgroundOptionControlsInitialized)
+            RunWithoutDirtyTracking(() => CustomBackgroundVideoSoundCheck.IsChecked = cfg.CustomBackgroundVideoSoundEnabled);
         CustomBackgroundVideoSoundCheck.ToolTip = isCurrentVideo
             ? "开启后视频壁纸会带上它自己的原始音轨播放；关闭则跟以前一样静音循环播放。"
             : "当前背景不是视频文件，这个开关暂时用不上；选中一个视频壁纸后即可开启声音。";
 
         // 缩放方式下拉框同理：先按当前配置选中对应项，再决定是否可用。
-        RunWithoutDirtyTracking(() => SelectComboByTag(CustomBackgroundVideoFitModeCombo, cfg.CustomBackgroundVideoFitMode.ToString()));
+        if (!_backgroundOptionControlsInitialized)
+            RunWithoutDirtyTracking(() => SelectComboByTag(CustomBackgroundVideoFitModeCombo, cfg.CustomBackgroundVideoFitMode.ToString()));
         if (CustomBackgroundVideoFitModeCombo.SelectedItem == null) CustomBackgroundVideoFitModeCombo.SelectedIndex = 0;
         CustomBackgroundVideoFitModeCombo.IsEnabled = isCurrentVideo;
+        _backgroundOptionControlsInitialized = true;
     }
 
-    /// <summary>视频壁纸声音开关：立即写回配置并让主窗口当前正在播放的视频同步生效，
-    /// 不用重启、也不用重新选一次背景。</summary>
+    /// <summary>视频壁纸声音进入统一保存，保存后立即同步正在播放的视频。</summary>
     private void CustomBackgroundVideoSoundCheck_Changed(object sender, RoutedEventArgs e)
     {
         if (_suppressDirtyTracking) return;
-        var cfg = _owner.ConfigService.Config;
-        cfg.CustomBackgroundVideoSoundEnabled = CustomBackgroundVideoSoundCheck.IsChecked == true;
-        _owner.ConfigService.Save();
-        _owner.ApplyCustomBackgroundVideoSound();
+        OnSettingsEdited();
     }
 
-    /// <summary>视频壁纸缩放方式：同样立即写回 + 立即让当前正在播放的视频同步生效。</summary>
+    /// <summary>视频壁纸缩放方式同样进入统一保存。</summary>
     private void CustomBackgroundVideoFitModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressDirtyTracking) return;
         if (CustomBackgroundVideoFitModeCombo.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
-        if (!Enum.TryParse<VideoBackgroundFitMode>(tag, out var mode)) return;
+        if (!Enum.TryParse<VideoBackgroundFitMode>(tag, out _)) return;
 
-        var cfg = _owner.ConfigService.Config;
-        if (cfg.CustomBackgroundVideoFitMode == mode) return;
-        cfg.CustomBackgroundVideoFitMode = mode;
-        _owner.ConfigService.Save();
-        _owner.ApplyCustomBackgroundVideoFitMode();
+        OnSettingsEdited();
     }
 
     private bool ApplyBackgroundImage(string path)
@@ -3364,30 +3423,40 @@ public partial class SettingsPage : UserControl
     private void UiSkinCandidateList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressDirtyTracking) return;
-        var cfg = _owner.ConfigService.Config;
-        cfg.UiSkinCandidates = CollectSelectedSkinCandidates();
-        AppearanceRotationService.NormalizeSkinCandidates(cfg);
-        _owner.ConfigService.Save();
+        var selected = CollectSelectedSkinCandidates();
+        if (ParseRotationMode(UiSkinRotationModeCombo) == AppearanceRotationMode.Fixed)
+        {
+            var added = e.AddedItems.OfType<ListBoxItem>().LastOrDefault()?.Tag as string;
+            _pendingSkinCandidates = ThemeSelectionPolicy.FixedCandidates(selected, added ?? _committedUiSkin);
+            if (_pendingSkinCandidates.FirstOrDefault() is string chosen)
+            {
+                RunWithoutDirtyTracking(() => SelectComboByTag(UiSkinCombo, chosen));
+                UpdateCustomThemePanelVisibility();
+                CommitThemeChoice(chosen);
+            }
+        }
+        else _pendingSkinCandidates = selected;
         RunWithoutDirtyTracking(RefreshSkinCandidateUi);
+        OnSettingsEdited();
     }
 
     /// <summary>「配色选择方式」下拉框，语义同背景那一个。</summary>
     private void UiSkinRotationModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressDirtyTracking) return;
-        var cfg = _owner.ConfigService.Config;
         var mode = ParseRotationMode(UiSkinRotationModeCombo);
-        if (cfg.UiSkinRotationMode == mode) return;
-
-        cfg.UiSkinRotationMode = mode;
-        cfg.UiSkinRotationLastDate = null; // 同背景：切换模式 = 重新开始计时，今天不换
-        _owner.ConfigService.Save();
-        _owner.ReevaluateAppearanceRotation();
-        RunWithoutDirtyTracking(() =>
+        if (mode == AppearanceRotationMode.Fixed)
         {
-            SelectComboByTag(UiSkinCombo, cfg.UiSkin); // 轮换可能已经改了当前色系，上面的下拉框要跟上
-            RefreshSkinCandidateUi();
-        });
+            _pendingSkinCandidates = ThemeSelectionPolicy.FixedCandidates(_pendingSkinCandidates, _committedUiSkin);
+            if (_pendingSkinCandidates.FirstOrDefault() is string chosen)
+            {
+                RunWithoutDirtyTracking(() => SelectComboByTag(UiSkinCombo, chosen));
+                UpdateCustomThemePanelVisibility();
+                CommitThemeChoice(chosen, showReplacement: false);
+            }
+        }
+        RunWithoutDirtyTracking(RefreshSkinCandidateUi);
+        OnSettingsEdited();
     }
 
     /// <summary>从多选列表读出当前勾选的色系 Tag，按列表显示顺序返回（轮换就按这个顺序走）。</summary>
@@ -3402,12 +3471,10 @@ public partial class SettingsPage : UserControl
         return result;
     }
 
-    /// <summary>按配置回填多选状态，并根据候选数量决定"选择方式"是否可用。
-    /// 少于两个时禁用下拉框——只有一个色系可换等于没有轮换。</summary>
+    /// <summary>按待保存副本回填列表；固定模式单选，轮换模式多选。</summary>
     private void RefreshSkinCandidateUi()
     {
-        var cfg = _owner.ConfigService.Config;
-        var candidates = cfg.UiSkinCandidates ?? new List<string>();
+        var candidates = _pendingSkinCandidates;
 
         UiSkinCandidateList.SelectedItems.Clear();
         foreach (var obj in UiSkinCandidateList.Items)
@@ -3419,13 +3486,19 @@ public partial class SettingsPage : UserControl
             }
         }
 
-        var canRotate = candidates.Count >= 2;
-        UiSkinRotationModeCombo.IsEnabled = canRotate;
+        var mode = ParseRotationMode(UiSkinRotationModeCombo);
+        // 固定模式只能选一个颜色，仍允许先切到轮换模式、再选第二个候选。
+        UiSkinRotationModeCombo.IsEnabled = true;
+        UiSkinCandidateLabel.Text = mode == AppearanceRotationMode.Fixed ? "固定配色" : "参与轮换的配色";
+        UiSkinCandidateList.ToolTip = mode == AppearanceRotationMode.Fixed
+            ? "固定模式只使用一个颜色；选择新颜色会自动取消上一个。"
+            : "点击可多选；至少两个配色才会每天轮换。";
         UiSkinRotationHintText.Text = candidates.Count switch
         {
-            0 => "还没有勾选参与轮换的配色。勾选至少两个之后，才能打开“每天自动轮换”。",
-            1 => "只勾了一个配色，没有可以轮换的对象；再勾一个才会真正开始每天换。",
-            _ when cfg.UiSkinRotationMode == AppearanceRotationMode.Daily =>
+            _ when mode == AppearanceRotationMode.Fixed => "固定模式只使用一个配色，选择新颜色会自动取消上一个；切换到“每天自动轮换”可多选。",
+            0 => "还没有选择参与轮换的配色。至少选择两个后才会开始每天轮换。",
+            1 => "只选择了一个配色，还不会轮换；再选择一个即可开始每天轮换。",
+            _ when mode == AppearanceRotationMode.Daily =>
                 $"共 {candidates.Count} 个配色，每天按列表顺序自动换下一个。只换色系，不影响深浅色（深浅由下面的“自动循环 / 跟随系统”决定）。",
             _ => $"已勾选 {candidates.Count} 个候选配色，但当前是“固定”模式，暂时不会自动切换。"
         };
@@ -3641,6 +3714,7 @@ public partial class SettingsPage : UserControl
 
     private void PreviewAnimationSettings()
     {
+        if (_uxResetInProgress) return;
         UpdateAnimationControlsEnabled();
         AnimationSettingsService.SetPreview(new AppConfig
         {

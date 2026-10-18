@@ -1,4 +1,4 @@
-namespace XCL2.App.Models;
+﻿namespace XCL2.App.Models;
 
 public enum DownloadSource
 {
@@ -124,17 +124,52 @@ public enum IntegrityCheckMode
 /// </summary>
 public enum MemoryOptimizationTiming
 {
-    /// <summary>默认：每次点「启动游戏」之前，临场按当前可用内存重新计算一次。</summary>
+    /// <summary>默认：每次点「启动游戏」之前重新采样并计算。</summary>
     BeforeGameLaunch,
-    /// <summary>启动器一打开就算好一次，直接写回 MinMemoryMb/MaxMemoryMb，游戏启动时不再重新计算。</summary>
+    /// <summary>启动器打开时额外预览一次；实际启动仍重新采样，不覆盖手动内存设置。</summary>
     OnLauncherOpen,
 }
 
 /// <summary>
 /// xcl2/config.json 的内容：全局配置。
 /// </summary>
-public class AppConfig
+public partial class AppConfig
 {
+    // 性能悬浮窗默认关闭，只观察已经识别的游戏进程，不注入游戏。
+    public bool ShowReminderBadge { get; set; } = true;
+    public bool EnableLaunchHealthCheck { get; set; } = true;
+    public bool RememberInterruptedDownloads { get; set; } = true;
+    public bool SnapshotBeforeModUpdates { get; set; } = true;
+    public int ModUpdateSnapshotRetentionCount { get; set; } = 10;
+    public int ModUpdateSnapshotMaxMb { get; set; } = 1024;
+    public bool PerformanceOverlayEnabled { get; set; }
+    public bool PerformanceOverlayShowSystemCpu { get; set; } = true;
+    public bool PerformanceOverlayShowSystemMemory { get; set; } = true;
+    public bool PerformanceOverlayShowMemoryPercent { get; set; } = true;
+    public bool PerformanceOverlayShowGames { get; set; } = true;
+    public bool PerformanceOverlayShowGameTotals { get; set; }
+    public bool PerformanceOverlayShowLauncher { get; set; }
+    public bool PerformanceOverlayShowGameCpu { get; set; } = true;
+    public bool PerformanceOverlayShowGameMemory { get; set; } = true;
+    public bool PerformanceOverlayShowProcessId { get; set; }
+    public bool PerformanceOverlayAllInstances { get; set; } = true;
+    /// <summary>实例目录派生的稳定标识；不使用显示名称匹配，避免不同目录的同名实例混淆。</summary>
+    public string PerformanceOverlayInstanceId { get; set; } = "";
+    public string PerformanceOverlayInstanceName { get; set; } = "";
+    public string PerformanceOverlayStyle { get; set; } = "Compact";
+    /// <summary>0 随样式自动调整；正值为悬浮窗逻辑像素宽度。</summary>
+    public int PerformanceOverlayWindowWidth { get; set; }
+    public string PerformanceOverlayGameSort { get; set; } = "Name";
+    public string PerformanceOverlayColorScheme { get; set; } = "Theme";
+    public string PerformanceOverlayMemoryUnit { get; set; } = "Auto";
+    public double PerformanceOverlayFontSize { get; set; } = 14;
+    public double PerformanceOverlayOpacityPercent { get; set; } = 90;
+    public int PerformanceOverlayRefreshMilliseconds { get; set; } = 1000;
+    public bool PerformanceOverlayAlwaysOnTop { get; set; } = true;
+    public bool PerformanceOverlayLockPosition { get; set; }
+    public double? PerformanceOverlayLeft { get; set; }
+    public double? PerformanceOverlayTop { get; set; }
+
     /// <summary>功能搜索范围：false 为当前主页面，true 为全部页面。关键词不保存。</summary>
     public bool FeatureSearchAllPages { get; set; }
 
@@ -291,6 +326,13 @@ public class AppConfig
 
     /// <summary>顶部功能搜索框样式："Floating"（默认，内容区左上角半透明悬浮窗）或 "Top"（占据页面顶部一行的原样式）。</summary>
     public string FeatureSearchStyle { get; set; } = "Floating";
+
+    /// <summary>搜索框布局（WPF 像素）；位置相对当前样式的默认锚点，不记录编辑模式。</summary>
+    public double FeatureSearchWidth { get; set; } = 300;
+    public double FeatureSearchHeight { get; set; } = 36;
+    public double FeatureSearchOffsetX { get; set; }
+    public double FeatureSearchOffsetY { get; set; }
+    public double FeatureSearchOpacityPercent { get; set; } = 70;
 
     /// <summary>工具箱快捷入口：Tab 索引，顺序由用户管理。
     /// 0=成就图片（默认第一个，百宝箱打开时也是默认停留的 Tab——TabControl 没显式设置
@@ -548,6 +590,12 @@ public class AppConfig
     /// 跟「XCL 更新日志」入口（ChangelogWindow）是否可用完全无关——那个入口任何时候都能手动打开，
     /// 这个开关只管"更新完之后要不要自动弹一次"。</summary>
     public bool ShowUpdateChangelogPopup { get; set; } = true;
+
+    /// <summary>启动后是否通过 GitHub Releases API 检查新版本。关闭后仍可在设置中手动检查。</summary>
+    public bool CheckLauncherUpdatesOnStartup { get; set; } = true;
+
+    /// <summary>是否允许下载安装启动器更新。关闭后可查看最新版本，但不会下载、替换或重启程序。</summary>
+    public bool EnableLauncherUpdates { get; set; } = true;
 
     /// <summary>是否开机自启动（写入 HKCU\Software\Microsoft\Windows\CurrentVersion\Run，
     /// 不需要管理员权限，只影响当前登录用户）。默认关闭。</summary>
@@ -1025,24 +1073,24 @@ public class AppConfig
     public int TodayLauncherStartCount { get; set; } = 0;
 
     /// <summary>
-    /// 内存优化功能总开关：开启后，启动游戏前会按 <see cref="Services.MemoryOptimizerService"/>
-    /// 的推荐算法，结合当前系统可用内存 + 已选版本的加载器类型，自动把 MinMemoryMb/MaxMemoryMb
-    /// 校正到一个更合理的区间（避免用户手动设置的 -Xmx 远超过系统实际可用内存，导致
-    /// 启动巨卡/系统濒临爆内存）。默认关闭：尊重用户在设置页手动填写的内存数值，
-    /// 只有主动打开这个开关才会介入自动调整。
+    /// 动态内存分配开关。开启后每次启动按总物理内存重新计算，不覆盖手动 Min/MaxMemoryMb。
+    /// 默认关闭以保留旧配置的手动数值；实例显式内存覆盖优先，除非实例明确开启动态分配。
     /// </summary>
     public bool EnableMemoryOptimization { get; set; } = false;
 
-    /// <summary>内存优化时，给系统自身/其它程序预留的内存(MB)，不会被分配给 Java 堆。
-    /// 默认 1536MB，兼顾"尽量把内存让给游戏"和"不能让系统本身卡死"两个目标。</summary>
+    public MemoryAllocationMode MemoryAllocationMode { get; set; } = MemoryAllocationMode.FixedRange;
+    public int DynamicMemoryMinimumMb { get; set; } = 500;
+    public int DynamicMemoryMaximumMb { get; set; } = 8192;
+    public double DynamicMemoryMinimumPercent { get; set; } = 5;
+    public double DynamicMemoryMaximumPercent { get; set; } = 70;
+    /// <summary>可选的固定分配值，单位 MB；null 为按所选模式动态计算。</summary>
+    public int? FixedMemoryAllocationMb { get; set; }
+    public MemoryDisplayBasis MemoryDisplayBasis { get; set; } = MemoryDisplayBasis.Total;
+
+    /// <summary>兼容旧配置保留；新动态模式使用总物理内存比例，不再从剩余内存扣减预留量。</summary>
     public int MemoryOptimizationReserveMb { get; set; } = 1536;
 
-    /// <summary>内存优化的触发时机：默认"游戏启动前"（跟这个功能上线时的行为一致），
-    /// 也可以改成"启动器打开时"——启动器一打开就算好一次推荐值并直接写回
-    /// MinMemoryMb/MaxMemoryMb，不用每次点启动都重新算一遍（见 <see cref="Services.MemoryOptimizerService"/>
-    /// 和 MainWindow 里 ApplyLauncherOpenMemoryOptimizationIfNeeded 的调用点）。这里只是
-    /// 全局默认值，具体某个实例可以在「版本的单独设置」里用 <see cref="Services.InstanceSettings.MemoryOptimizationTiming"/>
-    /// 单独覆盖；实例未配置时跟随这里。</summary>
+    /// <summary>兼容旧版的启动器打开时预览设置。所有动态分配在实际启动时都会重新采样。</summary>
     public MemoryOptimizationTiming MemoryOptimizationTiming { get; set; } = MemoryOptimizationTiming.BeforeGameLaunch;
 
     // ===== 功能隐藏 =====
@@ -1120,6 +1168,9 @@ public class AppConfig
     public List<BedrockServerRecord> BedrockServers { get; set; } = new();
 
     // ===== AI 助手 =====
+
+    /// <summary>已将 AI 等待时间一次性迁移为 86400 秒；迁移后保留用户后续修改。</summary>
+    public bool AiRequestTimeout86400Migrated { get; set; }
 
     /// <summary>AI 助手完整配置（API、模型表、普通/专家路由、上下文等）。</summary>
     public AiAssistantConfig AiAssistant { get; set; } = new();

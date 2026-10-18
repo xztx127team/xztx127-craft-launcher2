@@ -42,7 +42,11 @@ public partial class MainWindow
                 var content = definition.CreateContent(new PluginUiContext(entry.Context, "navigation:" + entry.Id));
                 if (content == null || content.Parent != null) throw new PluginOperationException("InvalidUi", "插件页面必须返回新的控件。");
                 return content;
-            }, _ => _activePluginPage = entry.Id);
+            }, _ =>
+            {
+                _activePluginPage = entry.Id;
+                UpdatePreviewNavigationSelection();
+            });
         }
         return _pageNavigationGeneration != generation;
     }

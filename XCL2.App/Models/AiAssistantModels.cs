@@ -349,7 +349,7 @@ public static class AiModelIds
 public enum AiReasoningLevel { Off, Low, Medium, High, VeryHigh, Max, Fast }
 
 /// <summary>Build 保持已有授权执行行为；Plan 只分析规划及使用已授权的只读工具。</summary>
-public enum AiWorkMode { Build = 0, Plan = 1 }
+public enum AiWorkMode { Build = 0, Plan = 1, Agent = 2, Chat = 3 }
 
 public sealed class AiApiEndpoint
 {
@@ -412,7 +412,7 @@ public class AiAssistantConfig
     public bool StreamResponses { get; set; } = true;
     public bool RequestUsageMetadata { get; set; } = true;
     /// <summary>单次请求（含重试）的最长等待秒数，0 表示不限时；最长可设 24 小时。</summary>
-    public int RequestTimeoutSeconds { get; set; } = 180;
+    public int RequestTimeoutSeconds { get; set; } = 86400;
     public int LongWaitHintSeconds { get; set; } = 45;
     public string LongWaitDescription { get; set; } = "模型仍在处理，请稍候；你可以随时停止生成。";
     /// <summary>按实际模型 ID 保存上下文容量与每百万 token 单价。留空表示未知，不猜测模型价格。</summary>
@@ -435,6 +435,10 @@ public class AiAssistantConfig
     public int MaxSubAgentsPerTurn { get; set; } = 2;
     /// <summary>允许 Shell；普通模式逐次确认，完全绝对访问生效后免确认。最高权限开启后默认启用。</summary>
     public bool AllowShellCommands { get; set; } = false;
+    /// <summary>用户明确选择默许全部 Shell，含未识别的“其他”命令；仍受 Plan 和电脑操作开关限制。</summary>
+    public bool AllowAllShellCommands { get; set; }
+    public AiCommandPermissions CommandPermissions { get; set; } = new();
+    public AiAgentAnimationProfile AgentAnimationProfile { get; set; } = AiAgentAnimationProfile.Balanced;
     public bool EnableDeepThinking { get; set; } = false;
     public bool EnableWebSearch { get; set; } = false;
 
@@ -474,6 +478,8 @@ public class AiAssistantConfig
     public double PanelWidth { get; set; } = 380;
     public bool ClearHistoryOnGuestSessionEnd { get; set; } = true;
     public bool ShowFloatingButton { get; set; } = false;
+    /// <summary>在模型下方显示已保存任务的选择横条。</summary>
+    public bool ShowTaskSelectionBar { get; set; } = true;
 
     /// <summary>AI 轻量编程工作目录。为空时文件工具完全不可用；AI 只能访问这个目录及其子目录，
     /// 每次读取/写入仍需用户逐次确认，不能通过 ../ 或绝对路径越界。</summary>
@@ -534,8 +540,11 @@ public enum AiMessageRole
 
 public class AiChatMessage
 {
+    /// <summary>发送时的工作模式；旧消息不猜测为纯聊天，以免带入旧工具上下文。</summary>
+    public AiWorkMode? WorkMode { get; set; }
     public AiMessageRole Role { get; set; } = AiMessageRole.User;
     public string Content { get; set; } = "";
+    public List<AiAttachment> Attachments { get; set; } = new();
     public string? ModelUsed { get; set; }
     public string? ModelDisplayName { get; set; }
     public AiRoutingMode RouteUsed { get; set; } = AiRoutingMode.Normal;
@@ -547,6 +556,8 @@ public class AiChatMessage
 public class AiChatSession
 {
     public string? TaskId { get; set; }
+    /// <summary>关闭后按普通对话处理，不自动创建或更新任务；旧会话默认保留任务行为。</summary>
+    public bool TaskTrackingEnabled { get; set; } = true;
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = "新对话";
     public bool IsGuestSession { get; set; }

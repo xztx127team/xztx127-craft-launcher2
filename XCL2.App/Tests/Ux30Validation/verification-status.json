@@ -1,0 +1,288 @@
+{
+  "kind": "Source delivery and executed checks, not a compiled or runtime-certified release",
+  "date": "2026-10-17",
+  "checks": {
+    "full_static": {
+      "status": "passed",
+      "checks": 31886
+    },
+    "settings_static": {
+      "status": "passed",
+      "checks": 305
+    },
+    "catalog": {
+      "status": "passed",
+      "destinations": 638
+    },
+    "preview_layout": {
+      "status": "passed",
+      "checks": 20
+    },
+    "debug_wiring": {
+      "status": "passed",
+      "checks": 18
+    },
+    "plugin_wiring": {
+      "status": "passed"
+    },
+    "preview_ast": {
+      "status": "not_run",
+      "reason": "tree_sitter and tree_sitter_c_sharp not installed"
+    },
+    "wpf_build": {
+      "status": "not_run",
+      "reason": "No .NET SDK or Windows environment"
+    },
+    "csharp_regression": {
+      "status": "not_run",
+      "projects": 39,
+      "reason": "No .NET SDK"
+    },
+    "windows_visual_and_functional": {
+      "status": "pending",
+      "reason": "No WPF runtime or Windows graphical environment"
+    }
+  },
+  "features": [
+    {
+      "number": 1,
+      "feature": "设置搜索与定位",
+      "default": "默认提供",
+      "entry": "设置页搜索；Ctrl+F、Enter / Shift+Enter 导航",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 2,
+      "feature": "单项与分组恢复默认",
+      "default": "提供入口，主动操作",
+      "entry": "设置项右键；分组菜单",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 3,
+      "feature": "收藏与最近使用",
+      "default": "收藏入口；三类最近记录默认关闭",
+      "entry": "实例菜单与筛选、服务端列表菜单、全部工具菜单",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 4,
+      "feature": "启动前摘要",
+      "default": "提供入口，主动查看",
+      "entry": "启动按钮右键 / Shift+F10 → 查看启动摘要",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 5,
+      "feature": "下载队列管理",
+      "default": "提供入口；默认保留不限制任务并发",
+      "entry": "右上角下载管理 → 筛选 / 管理 / 任务右键",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 6,
+      "feature": "模组兼容性预览",
+      "default": "本地检查入口；手动联网检查允许但不自动执行",
+      "entry": "模组页 → 兼容性预览",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 7,
+      "feature": "存档备份与恢复",
+      "default": "手动入口；自动备份默认关闭",
+      "entry": "实例文件与存档菜单 / 存档页 → 备份",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 8,
+      "feature": "实例备注与标签",
+      "default": "提供编辑/筛选入口",
+      "entry": "实例菜单 → 收藏与个性化",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 9,
+      "feature": "可预览的诊断导出",
+      "default": "默认脱敏；主动导出",
+      "entry": "日志 → 更多 / 崩溃页菜单 → 诊断导出",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 10,
+      "feature": "键盘与无障碍",
+      "default": "焦点/快捷说明；减少动画默认跟随系统",
+      "entry": "设置 → 使用习惯与隐私；Tab / Shift+Tab",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 11,
+      "feature": "设置修改摘要",
+      "default": "有真实修改才显示",
+      "entry": "设置页 → 查看本次修改 / 最近保存的修改",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 12,
+      "feature": "实例快捷入口",
+      "default": "提供入口；点击执行",
+      "entry": "实例菜单 → 文件与存档",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 13,
+      "feature": "长任务进度说明",
+      "default": "执行中显示",
+      "entry": "下载面板任务行及右键说明",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 14,
+      "feature": "取消后的清理说明",
+      "default": "提供保留说明；清理由用户确认",
+      "entry": "下载任务右键 → 进度与文件说明 / 清理已记录片段",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 15,
+      "feature": "磁盘空间提示",
+      "default": "已知下载大小时检查",
+      "entry": "下载写入前 / 存档备份与恢复前",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 16,
+      "feature": "截图浏览",
+      "default": "提供入口，主动打开",
+      "entry": "实例菜单 → 文件与存档 → 浏览截图",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 17,
+      "feature": "服务器地址隐私",
+      "default": "默认保留现有显示，用户开启",
+      "entry": "设置 → 使用习惯与隐私 → 隐藏服务器地址",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 18,
+      "feature": "窗口位置恢复",
+      "default": "默认开启，可关闭",
+      "entry": "设置 → 使用习惯与隐私",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 19,
+      "feature": "操作结果记录",
+      "default": "默认开启，会话内最多100条",
+      "entry": "日志 → 更多 → 本次会话任务结果；设置可关闭",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 20,
+      "feature": "可复制的错误说明",
+      "default": "错误出现时提供",
+      "entry": "通用错误框、崩溃框和友好错误框",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 21,
+      "feature": "列表记住浏览位置",
+      "default": "默认开启，会话内保存",
+      "entry": "版本选择页",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 22,
+      "feature": "长名称完整显示",
+      "default": "默认提供",
+      "entry": "实例、目录、相关下载条目",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 23,
+      "feature": "自定义实例图标",
+      "default": "提供入口，主动修改",
+      "entry": "实例菜单 → 收藏与个性化",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 24,
+      "feature": "更新内容对比",
+      "default": "选择更新前提供折叠信息",
+      "entry": "模组更新选择框 / 原有启动器更新确认",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 25,
+      "feature": "限速与游戏中降速",
+      "default": "默认不限速，游戏中降速关闭",
+      "entry": "下载管理 → 管理",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 26,
+      "feature": "账号有效状态",
+      "default": "本地状态默认展示",
+      "entry": "账户列表 / 启动摘要；启动时保留原校验",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 27,
+      "feature": "复制服务器连接信息",
+      "default": "普通复制只含地址",
+      "entry": "服务端复制按钮 / 右键菜单",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 28,
+      "feature": "时间与容量显示",
+      "default": "跟随系统时区/时间格式，容量自动单位",
+      "entry": "设置 → 使用习惯与隐私",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 29,
+      "feature": "空页面操作指引",
+      "default": "有需要才显示",
+      "entry": "首页未选实例、版本筛选、下载搜索结果、截图/备份列表",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 30,
+      "feature": "布局恢复",
+      "default": "提供入口，主动确认",
+      "entry": "设置 → 使用习惯与隐私 → 恢复界面布局",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    }
+  ]
+}

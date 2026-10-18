@@ -20,7 +20,8 @@ public sealed class WorldArchivePage : UserControl
     private readonly TextBox _nbt = new() { IsReadOnly = true, TextWrapping = TextWrapping.NoWrap, AcceptsReturn = true, FontFamily = new FontFamily("Consolas"), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
     private readonly Image _projection = new() { Stretch = Stretch.Uniform, MinHeight = 220 };
     private readonly TextBlock _materials = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly StackPanel _actions = new() { Orientation = Orientation.Horizontal };
+    private readonly WorldMapPanel _worldMap = new() { Name = "WorldMapPreview" };
+    private readonly WrapPanel _actions = new();
     private readonly Dictionary<string, TextBox> _extraFields = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CheckBox> _extraFlags = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _initialFields = new(StringComparer.Ordinal);
@@ -33,7 +34,7 @@ public sealed class WorldArchivePage : UserControl
         var page = new Grid { Margin = new Thickness(24) };
         page.RowDefinitions.Add(new() { Height = GridLength.Auto }); page.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) }); page.RowDefinitions.Add(new() { Height = GridLength.Auto });
         var header = new StackPanel(); header.Children.Add(new TextBlock { Text = "存档", FontSize = 28, FontWeight = FontWeights.Bold });
-        header.Children.Add(new TextBlock { Text = "管理世界 · 生成副本 · 查看投影与结构", Opacity = .7, Margin = new Thickness(0, 4, 0, 12) });
+        header.Children.Add(new TextBlock { Text = "管理世界 · 生成副本 · 二维地图 · 查看投影与结构", Opacity = .7, Margin = new Thickness(0, 4, 0, 12) });
         var toolbar = new WrapPanel();
         Add(toolbar, "刷新", async () => await RefreshAsync());
         Add(toolbar, "打开存档目录", async () => { var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择含 level.dat 的 Java 版存档目录" }; if (picker.ShowDialog() == true) await RunAsync(() => Task.Run(() => Select(WorldArchiveService.Read(picker.FolderName)))); });
@@ -68,11 +69,12 @@ public sealed class WorldArchivePage : UserControl
         var playerPanel = new StackPanel(); playerPanel.Children.Add(new TextBlock { Text = "编辑 level.dat 中的单人玩家生命、饥饿、经验、坐标和模式。不修改多人 playerdata；移动坐标前请确认目标安全。", TextWrapping = TextWrapping.Wrap, Opacity = .7 }); playerPanel.Children.Add(_playerFields);
         settings.Children.Add(new Expander { Header = "单人玩家数据", Content = playerPanel, Margin = new Thickness(0, 8, 0, 8) });
         settings.Children.Add(new TextBlock { Text = "留空或三态勾选的中间状态表示保留原值。保存前请退出游戏。修改 level.dat 会自动备份；副本保留已有区块。修改种子只影响之后生成的区块，可能产生地形接缝。", TextWrapping = TextWrapping.Wrap, Opacity = .7, Margin = new Thickness(0, 12, 0, 12) });
-        Add(_actions, "保存设置", SaveAsync); Add(_actions, "修改并生成副本", CopyAsync); settings.Children.Add(_actions);
+        Add(_actions, "备份 / 恢复副本", ManageBackupsAsync); Add(_actions, "保存设置", SaveAsync); Add(_actions, "修改并生成副本", CopyAsync); settings.Children.Add(_actions);
         tabs.Items.Add(new TabItem { Header = "世界设置", Content = new ScrollViewer { Content = settings, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         var preview = new StackPanel { Margin = new Thickness(12) }; preview.Children.Add(new TextBlock { Text = "俯视投影 · 颜色区分方块类型（非游戏材质）", Margin = new Thickness(0, 0, 0, 8) }); preview.Children.Add(_projection); preview.Children.Add(_materials);
         tabs.Items.Add(new TabItem { Header = "投影 / 材料", Content = new ScrollViewer { Content = preview, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } });
         tabs.Items.Add(new TabItem { Header = "NBT 结构", Content = _nbt });
+        tabs.Items.Add(new TabItem { Header = "二维地图", Content = _worldMap });
         Grid.SetRow(_status, 2); page.Children.Add(_status); Content = page;
         Loaded += async (_, _) => await RefreshAsync();
     }
@@ -94,6 +96,7 @@ public sealed class WorldArchivePage : UserControl
         _playerFields.IsEnabled = world.Settings.Player != null;
         _info.Text = $"{world.Settings.Version} · DataVersion {world.Settings.DataVersion}\n种子：{world.Settings.Seed?.ToString() ?? "未知"}\n{world.Path}";
         _nbt.Text = NbtDocument.Load(Path.Combine(world.Path, "level.dat")).Describe();
+        _worldMap.SetWorld(world);
     }
     private WorldEdit Edit()
     {
@@ -141,6 +144,12 @@ public sealed class WorldArchivePage : UserControl
     {
         var roots = WorldCatalog.GameRoots(); var warnings = new List<string>();
         await RunAsync(async () => { _worlds.ItemsSource = await Task.Run(() => WorldArchiveService.Discover(roots, warnings.Add)); _status.Text = warnings.Count == 0 ? "请选择存档；也可打开其他目录。" : string.Join("\n", warnings.Take(5)); });
+    }
+    private Task ManageBackupsAsync()
+    {
+        if (_selected == null) { _status.Text = "请先选择存档。"; return Task.CompletedTask; }
+        if (Application.Current.MainWindow is MainWindow owner) owner.OpenSaveBackups(_selected.Path);
+        return Task.CompletedTask;
     }
     private async Task SaveAsync()
     {

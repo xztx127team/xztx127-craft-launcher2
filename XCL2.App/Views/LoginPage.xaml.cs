@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
@@ -285,9 +285,16 @@ public partial class LoginPage : UserControl
         }
     }
 
+    private void AccountActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: { } menu } button) return;
+        menu.PlacementTarget = button;
+        menu.IsOpen = true;
+    }
+
     private void SelectAccount_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: Account acc })
+        if (sender is FrameworkElement { Tag: Account acc })
         {
             _owner.ConfigService.SelectAccount(acc.Id);
             _owner.RefreshSidebar();
@@ -297,14 +304,16 @@ public partial class LoginPage : UserControl
 
     private void CopyUuid_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: Account acc }) return;
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
         Clipboard.SetText(acc.Uuid ?? "");
-        ToastService.ShowSuccess("UUID 已复制");
+        if (_owner.ConfigService.Config.Ux50InputLocalCopyFeedback)
+            InputExperienceService.ShowCopied((FrameworkElement)sender);
+        else ToastService.ShowSuccess("UUID 已复制");
     }
 
     private void OpenAccountPortal_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: Account acc }) return;
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
         var url = acc.Type switch
         {
             AccountType.Microsoft => "https://www.minecraft.net/msaprofile",
@@ -322,13 +331,13 @@ public partial class LoginPage : UserControl
 
     private void SkinModel_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: Account account }) return;
+        if (sender is not FrameworkElement { Tag: Account account }) return;
         new SkinModelViewerDialog(account).ShowDialog();
     }
 
     private void Skin_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: Account acc }) return;
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
         if (acc.Type != AccountType.Offline) return; // 保险起见：微软账户不应该走到这里
 
         var skinService = new SkinService();
@@ -348,7 +357,7 @@ public partial class LoginPage : UserControl
     /// </summary>
     private void ImportAvatarPhoto_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: Account acc }) return;
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
 
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
@@ -376,7 +385,7 @@ public partial class LoginPage : UserControl
     /// <summary>清除头像照片：删掉本地存档，账户头像退回"皮肤正脸 / 史蒂夫默认头像"。</summary>
     private void ClearAvatarPhoto_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: Account acc }) return;
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
         if (string.IsNullOrWhiteSpace(acc.AvatarPhotoPath))
         {
             StatusText.Text = $"账户 {acc.Username} 目前没有设置头像照片。";
@@ -410,7 +419,7 @@ public partial class LoginPage : UserControl
 
     private void RemoveAccount_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: Account acc })
+        if (sender is FrameworkElement { Tag: Account acc })
         {
             _owner.ConfigService.RemoveAccount(acc.Id);
             Reload();

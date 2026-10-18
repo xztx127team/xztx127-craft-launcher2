@@ -31,12 +31,23 @@ public sealed class NbtDocument
         int compression = a == 0x1f && b == 0x8b ? 1 : a == 0x78 ? 2 : 0;
         using Stream decoded = compression == 1 ? new GZipStream(input, CompressionMode.Decompress) :
             compression == 2 ? new ZLibStream(input, CompressionMode.Decompress) : input;
+        return ReadUncompressed(decoded, Limit, default, compression);
+    }
+    /// <summary>Reads already decompressed Java NBT with an explicit allocation limit and cancellation.</summary>
+    public static NbtDocument ReadUncompressed(Stream decoded, int maxBytes = Limit, CancellationToken cancellationToken = default, int compression = 0)
+    {
+        if (maxBytes <= 0 || maxBytes > Limit) throw new ArgumentOutOfRangeException(nameof(maxBytes));
         using var bytes = new MemoryStream();
         var buffer = new byte[8192]; int count;
-        while ((count = decoded.Read(buffer)) > 0)
-        { if (bytes.Length + count > Limit) throw new InvalidDataException("NBT 解压后超过上限。"); bytes.Write(buffer, 0, count); }
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            count = decoded.Read(buffer); if (count == 0) break;
+            if (bytes.Length + count > maxBytes) throw new InvalidDataException($"NBT 解压后超过 {maxBytes / (1024 * 1024)} MiB 上限。");
+            bytes.Write(buffer, 0, count);
+        }
         bytes.Position = 0;
-        var reader = new Reader(bytes);
+        var reader = new Reader(bytes, cancellationToken);
         var type = reader.Byte();
         if (type != 10) throw new InvalidDataException("仅支持 Java 版 Compound NBT；基岩版 level.dat / mcstructure 暂不支持。");
         var name = reader.String();
@@ -68,11 +79,11 @@ public sealed class NbtDocument
         Walk(Name, Root, 0);
         return text.Length <= maxChars ? text.ToString() : text.ToString(0, maxChars) + "\n…显示已截断";
     }
-    private sealed class Reader(Stream input)
+    private sealed class Reader(Stream input, CancellationToken cancellationToken)
     {
         private int _nodes;
         public byte Byte() { int value = input.ReadByte(); return value < 0 ? throw new EndOfStreamException("NBT 数据不完整。") : (byte)value; }
-        private byte[] Bytes(int count) { if (count < 0 || count > Limit || count > input.Length - input.Position) throw new InvalidDataException("无效 NBT 长度。"); var bytes = new byte[count]; input.ReadExactly(bytes); return bytes; }
+        private byte[] Bytes(int count) { cancellationToken.ThrowIfCancellationRequested(); if (count < 0 || count > Limit || count > input.Length - input.Position) throw new InvalidDataException("无效 NBT 长度。"); var bytes = new byte[count]; input.ReadExactly(bytes); return bytes; }
         private int Length(int width) { int n = BinaryPrimitives.ReadInt32BigEndian(Bytes(4)); if (n < 0 || (long)n * width > input.Length - input.Position) throw new InvalidDataException("无效 NBT 数组长度。"); return n; }
         public string String()
         {
@@ -92,6 +103,7 @@ public sealed class NbtDocument
         }
         public NbtTag Tag(byte type, int depth)
         {
+            if ((_nodes & 127) == 0) cancellationToken.ThrowIfCancellationRequested();
             if (depth > 64 || ++_nodes > 1_000_000) throw new InvalidDataException("NBT 嵌套或节点超过上限。");
             object value;
             switch (type)

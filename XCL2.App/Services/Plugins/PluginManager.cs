@@ -158,7 +158,12 @@ public sealed class PluginManager
         {
             ExtractPackage(package, unpack); var entry = PluginManifestReader.ReadEntry(unpack);
             if (entry != Path.GetFileName(target)) throw new IOException("升级包入口与原插件不一致。");
-            return InstallEntry(Path.Combine(unpack, entry), PluginInstallConflictAction.Replace, unpack, conflict, false)!;
+            var previous = PluginManifestReader.Read(target, "");
+            var next = PluginManifestReader.Read(Path.Combine(unpack, entry), "")!;
+            var expectedId = previous?.DeclaredId ?? Plugins.FirstOrDefault(p => p.FilePath.Equals(target, StringComparison.OrdinalIgnoreCase))?.Plugin?.Id;
+            if (expectedId != null && next.DeclaredId != expectedId) throw new IOException("升级包的插件 ID 与原插件不一致。");
+            var retained = GetGrantedPermissions(target).Where(p => next.Permissions.Contains(p, StringComparer.Ordinal)).ToArray();
+            return InstallEntry(Path.Combine(unpack, entry), PluginInstallConflictAction.Replace, unpack, conflict, false, retained)!;
         }
         finally { TryDelete(unpack); }
     }
@@ -210,7 +215,7 @@ public sealed class PluginManager
     public string? FindInstallConflict(string sourcePath)
     {
         var entryName = Path.GetFileName(sourcePath);
-        if (Path.GetExtension(sourcePath).Equals(".xclplugin", StringComparison.OrdinalIgnoreCase))
+        if (PluginUpgradeExport.IsPackage(sourcePath))
         {
             using var package = System.IO.Compression.ZipFile.OpenRead(sourcePath);
             var entry = package.GetEntry(PluginManifestReader.FileName) ?? throw new InvalidDataException("插件包根目录缺少 plugin.json。");
@@ -256,8 +261,14 @@ public sealed class PluginManager
 
     public string? InstallFromFile(string sourcePath, PluginInstallConflictAction action)
     {
-        if (!Path.GetExtension(sourcePath).Equals(".xclplugin", StringComparison.OrdinalIgnoreCase))
-            return InstallEntry(sourcePath, action, null);
+        if (!PluginUpgradeExport.IsPackage(sourcePath))
+        {
+            // Exported DLL/EXE entries are accompanied by the exact signed manifest and dependencies.
+            // Copying only the entry/manifest discards the signature and can fall back to legacy permissions.
+            var directory = Path.GetDirectoryName(Path.GetFullPath(sourcePath))!;
+            var metadata = PluginManifestReader.Read(sourcePath, "");
+            return InstallEntry(sourcePath, action, metadata == null ? null : directory);
+        }
         var unpack = Path.Combine(_pluginsRoot, "staging", Guid.NewGuid().ToString("N"));
         try
         {
@@ -298,7 +309,7 @@ public sealed class PluginManager
         }
     }
 
-    private string? InstallEntry(string sourcePath, PluginInstallConflictAction action, string? payloadDirectory, string? targetOverride = null, bool enableOnInstall = true)
+    private string? InstallEntry(string sourcePath, PluginInstallConflictAction action, string? payloadDirectory, string? targetOverride = null, bool enableOnInstall = true, IEnumerable<string>? retainedPermissions = null)
     {
         if (!Enum.IsDefined(action)) throw new ArgumentOutOfRangeException(nameof(action));
         var conflict = targetOverride ?? FindInstallConflict(sourcePath);
@@ -347,7 +358,7 @@ public sealed class PluginManager
                 _ = PluginManifestReader.Read(sourcePath, "");
                 File.Copy(publicManifest, Path.Combine(stage, PluginManifestReader.FileName), true);
             }
-            _ = PluginManifestReader.Read(Path.Combine(stage, entryName), "");
+            var stagedMetadata = PluginManifestReader.Read(Path.Combine(stage, entryName), "");
             File.WriteAllText(Path.Combine(stage, ManifestName), JsonSerializer.Serialize(new InstallManifest
             { EntryFile = entryName, InstanceSuffix = suffix }));
             if (conflict != null) BackupBeforeUpgrade();
@@ -362,7 +373,11 @@ public sealed class PluginManager
             movedNew = true;
             var destination = Path.Combine(destinationDir, entryName);
             foreach (var old in oldEntries) state.Remove(StateKey(old));
-            state[StateKey(destination)] = new PluginState { Enabled = enableOnInstall }; // 替换也算新导入，OnceOnImport 可运行新版本。
+            // Retain only grants still requested by an upgraded plugin. Its new fingerprint remains unregistered
+            // until the user clicks “插火”, so new capabilities can never inherit an unrelated/default grant.
+            state[StateKey(destination)] = new PluginState { Enabled = enableOnInstall,
+                GrantedPermissions = retainedPermissions?.Where(p => stagedMetadata?.Permissions.Contains(p, StringComparer.Ordinal) == true)
+                    .Distinct(StringComparer.Ordinal).ToList() ?? new() }; // 替换也算新导入，OnceOnImport 可运行新版本。
             WriteState(state);
             TryDelete(backup);
             return destination;

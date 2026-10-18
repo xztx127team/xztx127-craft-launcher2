@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -14,22 +14,42 @@ public enum DownloadQueueItemStatus
     Paused,
     Completed,
     Failed,
-    Canceled
+    Canceled,
+    Waiting
 }
 
 /// <summary>
-/// 标题栏下载列表里的单个条目。暂停/继续 不是真正的"字节级暂停"（那需要把
-/// DownloadService 内部按 chunk 写盘的循环整个改成可挂起状态机，改动面太大、
-/// 风险也高），而是复用 DownloadService 本来就有的行为："文件已存在且校验通过
-/// 就跳过，不重新下载"——所以这里的"暂停"实际是：取消当前正在跑的这次下载
-/// （已经完整下载并校验通过的文件不会被删，只有正在写的那个 .part 分片会被
-/// DownloadService 自己清理掉），"继续"则是用同样的参数重新调用一次安装方法，
-/// 已经装好的部分会被跳过，效果上等价于"从中断点继续"，只是没有字节级精确续传。
+/// 标题栏统一任务。暂停会取消当前执行，等待写入和清理真正结束后才允许继续。
+/// 完整且校验通过的文件可复用；单流 .part 在服务端支持 Range 时可续传，
+/// 分片中间态和通用镜像暂存文件会按各自下载器规则清理，不虚称所有任务都能字节续传。
 /// </summary>
 public sealed class DownloadQueueItem : INotifyPropertyChanged
 {
     public Guid Id { get; } = Guid.NewGuid();
+    public Guid RecoveryId { get; init; } = Guid.NewGuid();
+    public DownloadRecoveryRequest? RecoveryRequest { get; init; }
     public string Name { get; }
+    public string OriginPage { get; init; } = "启动器任务";
+    private string _remark = "";
+    public string Remark { get => _remark; set { var text = (value ?? "").Trim(); _remark = text[..Math.Min(text.Length, 200)]; OnChanged(); } }
+    public string TransferStageText => TransferObservation.ActivitySummary(
+        DownloadQueueService.Instance.Config?.Ux50DownloadStageDetails != false,
+        DownloadQueueService.Instance.Config?.Ux50DownloadRetryCountdown != false);
+    public string Category => RecoveryRequest != null || TargetVersionId != null ? "游戏实例"
+        : Name.Contains("Java", StringComparison.OrdinalIgnoreCase) || Name.Contains("DirectX", StringComparison.OrdinalIgnoreCase) || Name.Contains("运行库") || Name.Contains("VC++") ? "运行环境"
+        : Name.Contains("模组") || Name.Contains("资源") || Name.Contains("整合包") ? "模组与资源" : "其他";
+    public DownloadTransferObservation TransferObservation { get; } = new();
+    private string _taskExplanation = "";
+    public string TaskExplanation { get => _taskExplanation; internal set { _taskExplanation = value; OnChanged(); } }
+    private readonly System.Diagnostics.Stopwatch _executionWatch = new();
+    public string ActivityText => Status == DownloadQueueItemStatus.Waiting ? "等待执行；可右键调整顺序"
+        : $"已用 {(int)_executionWatch.Elapsed.TotalMinutes}分{_executionWatch.Elapsed.Seconds:00}秒";
+    internal void StartTiming() { _lastSampleTime = DateTime.MinValue; _unitsPerSecond = 0; _lastStage = null; _executionWatch.Start(); RefreshTiming(); }
+    internal void StopTiming() { _executionWatch.Stop(); RefreshTiming(); }
+    public void RefreshTiming() { OnChanged(nameof(ActivityText)); OnChanged(nameof(TransferStageText)); }
+    public bool CanMoveWaiting => !IsRunning && Status == DownloadQueueItemStatus.Waiting;
+    internal bool BypassScheduler;
+
 
     private double _progressPercent;
     private bool _isIndeterminate = true;
@@ -59,9 +79,19 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     }
 
     /// <summary>该任务是否允许暂停。安装加载器这类不能安全中断后续传的任务设为 false，界面上不会出现暂停按钮。</summary>
-    public bool SupportsPause { get; init; } = true;
+    private bool _supportsPause = true;
+    public bool SupportsPause
+    {
+        get => _supportsPause;
+        set { _supportsPause = value; NotifyControls(); }
+    }
     public bool SupportsRetry { get; init; } = true;
-    public bool SupportsCancel { get; init; } = true;
+    private bool _supportsCancel = true;
+    public bool SupportsCancel
+    {
+        get => _supportsCancel;
+        set { _supportsCancel = value; NotifyControls(); }
+    }
     private bool _isRunning;
     public bool IsRunning
     {
@@ -82,10 +112,24 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     public Task<DownloadQueueItemStatus> Completion => CompletionSource.Task;
     public Exception? LastError { get; internal set; }
     public string? CompletionText { get; set; }
+    /// <summary>系统安装进程不能安全强停；仅在这一阶段暂时关闭暂停/取消。</summary>
+    internal async Task<T> RunInstallerPhaseAsync<T>(Func<Task<T>> action)
+    {
+        var previousPause = SupportsPause;
+        var previousCancel = SupportsCancel;
+        SupportsPause = false;
+        SupportsCancel = false;
+        try { return await action(); }
+        finally
+        {
+            SupportsPause = previousPause;
+            SupportsCancel = previousCancel;
+        }
+    }
     private void NotifyControls()
     {
         OnChanged(nameof(CanPause)); OnChanged(nameof(CanResume)); OnChanged(nameof(CanPauseOrResume));
-        OnChanged(nameof(CanCancel)); OnChanged(nameof(CancelLabel));
+        OnChanged(nameof(CanCancel)); OnChanged(nameof(CancelLabel)); OnChanged(nameof(CanMoveWaiting)); OnChanged(nameof(ActivityText));
     }
 
     /// <summary>驱动本次下载的取消令牌源。暂停/取消都通过 Cancel() 它来打断当前
@@ -158,6 +202,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     private int _lastSampleDone;
     private double _unitsPerSecond;
     private string? _lastStage;
+    private string _progressUnit = "项";
 
     private string _detailText = "";
     /// <summary>格式化好的详情行文本（剩余时间 · 当前速度 · 大小），按
@@ -193,7 +238,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
         }
 
         var remaining = Math.Max(0, total - done);
-        var speedText = _unitsPerSecond > 0.05 ? $"{_unitsPerSecond:0.#}/s" : "--";
+        var speedText = _unitsPerSecond > 0.05 ? $"{_unitsPerSecond:0.#} {_progressUnit}/秒" : "速度待计算";
         string etaText;
         if (_unitsPerSecond > 0.05 && remaining > 0)
         {
@@ -212,7 +257,16 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
             _ => $"剩余 {remaining}/{total}",
         };
 
-        DetailText = total > 0 ? $"剩余时间 {etaText} · {speedText} · {sizeText}" : "";
+        var suffix = " " + _progressUnit;
+        if (_progressUnit == "KiB")
+        {
+            var finishedSize = DownloadTransferPolicy.FormatCapacity((long)done * 1024);
+            var totalSize = DownloadTransferPolicy.FormatCapacity((long)total * 1024);
+            var remainingSize = DownloadTransferPolicy.FormatCapacity((long)remaining * 1024);
+            sizeText = mode switch { 1 => $"已完成 {finishedSize}/{totalSize}", 2 => $"已完成 {finishedSize}/{totalSize}（剩余 {remainingSize}）", _ => $"剩余 {remainingSize}/{totalSize}" };
+            suffix = "";
+        }
+        DetailText = total > 0 ? $"本阶段预计剩余 {etaText} · {speedText} · {sizeText}{suffix}" : "当前阶段没有可计算的总量";
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -231,6 +285,8 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
             _lastSampleTime = DateTime.MinValue;
             _unitsPerSecond = 0;
         }
+        _progressUnit = info.Unit;
+        RefreshTiming();
         IsIndeterminate = info.Total <= 0;
         var pct = info.Total > 0 ? (double)info.Done / info.Total * 100 : 0;
         ProgressPercent = Math.Clamp(pct, 0, 100);
@@ -252,9 +308,12 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
 /// "这个版本还在装，装完再启动"。判断入口见 FindActiveForVersion，拦截点在
 /// MainWindow.LaunchInternalAsync。跟这条下载无关的其它版本仍然照常可以启动。
 /// </summary>
-public sealed class DownloadQueueService
+public sealed partial class DownloadQueueService
 {
     public static DownloadQueueService Instance { get; } = new();
+    private readonly AsyncLocal<DownloadQueueItem?> _currentItem = new();
+    /// <summary>同一下载流水线中的运行库补全复用父任务，避免嵌套登记两条下载。</summary>
+    internal DownloadQueueItem? CurrentItem => _currentItem.Value is { IsRunning: true } item ? item : null;
 
     /// <summary>由 MainWindow 启动时赋值一次，供 DownloadQueueItem.UpdateDetail 读取
     /// DownloadPopupSizeDisplayMode 等设置项——这个单例服务本身不持有 ConfigService，
@@ -263,8 +322,10 @@ public sealed class DownloadQueueService
     public AppConfig? Config { get; set; }
 
     public ObservableCollection<DownloadQueueItem> Items { get; } = new();
+    /// <summary>只保留本会话最近的完成任务，供用户主动定位文件；不落盘路径或操作记录。</summary>
+    public ObservableCollection<DownloadQueueItem> RecentCompleted { get; } = new();
 
-    public bool HasActive => Items.Any(i => i.IsRunning || i.Status == DownloadQueueItemStatus.Paused);
+    public bool HasActive => Items.Any(i => i.IsRunning || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting);
 
     /// <summary>
     /// 找出"正在下载/安装 <paramref name="versionId"/> 这个版本"的队列条目，没有就返回 null。
@@ -282,7 +343,7 @@ public sealed class DownloadQueueService
         if (string.IsNullOrWhiteSpace(versionId)) return null;
 
         return Items.FirstOrDefault(i =>
-            (i.IsRunning || i.Status == DownloadQueueItemStatus.Paused) &&
+            (i.IsRunning || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting) &&
             i.TargetsVersion(versionId) &&
             (string.IsNullOrWhiteSpace(i.TargetFolderPath) || string.IsNullOrWhiteSpace(folderPath) ||
              string.Equals(NormalizeFolder(i.TargetFolderPath), NormalizeFolder(folderPath), StringComparison.OrdinalIgnoreCase)));
@@ -307,7 +368,7 @@ public sealed class DownloadQueueService
         item.AddInstallationTarget(versionId);
     });
 
-    /// <summary>登记一个新的下载条目并立即开始跑。调用方只需要把"怎么下载"包成
+    /// <summary>登记一个新的下载条目，按用户选择的任务并发数执行。调用方只需要把"怎么下载"包成
     /// resumeAction，其余的状态流转、异常吞掉、UI 线程调度都在这里统一处理，
     /// 不需要每个调用点各自重复一遍 try/catch。
     ///
@@ -320,7 +381,8 @@ public sealed class DownloadQueueService
     /// 区分开，避免用户扫一眼颜色就以为下载已经结束了。</summary>
     public DownloadQueueItem StartNew(string name, Func<DownloadQueueItem, CancellationToken, Task> resumeAction,
         string? targetVersionId = null, string? targetFolderPath = null, bool supportsPause = true,
-        bool supportsRetry = true, bool supportsCancel = true)
+        bool supportsRetry = true, bool supportsCancel = true, DownloadRecoveryRequest? recoveryRequest = null,
+        string? originPage = null, [CallerFilePath] string originFile = "")
     {
         var cts = new CancellationTokenSource();
         var item = new DownloadQueueItem(name, cts, resumeAction)
@@ -329,25 +391,34 @@ public sealed class DownloadQueueService
             TargetFolderPath = string.IsNullOrWhiteSpace(targetFolderPath) ? null : targetFolderPath,
             SupportsPause = supportsPause,
             SupportsRetry = supportsRetry,
-            SupportsCancel = supportsCancel
+            SupportsCancel = supportsCancel,
+            RecoveryRequest = recoveryRequest,
+            OriginPage = originPage ?? CurrentItem?.OriginPage ?? DescribeOrigin(originFile),
+            BypassScheduler = CurrentItem != null,
+            Status = DownloadQueueItemStatus.Waiting,
+            StatusText = "等待执行"
         };
         RunOnUi(() =>
         {
             if (FindActiveForVersion(targetFolderPath, targetVersionId) != null)
                 throw new InvalidOperationException($"「{targetVersionId}」已有下载或补全任务，请等待该任务结束。");
-            item.IsRunning = true;
             Items.Add(item);
-            ToastService.ShowInfo($"{name}：下载已开始");
+            PersistRecovery();
+
         });
-        RunOnUi(() => { _ = RunAsync(item); });
+        RunOnUi(PumpWaiting);
         return item;
     }
 
     private async Task RunAsync(DownloadQueueItem item)
     {
+        using var observation = DownloadTransferPolicy.Observe(item.TransferObservation);
+        item.StartTiming();
         var attemptCts = item.Cts;
         var completion = item.CompletionSource;
-        RunOnUi(() => { item.Status = DownloadQueueItemStatus.Downloading; item.StatusText = "下载中..."; });
+        var previousItem = _currentItem.Value;
+        _currentItem.Value = item;
+        RunOnUi(() => { item.Status = DownloadQueueItemStatus.Downloading; item.StatusText = "正在执行…"; });
         try
         {
             await item.ResumeAction(item, attemptCts.Token);
@@ -379,13 +450,21 @@ public sealed class DownloadQueueService
         }
         finally
         {
-            RunOnUi(() => { item.IsRunning = false; item.IsIndeterminate = false; });
+            var explanation = await Task.Run(item.TransferObservation.Summary);
+            RunOnUi(() => { item.TaskExplanation = explanation; item.StopTiming(); item.IsRunning = false; item.IsIndeterminate = false; PersistRecovery(); });
+            _currentItem.Value = previousItem;
             completion.TrySetResult(item.Status);
             attemptCts.Dispose();
+            RunOnUi(PumpWaiting);
         }
         if (item.Status == DownloadQueueItemStatus.Completed)
         {
-            RunOnUi(() => ShowCompletionNotification(item));
+            RunOnUi(() =>
+            {
+                RecentCompleted.Insert(0, item);
+                while (RecentCompleted.Count > 20) RecentCompleted.RemoveAt(RecentCompleted.Count - 1);
+                ShowCompletionNotification(item);
+            });
             await Task.Delay(TimeSpan.FromSeconds(item.CompletionText == null ? 4 : 15));
             RunOnUi(() => Items.Remove(item));
         }
@@ -395,12 +474,13 @@ public sealed class DownloadQueueService
     /// 不提供暂停或重试，避免调用方已结束后后台重试又触发启动或安装。</summary>
     public async Task<T> RunAndWaitAsync<T>(string name,
         Func<DownloadQueueItem, CancellationToken, Task<T>> action, CancellationToken ct = default,
-        string? targetVersionId = null, string? targetFolderPath = null, bool supportsCancel = true)
+        string? targetVersionId = null, string? targetFolderPath = null, bool supportsCancel = true,
+        [CallerFilePath] string originFile = "")
     {
         ct.ThrowIfCancellationRequested();
         T result = default!;
         var item = StartNew(name, async (entry, token) => { result = await action(entry, token); },
-            targetVersionId, targetFolderPath, supportsPause: false, supportsRetry: false, supportsCancel: supportsCancel);
+            targetVersionId, targetFolderPath, supportsPause: false, supportsRetry: false, supportsCancel: supportsCancel, originPage: DescribeOrigin(originFile));
         // 安装程序不可安全中断时仅取消调用方后续步骤；等安装进程真实退出后才释放任务。
         using var registration = supportsCancel ? ct.Register(() =>
         {
@@ -435,11 +515,18 @@ public sealed class DownloadQueueService
             else if (item.Name.StartsWith("下载 ") && cfg.CommunityResourceNoPopup) noPopup = true;
             else if (item.Name.StartsWith("整合包 ") && cfg.ModpackNoPopup) noPopup = true;
 
+            // 原有“不提醒”优先；安静时段只改变仍允许出现的完成提醒。
+            if (noPopup && cfg.DownloadNotifyMode == 3) return;
+            if (DownloadNotificationPolicy.IsQuiet(cfg, DateTime.Now))
+            {
+                ReminderCenterService.Publish("download-quiet-" + item.Id, "下载完成", completionMessage);
+                return;
+            }
             if (noPopup)
             {
                 if (cfg.DownloadNotifyMode == 1) // 角标
                 {
-                    ToastService.ShowSuccess(completionMessage);
+                    ReminderCenterService.Publish("download-complete-" + item.Id, "下载完成", completionMessage);
                 }
                 else if (cfg.DownloadNotifyMode == 2) // Windows 通知
                 {
@@ -453,6 +540,41 @@ public sealed class DownloadQueueService
             }
         }
         catch { }
+    }
+
+    internal static string DescribeOrigin(string file) => Path.GetFileNameWithoutExtension(file).Replace(".xaml", "") switch
+    {
+        "DownloadCenterPage" => "下载中心",
+        "BedrockPage" => "基岩版",
+        "ServerManagerPage" or "CreateServerWindow" => "服务器管理",
+        "QuickStartWizardWindow" => "快速开始",
+        "PluginModSourcesDialog" or "PluginManagementService" or "PluginResourceService" => "插件与资源",
+        "LoaderInstallQueue" => "加载器安装",
+        "WindowsDisplayDriverInstallService" => "显示驱动工具",
+        "JavaDownloadQueueService" or "DirectXRuntimeInstallService" or "MainWindow" => "启动与运行环境补全",
+        _ => "启动器任务"
+    };
+    public int PauseAllSafe()
+    {
+        // 先暂停安全的等待项，避免运行任务停下后调度器立刻开始下一项。
+        var waiting = Items.Where(item => !item.IsRunning && item.Status == DownloadQueueItemStatus.Waiting && item.SupportsPause).ToArray();
+        foreach (var entry in waiting)
+        {
+            entry.Status = DownloadQueueItemStatus.Paused;
+            entry.StatusText = "排队已暂停，本次执行尚未开始";
+            entry.IsIndeterminate = false;
+            entry.CompletionSource.TrySetResult(DownloadQueueItemStatus.Paused);
+        }
+        var entries = Items.Where(item => item.CanPause).ToArray();
+        foreach (var entry in entries) Pause(entry);
+        PersistRecovery();
+        return waiting.Length + entries.Length;
+    }
+    public int CancelSelectedWaiting(IEnumerable<DownloadQueueItem> selected)
+    {
+        var entries = selected.Distinct().Where(item => Items.Contains(item) && item.Status == DownloadQueueItemStatus.Waiting && !item.IsRunning).ToArray();
+        foreach (var entry in entries) Cancel(entry);
+        return entries.Length;
     }
 
     public void Pause(DownloadQueueItem item)
@@ -475,10 +597,13 @@ public sealed class DownloadQueueService
         item.PauseRequested = false;
         item.LastError = null;
         item.CompletionText = null;
+        item.Cts.Dispose();
         item.Cts = new CancellationTokenSource();
         item.CompletionSource = DownloadQueueItem.NewCompletionSource();
-        item.IsRunning = true;
-        _ = RunAsync(item);
+        item.Status = DownloadQueueItemStatus.Waiting;
+        item.StatusText = "等待执行";
+        PersistRecovery();
+        PumpWaiting();
     }
 
     public void Cancel(DownloadQueueItem item)
@@ -486,14 +611,96 @@ public sealed class DownloadQueueService
         if (!item.CanCancel) return;
         if (!item.IsRunning)
         {
-            item.Status = DownloadQueueItemStatus.Canceled;
+            if (item.Status == DownloadQueueItemStatus.Paused)
+            {
+                // 暂停已经结束了上次执行。取消只放弃后续继续，已有文件保留。
+                item.PauseRequested = false;
+                item.Status = DownloadQueueItemStatus.Canceled;
+                item.StatusText = "已取消后续下载；已有文件保留";
+                item.TaskExplanation = "已取消后续下载，未删除已有文件。\n" + item.TaskExplanation;
+                item.CompletionSource.TrySetResult(DownloadQueueItemStatus.Canceled);
+                item.Cts.Dispose();
+                PersistRecovery();
+                _ = RefreshCanceledFileExplanationAsync(item);
+                // 保留说明和清理入口；下一次点击「移除」才收起该行。
+                return;
+            }
+            if (item.Status == DownloadQueueItemStatus.Waiting)
+            {
+                // 「本次」排队尚未执行；此前暂停/重试留下的文件仍可能存在。
+                item.Status = DownloadQueueItemStatus.Canceled;
+                item.StatusText = "已取消排队；本次执行尚未开始";
+                item.TaskExplanation = "本次排队未执行，未新增文件；此前已有的文件不会因取消而删除。\n" + item.TaskExplanation;
+                item.CompletionSource.TrySetResult(DownloadQueueItemStatus.Canceled);
+                item.Cts.Dispose();
+            }
+            // 完成、失败或已取消的行仅移出列表，保留原结果，避免额外记录一次「取消」。
             Items.Remove(item);
+            PersistRecovery();
             return;
         }
         item.PauseRequested = false;
         item.Status = DownloadQueueItemStatus.Canceled;
         item.StatusText = "正在取消...";
         item.Cts.Cancel();
+    }
+
+    private static async Task RefreshCanceledFileExplanationAsync(DownloadQueueItem item)
+    {
+        var summary = await Task.Run(item.TransferObservation.Summary);
+        RunOnUi(() =>
+        {
+            if (item.Status == DownloadQueueItemStatus.Canceled)
+                item.TaskExplanation = "已取消后续下载，未删除已有文件。\n" + summary;
+        });
+    }
+
+    private bool _pumpingWaiting;
+    private bool _cleaningRecordedParts;
+    public async Task<int> CleanupRecordedPartsAsync(DownloadQueueItem item)
+    {
+        RunOnUi(() =>
+        {
+            if (_cleaningRecordedParts || HasActive) throw new InvalidOperationException("请先结束其他下载任务，再清理续传文件。");
+            _cleaningRecordedParts = true;
+        });
+        try { return await Task.Run(item.TransferObservation.DeleteResumableFiles); }
+        finally { RunOnUi(() => { _cleaningRecordedParts = false; PumpWaiting(); }); }
+    }
+    /// <summary>只改变尚未开始的任务；运行中任务、单文件并发数和安装阶段不受排序影响。</summary>
+    public void RefreshScheduling() => RunOnUi(PumpWaiting);
+    private void PumpWaiting()
+    {
+        if (_pumpingWaiting || _cleaningRecordedParts) return;
+        _pumpingWaiting = true;
+        try
+        {
+            while (true)
+            {
+                var limit = Math.Clamp(Config?.DownloadTaskConcurrency ?? 0, 0, 8);
+                var next = Items.FirstOrDefault(entry => entry.CanMoveWaiting &&
+                    (entry.BypassScheduler || limit == 0 || Items.Count(active => active.IsRunning && !active.BypassScheduler) < limit));
+                if (next == null) break;
+                next.IsRunning = true;
+                _ = RunAsync(next);
+            }
+        }
+        finally { _pumpingWaiting = false; }
+    }
+    public void MoveWaiting(DownloadQueueItem item, int direction) => RunOnUi(() =>
+    {
+        if (!item.CanMoveWaiting || !Items.Contains(item)) return;
+        var index = Items.IndexOf(item);
+        var target = direction < 0
+            ? Enumerable.Range(0, index).Reverse().FirstOrDefault(i => Items[i].CanMoveWaiting, -1)
+            : Enumerable.Range(index + 1, Items.Count - index - 1).FirstOrDefault(i => Items[i].CanMoveWaiting, -1);
+        if (target >= 0) Items.Move(index, target);
+    });
+    public int RetryFailed()
+    {
+        var failed = Items.Where(entry => entry.Status == DownloadQueueItemStatus.Failed && entry.CanResume).ToArray();
+        foreach (var item in failed) Resume(item);
+        return failed.Length;
     }
 
     private static void RunOnUi(Action action)

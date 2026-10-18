@@ -100,6 +100,7 @@ public class DragDropInstallService
             case ".dll":
             case ".exe":
             case ".xclplugin":
+            case ".xcl":
                 return DropKind.Plugin;
             case ".zip":
                 return ClassifyZip(path);

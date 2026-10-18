@@ -15,7 +15,7 @@ namespace XCL2.App.Services;
 /// 内容分享) 和 versions 内部的 jar/json 本体(游戏版本文件，导入方应该用启动器自己下载对应版本，
 /// 而不是靠整合包夹带游戏本体，那样体积会非常大且容易涉及版权问题)。
 /// </summary>
-public class ModpackService
+public partial class ModpackService
 {
     private static readonly string[] IncludedFolders = { "mods", "config", "resourcepacks", "shaderpacks" };
     private const string ManifestFileName = "xclpack.json";
@@ -37,7 +37,6 @@ public class ModpackService
     public void Export(string versionDir, string destZipPath, ModpackManifest manifest,
         IProgress<ProgressInfo>? progress)
     {
-        if (File.Exists(destZipPath)) File.Delete(destZipPath);
 
         var tmpDir = Path.Combine(Path.GetTempPath(), $"xcl2_pack_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tmpDir);
@@ -45,7 +44,7 @@ public class ModpackService
         try
         {
             // 跟 ExportMrpack 同样的兜底：manifest 里的版本信息不可信时就地重新解析，
-            // 保证 .xclpack 里的 manifest.json 也带上正确的 MC 版本 / 加载器版本，
+            // 保证 .xclpack 里的 xclpack.json 也带上正确的 MC 版本 / 加载器版本，
             // 否则本启动器自己再导入这个包时同样读不到版本信息（"无法导入"的另一半成因）。
             manifest = NormalizeManifest(versionDir, manifest);
 
@@ -76,7 +75,8 @@ public class ModpackService
             }
 
             progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Creating_Archive", "生成压缩包"), totalFiles, totalFiles, Path.GetFileName(destZipPath)));
-            ZipFile.CreateFromDirectory(tmpDir, destZipPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+            ArchiveImportSafety.ExportAtomically(destZipPath, temporary =>
+                ZipFile.CreateFromDirectory(tmpDir, temporary, CompressionLevel.Optimal, includeBaseDirectory: false));
             progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Export_Complete", "导出完成"), totalFiles, totalFiles, ""));
         }
         finally
@@ -96,52 +96,27 @@ public class ModpackService
         if (!File.Exists(zipPath))
             throw new FileNotFoundException("找不到整合包文件。", zipPath);
 
-        ModpackManifest? manifest = null;
-        Directory.CreateDirectory(targetVersionDir);
-
-        progress?.Report("解压整合包 ...");
+        ArchiveImportSafety.CheckLinks(zipPath);
         using var archive = ZipFile.OpenRead(zipPath);
-
-        var manifestEntry = archive.GetEntry(ManifestFileName);
+        ArchiveImportSafety.ValidateArchive(archive, targetVersionDir);
+        if (archive.GetEntry("manifest.json") is { } cf && IsCurseForgeManifest(cf))
+            throw new InvalidOperationException("这是 CurseForge 清单包，请使用联网整合包安装流程解析文件清单；未写入内容。");
+        ModpackManifest? manifest = null;
+        var manifestEntry = archive.GetEntry(ManifestFileName) ?? archive.GetEntry("xcl2-modpack.json");
         if (manifestEntry != null)
         {
-            try
-            {
-                using var stream = manifestEntry.Open();
-                manifest = JsonSerializer.Deserialize<ModpackManifest>(stream);
-            }
-            catch
-            {
-                // manifest 损坏或格式不对不影响继续导入内容文件，只是拿不到展示用的元信息
-            }
+            try { manifest = JsonSerializer.Deserialize<ModpackManifest>(ArchiveImportSafety.ReadManifest(manifestEntry)); }
+            catch (JsonException) { /* Content-only imports may omit display metadata. */ }
         }
-
-        var importedAny = false;
-        foreach (var entry in archive.Entries)
-        {
-            // 目录条目 Name 为空，跳过；只处理落在 IncludedFolders 白名单下的文件条目，
-            // 防止 zip 包里混入奇怪路径（例如故意构造的 "../../xxx" 路径穿越）写到白名单目录之外。
-            if (string.IsNullOrEmpty(entry.Name)) continue;
-            if (entry.FullName == ManifestFileName) continue;
-
-            var normalizedPath = entry.FullName.Replace('\\', '/');
-            var topFolder = normalizedPath.Split('/')[0];
-            if (!IncludedFolders.Contains(topFolder)) continue;
-
-            var destPath = Path.Combine(targetVersionDir, normalizedPath.Replace('/', Path.DirectorySeparatorChar));
-            var destFullPath = Path.GetFullPath(destPath);
-            var targetFullPath = Path.GetFullPath(targetVersionDir);
-            if (!destFullPath.StartsWith(targetFullPath, StringComparison.OrdinalIgnoreCase))
-                continue; // 路径穿越防护：解出来的最终路径必须落在目标版本目录内部
-
-            Directory.CreateDirectory(Path.GetDirectoryName(destFullPath)!);
-            entry.ExtractToFile(destFullPath, overwrite: true);
-            importedAny = true;
-        }
-
-        if (!importedAny)
-            throw new InvalidOperationException("这个压缩包里没有找到 mods/config/resourcepacks/shaderpacks 任何内容，可能不是有效的整合包文件。");
-
+        var files = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) &&
+            IncludedFolders.Contains(entry.FullName.Replace('\\', '/').Split('/')[0])).ToArray();
+        if (files.Length == 0)
+            throw new InvalidOperationException("这个压缩包里没有找到 mods/config/resourcepacks/shaderpacks 内容，未执行导入。");
+        // Validate every selected destination before creating or overwriting any file.
+        foreach (var entry in files) _ = ArchiveImportSafety.Resolve(targetVersionDir, entry.FullName.Replace('\\', '/'));
+        progress?.Report("解压整合包 ...");
+        foreach (var entry in files)
+            ArchiveImportSafety.Extract(entry, targetVersionDir, entry.FullName.Replace('\\', '/'));
         progress?.Report("导入完成");
         return manifest;
     }
@@ -171,86 +146,59 @@ public class ModpackService
     /// 3) 下载失败的单个 mod 不中止整个导入（部分整合包体积很大，某个源暂时挂了不该导致整体失败），
     ///    累计失败的文件名收集起来，导入完成后通过返回值告知调用方。
     /// </summary>
-    public async Task<MrpackImportResult> ImportMrpackAsync(string mrpackPath, string targetVersionDir,
+    // Preserve the original CLR signature for already compiled callers.
+    public Task<MrpackImportResult> ImportMrpackAsync(string mrpackPath, string targetVersionDir,
         IProgress<string>? progress = null, CancellationToken ct = default)
-    {
-        if (!File.Exists(mrpackPath))
-            throw new FileNotFoundException("找不到整合包文件。", mrpackPath);
+        => ImportMrpackAsync(mrpackPath, targetVersionDir, progress, ct, server: false);
 
-        Directory.CreateDirectory(targetVersionDir);
+    public async Task<MrpackImportResult> ImportMrpackAsync(string mrpackPath, string targetVersionDir,
+        IProgress<string>? progress, CancellationToken ct, bool server)
+    {
+        if (!File.Exists(mrpackPath)) throw new FileNotFoundException("找不到整合包文件。", mrpackPath);
+        ArchiveImportSafety.CheckLinks(mrpackPath);
+        using var archive = ZipFile.OpenRead(mrpackPath);
+        ArchiveImportSafety.ValidateArchive(archive, targetVersionDir);
+        var indexEntry = archive.GetEntry("modrinth.index.json")
+            ?? throw new InvalidOperationException("找不到 modrinth.index.json，未执行导入。");
+        var index = JsonSerializer.Deserialize<MrpackIndex>(ArchiveImportSafety.ReadManifest(indexEntry))
+            ?? throw new InvalidDataException("modrinth.index.json 解析失败。");
+        if (index.Files == null || index.Files.Count > ArchiveImportSafety.MaximumEntries)
+            throw new InvalidDataException("整合包文件清单无效或过大。");
+        var files = index.Files.Where(file => file != null &&
+            !string.Equals(server ? file.Env?.Server : file.Env?.Client, "unsupported", StringComparison.OrdinalIgnoreCase)).ToArray();
+        // Reject unsafe manifest paths before the first override is written.
+        foreach (var file in files) _ = ArchiveImportSafety.Resolve(targetVersionDir, file.Path);
+        var sidePrefix = server ? "server-overrides/" : "client-overrides/";
+        var common = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) && entry.FullName.Replace('\\', '/').StartsWith("overrides/", StringComparison.Ordinal));
+        var specific = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) && entry.FullName.Replace('\\', '/').StartsWith(sidePrefix, StringComparison.Ordinal));
+        var overrides = common.Select(entry => (Entry: entry, Relative: entry.FullName.Replace('\\', '/')[10..]))
+            .Concat(specific.Select(entry => (Entry: entry, Relative: entry.FullName.Replace('\\', '/')[sidePrefix.Length..]))).ToArray();
+        foreach (var entry in overrides) _ = ArchiveImportSafety.Resolve(targetVersionDir, entry.Relative);
+        progress?.Report(server ? "导入服务器附带文件 ..." : "导入客户端附带文件 ...");
+        foreach (var entry in overrides) ArchiveImportSafety.Extract(entry.Entry, targetVersionDir, entry.Relative, ct);
         using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("XCL2-Launcher/1.0 (+https://github.com/xztx127-craft/xcl2)");
-
-        using var archive = ZipFile.OpenRead(mrpackPath);
-        var indexEntry = archive.GetEntry("modrinth.index.json")
-            ?? throw new InvalidOperationException("这不是一个有效的 Modrinth 整合包(.mrpack)：找不到 modrinth.index.json。");
-
-        MrpackIndex? index;
-        using (var s = indexEntry.Open())
-            index = JsonSerializer.Deserialize<MrpackIndex>(s);
-        if (index == null)
-            throw new InvalidOperationException("modrinth.index.json 解析失败，文件可能已损坏。");
-
-        // 1) 解压 overrides/（config、资源包等）到目标版本目录根下
-        progress?.Report("解压附带文件(overrides) ...");
-        foreach (var entry in archive.Entries)
-        {
-            if (string.IsNullOrEmpty(entry.Name)) continue;
-            var normalized = entry.FullName.Replace('\\', '/');
-            string? relative = null;
-            if (normalized.StartsWith("overrides/")) relative = normalized["overrides/".Length..];
-            else if (normalized.StartsWith("client-overrides/")) relative = normalized["client-overrides/".Length..];
-            if (relative == null || relative.Length == 0) continue;
-
-            var destPath = Path.Combine(targetVersionDir, relative.Replace('/', Path.DirectorySeparatorChar));
-            var destFull = Path.GetFullPath(destPath);
-            if (!destFull.StartsWith(Path.GetFullPath(targetVersionDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
-
-            Directory.CreateDirectory(Path.GetDirectoryName(destFull)!);
-            entry.ExtractToFile(destFull, overwrite: true);
-        }
-
-        // 2) 按清单下载每个 mod/资源文件。清单里的 env.client 标记这个文件是否是客户端需要的，
-        //    "unsupported" 表示这个 mod 在客户端不需要，跳过（常见于服务端专属 mod）。
         var failed = new List<string>();
-        var files = index.Files.Where(f => f.Env == null || f.Env.Client != "unsupported").ToList();
-        for (var i = 0; i < files.Count; i++)
+        for (var i = 0; i < files.Length; i++)
         {
-            var file = files[i];
-            var url = file.Downloads.FirstOrDefault();
-            if (string.IsNullOrEmpty(url) || string.IsNullOrEmpty(file.Path))
-            {
-                failed.Add(file.Path ?? "(未知文件)");
-                continue;
-            }
-
-            progress?.Report($"下载 {Path.GetFileName(file.Path)} ({i + 1}/{files.Count}) ...");
-            var destPath = Path.Combine(targetVersionDir, file.Path.Replace('/', Path.DirectorySeparatorChar));
-            var destFull = Path.GetFullPath(destPath);
-            if (!destFull.StartsWith(Path.GetFullPath(targetVersionDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            {
-                failed.Add(file.Path);
-                continue;
-            }
-
+            ct.ThrowIfCancellationRequested(); var file = files[i];
+            if (file.Downloads == null || !file.Downloads.Any(url => !string.IsNullOrWhiteSpace(url)))
+            { failed.Add(file.Path); continue; }
+            var destination = ArchiveImportSafety.Resolve(targetVersionDir, file.Path);
+            progress?.Report($"下载 {Path.GetFileName(file.Path)} ({i + 1}/{files.Length}) ...");
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(destFull)!);
+                ArchiveImportSafety.CheckLinks(destination);
                 await DownloadEndpoints.DownloadFilesWithFallbackAsync(http, file.Downloads, DownloadEndpoints.PreferMirror,
-                    destFull, $"下载整合包文件 {file.Path} 失败", ct: ct,
+                    destination, $"下载整合包文件 {file.Path} 失败", ct: ct,
                     expectedSha1: file.Hashes?.GetValueOrDefault("sha1"),
                     expectedSha512: file.Hashes?.GetValueOrDefault("sha512"),
                     expectedSize: file.FileSize > 0 ? file.FileSize : null);
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not Plugins.PluginFlowCanceledException)
-            {
-                // 单个文件下载失败不中止整体导入——大型整合包里某一个 mod 源偶尔失效很常见，
-                // 让用户能先玩上，之后自己去 Mod 管理页补装这一个即可，比整体导入失败友好得多。
-                failed.Add(file.Path);
-            }
+            { failed.Add(file.Path); }
         }
-
-        progress?.Report("导入完成");
+        progress?.Report(failed.Count == 0 ? "导入完成" : $"内容已导入，但 {failed.Count} 个文件下载失败");
         return new MrpackImportResult(index.Name, index.Dependencies?.Minecraft, failed);
     }
 
@@ -282,7 +230,6 @@ public class ModpackService
     public void ExportMrpack(string versionDir, string destMrpackPath, ModpackManifest manifest,
         IProgress<ProgressInfo>? progress)
     {
-        if (File.Exists(destMrpackPath)) File.Delete(destMrpackPath);
 
         var tmpDir = Path.Combine(Path.GetTempPath(), $"xcl2_mrpack_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tmpDir);
@@ -382,7 +329,8 @@ public class ModpackService
             }
 
             progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Creating_Archive", "生成压缩包"), totalFiles, totalFiles, Path.GetFileName(destMrpackPath)));
-            ZipFile.CreateFromDirectory(tmpDir, destMrpackPath, CompressionLevel.Optimal, includeBaseDirectory: false);
+            ArchiveImportSafety.ExportAtomically(destMrpackPath, temporary =>
+                ZipFile.CreateFromDirectory(tmpDir, temporary, CompressionLevel.Optimal, includeBaseDirectory: false));
             progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Export_Complete", "导出完成"), totalFiles, totalFiles, ""));
         }
         finally
@@ -393,6 +341,7 @@ public class ModpackService
 
     private static int CountFiles(string dir)
     {
+        ArchiveImportSafety.CheckLinks(dir);
         var count = Directory.GetFiles(dir).Length;
         foreach (var sub in Directory.GetDirectories(dir))
             count += CountFiles(sub);
@@ -433,10 +382,13 @@ public class ModpackService
     /// 只是纯复制不汇报。</summary>
     private static void CopyDirectory(string sourceDir, string destDir, Action<string, string>? onFile = null)
     {
+        ArchiveImportSafety.CheckLinks(sourceDir); ArchiveImportSafety.CheckLinks(destDir);
         Directory.CreateDirectory(destDir);
         foreach (var file in Directory.GetFiles(sourceDir))
         {
+            ArchiveImportSafety.CheckLinks(file);
             var destFile = Path.Combine(destDir, Path.GetFileName(file));
+            ArchiveImportSafety.CheckLinks(destFile);
             File.Copy(file, destFile, overwrite: true);
             onFile?.Invoke(file, Path.GetFileName(file));
         }
@@ -486,6 +438,7 @@ public class MrpackFile
 public class MrpackFileEnv
 {
     [JsonPropertyName("client")] public string? Client { get; set; }
+    [JsonPropertyName("server")] public string? Server { get; set; }
 }
 
 /// <summary>mrpack 导入结果：整合包名字、清单里声明的 MC 版本(可能为空)、下载失败的文件路径列表。</summary>

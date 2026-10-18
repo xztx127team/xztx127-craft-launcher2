@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Views/FeatureSearchBox.LayoutEditor.cs" Link="FeatureSearchBox.LayoutEditor.cs" />
+    <Compile Include="../../Services/FeatureSearchLayoutPolicy.cs" Link="FeatureSearchLayoutPolicy.cs" />
+  </ItemGroup>
+</Project>

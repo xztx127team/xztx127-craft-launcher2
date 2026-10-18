@@ -4,9 +4,16 @@
     <Compile Include="../../Services/AiAssistantService.Workbench.cs" Link="AiAssistantService.Workbench.cs" />
     <Compile Include="../../Services/Workbench/*.cs" Link="Workbench/%(Filename)%(Extension)" />
     <Compile Include="../../Models/AiAssistantModels.cs" Link="AiAssistantModels.cs" />
+    <Compile Include="../../Models/AiAgentSettings.cs" Link="AiAgentSettings.cs" />
+    <Compile Include="../../Models/AiCommandPermissions.cs" Link="AiCommandPermissions.cs" />
+    <Compile Include="../../Models/AiAttachmentModels.cs" Link="AiAttachmentModels.cs" />
     <Compile Include="../../Models/AiAssistantActivity.cs" Link="AiAssistantActivity.cs" />
     <Compile Include="../../Models/AiFileDiff.cs" Link="AiFileDiff.cs" />
     <Compile Include="../../Services/AiAssistantService.cs" Link="AiAssistantService.cs" />
+    <Compile Include="../../Services/AiAssistantService.ParameterCompatibility.cs" Link="AiAssistantService.ParameterCompatibility.cs" />
+    <Compile Include="../../Services/AiUnsupportedParameterPolicy.cs" Link="AiUnsupportedParameterPolicy.cs" />
+    <Compile Include="../../Services/AiProviderParameterMemory.cs" Link="AiProviderParameterMemory.cs" />
+    <Compile Include="../../Services/AiAttachmentService.cs" Link="AiAttachmentService.cs" />
     <Compile Include="../../Services/AiToolActionBudget.cs" Link="AiToolActionBudget.cs" />
     <Compile Include="../../Services/AiWorkModePolicy.cs" Link="AiWorkModePolicy.cs" />
     <Compile Include="../../Services/AiEndpointRouting.cs" Link="AiEndpointRouting.cs" />
@@ -19,5 +26,9 @@
     <Compile Include="../../Services/AiSubAgentProtocol.cs" Link="AiSubAgentProtocol.cs" />
     <Compile Include="../../Services/AiProviderJson.cs" Link="AiProviderJson.cs" />
     <Compile Include="../../Services/AiControlProtocol.cs" Link="AiControlProtocol.cs" />
+    <Compile Include="../../Services/AiPlanProtocol.cs" Link="AiPlanProtocol.cs" />
+    <Compile Include="../../Services/AiAgentPlanRecovery.cs" Link="AiAgentPlanRecovery.cs" />
+    <Compile Include="../../Services/AiResponseLimits.cs" Link="AiResponseLimits.cs" />
+    <Compile Include="../../Services/AiChatContextWindow.cs" Link="AiChatContextWindow.cs" />
   </ItemGroup>
 </Project>

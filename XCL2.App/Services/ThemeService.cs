@@ -140,6 +140,14 @@ public static class ThemeService
     /// 这一个色系（见 SettingsPage.xaml.cs VisualEffectsToggle_Changed），因为其它色系的
     /// 面板颜色不是按"水感"设计的，跟云母材质叠加在一起观感会很怪。</summary>
     public const string SkinAquatic = "Aquatic";
+    public const string SkinSakura = ThemePaletteCatalog.SkinSakura;
+    public const string SkinForest = ThemePaletteCatalog.SkinForest;
+    public const string SkinSeaSalt = ThemePaletteCatalog.SkinSeaSalt;
+    public const string SkinCoffee = ThemePaletteCatalog.SkinCoffee;
+    public const string SkinGrape = ThemePaletteCatalog.SkinGrape;
+    public const string SkinBerry = ThemePaletteCatalog.SkinBerry;
+    public const string SkinDune = ThemePaletteCatalog.SkinDune;
+    public const string SkinMidnight = ThemePaletteCatalog.SkinMidnight;
     /// <summary>历史遗留色系常量：仅用于兼容"旧配置文件里 UiSkin 存的是 Dark"这种数据，
     /// 新增的色系选择 UI（设置页下拉框等）不再把它作为一个可选项列出——现在"要不要深色"
     /// 已经拆到 IsDarkMode 独立控制，不需要再单独占一个"色系"位置。</summary>
@@ -155,7 +163,7 @@ public static class ThemeService
 
     /// <summary>提供给设置页"色系"下拉框遍历用的可选值，不包含 SkinDark（见上面注释，
     /// 深色已经拆成 IsDarkMode 独立维度，不再是一个单独的色系选项）。</summary>
-    public static readonly string[] AllSkins = { SkinWhite, SkinBlue, SkinYellow, SkinPurple, SkinPink, SkinSilver, SkinGold, SkinEmerald, SkinNether, SkinEndStone, SkinWarmYellow, SkinOrange, SkinObsidian, SkinFrostglass, SkinChampagneFrost, SkinPearl, SkinAlabaster, SkinGlacier, SkinCopper, SkinDeepslate, SkinAmethyst, SkinPrismarine, SkinLava, SkinLapis, SkinAquatic, SkinCustom };
+    public static readonly string[] AllSkins = { SkinWhite, SkinBlue, SkinYellow, SkinPurple, SkinPink, SkinSilver, SkinGold, SkinEmerald, SkinNether, SkinEndStone, SkinWarmYellow, SkinOrange, SkinObsidian, SkinFrostglass, SkinChampagneFrost, SkinPearl, SkinAlabaster, SkinGlacier, SkinCopper, SkinDeepslate, SkinAmethyst, SkinPrismarine, SkinLava, SkinLapis, SkinAquatic, SkinSakura, SkinForest, SkinSeaSalt, SkinCoffee, SkinGrape, SkinBerry, SkinDune, SkinMidnight, SkinCustom };
 
     /// <summary>当前是否深色模式，Apply 每次调用时同步更新。供 WindowChromeService 在
     /// 新窗口刚创建（SourceInitialized）时查询"现在该用深色标题栏还是浅色标题栏"——
@@ -341,14 +349,6 @@ public static class ThemeService
     {
         "PanelBrush", "SideBrush", "ButtonBackgroundBrush"
     };
-
-    private sealed record Palette(
-        string Accent, string AccentHover, string Glow, string GlowSoft,
-        string Panel, string Side, string Border, string BorderHover,
-        string TextPrimary, string TextSecondary,
-        string TileBlue, string TileIndigo, string TileGreen, string TileOrange, string TilePurple,
-        string SuccessText, string WarningText, string WarningBanner, string Danger, string Divider,
-        string ButtonBackground, string ButtonHoverBackground, string ButtonForeground);
 
     /// <summary>Key 是 (色系, 是否深色) 的组合；每个色系都各自有浅色版和深色版，
     /// 深色版只调整背景/文字/边框这些跟"看不看得清"直接相关的层次，强调色(Accent)/
@@ -863,6 +863,13 @@ public static class ThemeService
         [(SkinEggCantWin, false)] = WhiteLight,   [(SkinEggCantWin, true)] = WhiteDark,
         [(SkinEggBug, false)] = WhiteLight,       [(SkinEggBug, true)] = WhiteDark,
     };
+
+    static ThemeService()
+    {
+        // 新主题的完整色值存放在不依赖 WPF 的目录中，浅色/深色使用同一条应用路径。
+        foreach (var entry in ThemePaletteCatalog.Palettes)
+            Palettes[entry.Key] = entry.Value;
+    }
 
     /// <summary>
     /// 根据用户当前的色系 + 明暗选择应用配色。一切以用户当前选择为准：包括访客模式期间
@@ -1746,6 +1753,14 @@ public static class ThemeService
         SkinLava => "熔岩",
         SkinLapis => "青金石",
         SkinAquatic => "水（清澈通透）",
+        SkinSakura => "樱花",
+        SkinForest => "森林",
+        SkinSeaSalt => "海盐",
+        SkinCoffee => "咖啡",
+        SkinGrape => "葡萄",
+        SkinBerry => "莓果",
+        SkinDune => "沙丘",
+        SkinMidnight => "午夜",
         SkinDark => "黑色",
         SkinEggNote => "注意：此按钮以及以下的按钮均为彩蛋，均为白色系",
         SkinEggDisco => "(彩蛋)雷霆动物集体蹦迪",

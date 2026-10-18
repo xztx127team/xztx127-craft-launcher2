@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 
 namespace XCL2.App.Services;
@@ -40,11 +40,9 @@ public static class ErrorPresenter
         // 原生 MessageBox 是 Win32 对话框，样式跟启动器自己的皮肤系统完全脱节，错误提示
         // 又是玩家最容易频繁看到的弹窗类型之一，所以这一类优先迁移。见
         // Views/MessageBoxDialog.xaml.cs 顶部注释。
-        Views.MessageBoxDialog.ShowError(
-            $"{friendlySummary}\n\n" +
-            "详细的技术日志已经自动保存在本地，如果这个问题反复出现：\n" +
-            "1. 打开「日志」页面，把完整日志内容发给你信任的专业人士（不要只发窗口截图，截图经常漏掉关键信息）；\n" +
-            $"2. 或者前往 GitHub 提交反馈：{GitHubRepoUrl}",
+        Views.FriendlyErrorDialog.Show(
+            friendlySummary + "\n\n详细日志已保存在本地。可在「日志」页面预览并导出脱敏诊断包。",
+            technicalDetail,
             title);
     }
 

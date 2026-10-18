@@ -10,6 +10,8 @@ namespace XCL2.App.Services;
 public sealed record AiModelFetchResult(bool Success, string Error, List<AiModelDefinition> Models, int SkippedNonChat)
 {
     public int? StatusCode { get; init; }
+    public bool CanRetryWithNextKey { get; init; }
+    public int SuccessfulKeyIndex { get; init; }
 }
 
 /// <summary>
@@ -63,19 +65,15 @@ public static class AiModelListFetcher
 
     /// <summary>由用户填的 Base URL 得到 /models 的完整地址：去掉末尾斜杠，粘贴了完整
     /// /chat/completions 地址时还原，已经以 /models 结尾就原样使用。</summary>
-    public static string BuildModelsUrl(string baseUrl)
-    {
-        var url = (baseUrl ?? "").Trim().TrimEnd('/');
-        const string chat = "/chat/completions";
-        if (url.EndsWith(chat, StringComparison.OrdinalIgnoreCase))
-            url = url[..^chat.Length].TrimEnd('/');
-        if (url.EndsWith("/models", StringComparison.OrdinalIgnoreCase))
-            return url;
-        return url + "/models";
-    }
+    public static string BuildModelsUrl(string baseUrl) => AiEndpointRouting.BuildModelsUrl(baseUrl);
 
     /// <summary>从指定接口拉取模型；每条结果保留接口身份，第二接口同名模型不会覆盖第一接口。</summary>
     public static async Task<AiModelFetchResult> FetchAsync(AiApiEndpoint endpoint,
+        bool enableKeyFailover = true, CancellationToken ct = default)
+        => await FetchAsync(endpoint, Http, enableKeyFailover, ct).ConfigureAwait(false);
+
+    // A caller-owned client lets regression tests validate routing without contacting a provider.
+    internal static async Task<AiModelFetchResult> FetchAsync(AiApiEndpoint endpoint, HttpClient client,
         bool enableKeyFailover = true, CancellationToken ct = default)
     {
         if (!endpoint.Enabled) return new(false, "该接口已禁用，请先启用后再拉取。", new(), 0);
@@ -83,10 +81,10 @@ public static class AiModelListFetcher
         if (keys.Count == 0) keys = new[] { "" }; // 兼容本地免密接口。
         if (!enableKeyFailover) keys = keys.Take(1).ToArray();
         AiModelFetchResult result = new(false, "没有可用接口。", new(), 0);
-        foreach (var key in keys)
+        for (var keyIndex = 0; keyIndex < keys.Count; keyIndex++)
         {
             ct.ThrowIfCancellationRequested();
-            result = await FetchAsync(endpoint.BaseUrl, key, ct).ConfigureAwait(false);
+            result = await FetchAsync(endpoint.BaseUrl, keys[keyIndex], client, ct).ConfigureAwait(false);
             if (result.Success)
             {
                 foreach (var model in result.Models)
@@ -94,14 +92,17 @@ public static class AiModelListFetcher
                     model.ProviderId = endpoint.Id;
                     model.ProviderName = endpoint.Name;
                 }
-                return result;
+                return result with { SuccessfulKeyIndex = keyIndex };
             }
-            if (result.StatusCode is not (401 or 402 or 403 or 429)) break;
+            if (!result.CanRetryWithNextKey) break;
         }
         return result;
     }
 
     public static async Task<AiModelFetchResult> FetchAsync(string baseUrl, string apiKey, CancellationToken ct = default)
+        => await FetchAsync(baseUrl, apiKey, Http, ct).ConfigureAwait(false);
+
+    private static async Task<AiModelFetchResult> FetchAsync(string baseUrl, string apiKey, HttpClient client, CancellationToken ct)
     {
         var empty = new List<AiModelDefinition>();
         try
@@ -111,7 +112,7 @@ public static class AiModelListFetcher
             if (!string.IsNullOrWhiteSpace(apiKey))
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Trim());
 
-            using var response = await Http.SendAsync(request, ct).ConfigureAwait(false);
+            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
@@ -122,10 +123,14 @@ public static class AiModelListFetcher
                 {
                     401 or 403 => "API Key 无效或没有权限。",
                     404 => "该接口没有提供模型列表（/models）。请确认接口地址（通常以 /v1 结尾），或手动添加模型。",
-                    429 => "请求太频繁或额度不足，请稍后再试。",
+                    402 or 429 => "请求太频繁或额度不足，请检查额度或稍后再试。",
                     _ => ""
                 };
-                return new(false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}。{hint}\n{snippet}".Trim(), empty, 0) { StatusCode = (int)response.StatusCode };
+                return new(false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}。{hint}\n{snippet}".Trim(), empty, 0)
+                {
+                    StatusCode = (int)response.StatusCode,
+                    CanRetryWithNextKey = AiEndpointRouting.ShouldRetryWithNextKey((int)response.StatusCode, body)
+                };
             }
 
             JsonDocument doc;
@@ -170,7 +175,7 @@ public static class AiModelListFetcher
         }
         catch (OperationCanceledException)
         {
-            return new(false, "已取消。", empty, 0);
+            throw;
         }
         catch (Exception ex)
         {

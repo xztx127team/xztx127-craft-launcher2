@@ -198,6 +198,7 @@ public partial class DownloadCenterPage : UserControl
     {
         _owner = owner;
         InitializeComponent();
+        InitializeContextHints();
         OnlineListBox.ItemsSource = _online;
         ResourceListBox.ItemsSource = _resources;
         FavoritesListBox.ItemsSource = _favorites;
@@ -220,6 +221,7 @@ public partial class DownloadCenterPage : UserControl
             action?.Invoke();
         };
 
+        InitializeSearchExperience();
         _initialized = true;
         InitializePluginSources();
         Category_Checked(CatVersion, new RoutedEventArgs()); // 补上初始化阶段被跳过的那次面板显隐
@@ -258,7 +260,9 @@ public partial class DownloadCenterPage : UserControl
     /// </summary>
     private void Debounce(Action action)
     {
-        if (!_initialized || _debounceTimer == null) return;
+        if (!_initialized || _debounceTimer == null || _applyingSearchPreset) return;
+        InvalidateExperienceSearches();
+        if (IsSearchComposing) { _debounceTimer.Stop(); return; }
         _pendingDebouncedAction = action;
         _debounceTimer.Stop();
         _debounceTimer.Start();
@@ -614,6 +618,7 @@ public partial class DownloadCenterPage : UserControl
         _manifestCancellation = cancellation;
         VersionLoadingHost.Content ??= LoadingPlaceholderFactory.Create("正在获取游戏版本列表");
         VersionLoadingHost.Visibility = Visibility.Visible;
+        SetContextHint(OnlineListBox, null);
         try
         {
             using var svc = new DownloadService(_owner.ConfigService.Config.Source);
@@ -629,7 +634,11 @@ public partial class DownloadCenterPage : UserControl
         catch (Exception ex)
         {
             if (IsLoaded && generation == _manifestRequestGeneration)
+            {
+                SetContextHint(OnlineListBox, "暂时无法获取游戏版本列表。请检查网络或切换上方下载来源后重试。",
+                    "重新获取", () => _ = FetchOnlineAsync());
                 ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Couldn_T_Fetch_The_Version_List_This_Is_", "获取版本列表失败，可能是网络连接问题或下载源暂时不可用，请检查网络后重试。"), $"[获取版本列表失败] {ex}", "获取版本列表失败");
+            }
         }
         finally
         {
@@ -671,22 +680,24 @@ public partial class DownloadCenterPage : UserControl
     /// 也不能对 manifest 做真 API 分页——manifest 接口本身不支持分页参数）。</summary>
     private void ApplyVersionFilter()
     {
-        if (_manifestCache == null) return;
+        if (_manifestCache == null || IsSearchComposing) return;
 
         var selectedTag = (VersionTypeCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? "Release";
         if (!Enum.TryParse<VersionCategory>(selectedTag, out var category)) category = VersionCategory.Release;
 
         var keyword = VersionSearchBox.Text?.Trim() ?? "";
+        VersionSearchBox.Tag = _owner.ConfigService.Config.Ux50SearchHighlight;
 
         // 显式按 releaseTime 倒序（新→旧）重排，不依赖 manifest 数据源自带顺序，
         // 保证界面列表任何数据源下都严格"从上到下从新到旧"。
         var filtered = _manifestCache.Versions
             .Where(v => v.GetCategory() == category)
-            .Where(v => keyword.Length == 0 || v.Id.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            .Where(v => ExperienceSearchState.Matches(v.Id, keyword, _owner.ConfigService.Config.Ux50SearchMultipleKeywords))
             .SortNewestFirst();
+        filtered = OrderExperienceVersions(filtered);
 
         var totalPages = filtered.Count == 0 ? 0 : (int)Math.Ceiling(filtered.Count / (double)PageSize);
-        if (_versionPageIndex < 0) _versionPageIndex = 0;
+        if (_versionPageIndex < 0 || totalPages == 0) _versionPageIndex = 0;
         if (totalPages > 0 && _versionPageIndex > totalPages - 1) _versionPageIndex = totalPages - 1;
 
         var page = filtered.Skip(_versionPageIndex * PageSize).Take(PageSize);
@@ -696,7 +707,10 @@ public partial class DownloadCenterPage : UserControl
             .Where(f => f.Type == FavoriteItemType.Version).Select(f => f.SourceId).ToHashSet();
         foreach (var v in page) _online.Add(new VersionListItem(v, favoriteIds.Contains(v.Id)));
 
-        VersionPageSummaryText.Text = totalPages > 0 ? $"第 {_versionPageIndex + 1} 页 / 共 {totalPages} 页" : "第 1 页";
+        SetContextHint(OnlineListBox, "没有找到匹配的游戏版本。可以清除搜索词，或切换上方的版本分类。", "清除搜索词", ResetVersionSearch);
+        VersionPageSummaryText.Text = _owner.ConfigService.Config.Ux50SearchLoadedCounts
+            ? $"本页已加载 {_online.Count} 条 · 共 {filtered.Count} 条 · {VersionSortCaption} · 第 {_versionPageIndex + 1} 页"
+            : totalPages > 0 ? $"第 {_versionPageIndex + 1} 页 / 共 {totalPages} 页" : "第 1 页";
         VersionPrevPageButton.IsEnabled = _versionPageIndex > 0;
         VersionNextPageButton.IsEnabled = _versionPageIndex < totalPages - 1;
     }
@@ -810,7 +824,8 @@ public partial class DownloadCenterPage : UserControl
         // 登记这次安装的目标版本/文件夹：装到一半的版本目录不能被启动，
         // MainWindow.LaunchInternalAsync 会据此拦下"启动正在下载中的那个版本"。
         // 见 DownloadQueueService.FindActiveForVersion 的注释。
-        targetVersionId: entry.Id, targetFolderPath: folder.Path);
+        targetVersionId: entry.Id, targetFolderPath: folder.Path,
+        recoveryRequest: new DownloadRecoveryRequest(folder.Path, entry.Id, entry.Url, entry.Type));
     }
 
     /// <summary>右键菜单"在中文 Minecraft Wiki 中查看"（下载中心的"游戏版本"列表）：
@@ -1042,14 +1057,26 @@ public partial class DownloadCenterPage : UserControl
     /// </summary>
     private async Task RunResourceSearchAsync(bool showEmptyHint = false)
     {
+        if (IsSearchComposing || _applyingSearchPreset) return;
+        using var searchCancellation = BeginSearch(ref _resourceSearchCancellation);
+        var searchToken = searchCancellation.Token;
+        var requestedPageIndex = _resourcePageIndex;
         var seq = ++_resourceSearchSeq;
+        _pendingSearchScopes.Add("resources");
+        if (showEmptyHint) CommitExperienceSearch(ResourceSearchBox);
+        RefreshExperiencePageButtons();
+        ResourcePrevPageButton.IsEnabled = false;
+        ResourceNextPageButton.IsEnabled = false;
+        ResourcePageSummaryText.Text = "正在加载第 " + (requestedPageIndex + 1) + " 页…";
+        SetContextHint(ResourceListBox, "正在搜索资源…");
         try
         {
             var keyword = ResourceSearchBox.Text?.Trim() ?? "";
             var gameVersion = ResourceGameVersionBox.Text?.Trim();
             var outcome = await GetModSearch().SearchResourcesAsync(_currentResourceSource, _currentResourceType,
-                keyword, string.IsNullOrEmpty(gameVersion) ? null : gameVersion, _resourcePageIndex, PageSize);
+                keyword, string.IsNullOrEmpty(gameVersion) ? null : gameVersion, requestedPageIndex, PageSize, searchToken);
 
+            searchToken.ThrowIfCancellationRequested();
             if (seq != _resourceSearchSeq) return; // 期间已有更新的搜索发出，这次结果已过时，丢弃
 
             _resources.Clear();
@@ -1069,21 +1096,27 @@ public partial class DownloadCenterPage : UserControl
                 _resources.Add(item);
             }
 
-            UpdatePageSummary(ResourcePageSummaryText, _resourcePageIndex, outcome.ModrinthTotal, outcome.CurseForgeTotal);
+            RecordDisplayedSearchPage("resources", requestedPageIndex, _resources.Count, outcome.ModrinthTotal, outcome.CurseForgeTotal);
+            UpdatePageSummary(ResourcePageSummaryText, requestedPageIndex, outcome.ModrinthTotal, outcome.CurseForgeTotal, _resources.Count);
             ResourcePrevPageButton.IsEnabled = _resourcePageIndex > 0;
             ResourceNextPageButton.IsEnabled = HasMorePages(_resourcePageIndex, outcome.ModrinthTotal, outcome.CurseForgeTotal);
 
-            if (showEmptyHint)
-            {
-                if (outcome.Items.Count == 0 && outcome.Warnings.Count == 0)
-                    MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Nothing_Matched_Try_A_Different_Keyword", "没有找到匹配的资源，换个关键词试试。"));
-                else if (outcome.Warnings.Count > 0)
-                    MessageBoxDialog.ShowWarning(string.Join("\n", outcome.Warnings), Loc.T("Str_Cs_Some_Sources_Failed_To_Return_Results", "部分来源搜索失败"));
-            }
+            if (showEmptyHint && outcome.Warnings.Count > 0)
+                ReminderCenterService.Publish("download-resource-source-warning", "部分资源来源暂不可用", string.Join("\n", outcome.Warnings));
+            SetContextHint(ResourceListBox, outcome.Warnings.Count > 0
+                ? "资源来源暂时未返回结果。可以更换来源或稍后重试。"
+                : "没有找到匹配的资源。可以更换关键词，或清除名称和游戏版本筛选。",
+                "清除筛选", () => ResourceFilterReset_Click(this, new RoutedEventArgs()));
         }
+        catch (OperationCanceledException) { if (seq == _resourceSearchSeq) RestoreCanceledSearch("resources"); return; }
         catch (Exception ex)
         {
             if (seq != _resourceSearchSeq) return;
+            _pendingSearchScopes.Remove("resources");
+            ResourcePrevPageButton.IsEnabled = requestedPageIndex > 0;
+            ResourceNextPageButton.IsEnabled = false;
+            ResourcePageSummaryText.Text = "加载失败；保留原结果 " + _resources.Count + " 条";
+            SetContextHint(ResourceListBox, "暂时无法获取结果。请检查网络或更换下载来源后重试。", "重新搜索", () => _ = RunResourceSearchAsync());
             if (showEmptyHint)
                 ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Search_Failed_Most_Likely_A_Network_Prob", "搜索失败，可能是网络连接问题，请检查网络后重试。"), $"[搜索失败] {ex}", "搜索失败");
             // 自动触发的搜索静默失败即可：切换分类/防抖引发的请求本来就是"锦上添花"，
@@ -1593,8 +1626,14 @@ public partial class DownloadCenterPage : UserControl
     /// （见 ModSearchService.SearchAsync 类注释的"并列分页"语义），单一来源时就是那个来源自己的页数。
     /// modrinthTotal/curseForgeTotal 为 0 且当前页也没有更多结果时，只显示"第 N 页"，不硬凑一个"共 0 页"。
     /// </summary>
-    private static void UpdatePageSummary(TextBlock text, int pageIndex, int modrinthTotal, int curseForgeTotal)
+    private void UpdatePageSummary(TextBlock text, int pageIndex, int modrinthTotal, int curseForgeTotal, int loaded)
     {
+        if (_owner.ConfigService.Config.Ux50SearchLoadedCounts)
+        {
+            text.Text = ExperienceSearchState.LoadedSummary(pageIndex, loaded, modrinthTotal, curseForgeTotal, PageSize);
+            text.ToolTip = "仅统计当前页实际显示的项目；综合来源可能包含同一个项目，不把来源总数相加。";
+            return;
+        }
         var totalPages = Math.Max(
             modrinthTotal > 0 ? (int)Math.Ceiling(modrinthTotal / (double)PageSize) : 0,
             curseForgeTotal > 0 ? (int)Math.Ceiling(curseForgeTotal / (double)PageSize) : 0);
@@ -1692,7 +1731,18 @@ public partial class DownloadCenterPage : UserControl
     /// </summary>
     private async Task RunModSearchAsync(bool showHints = false)
     {
+        if (IsSearchComposing || _applyingSearchPreset) return;
+        using var searchCancellation = BeginSearch(ref _modSearchCancellation);
+        var searchToken = searchCancellation.Token;
+        var requestedPageIndex = _modPageIndex;
         var seq = ++_modSearchSeq;
+        _pendingSearchScopes.Add("mods");
+        if (showHints) CommitExperienceSearch(ModSearchBox);
+        RefreshExperiencePageButtons();
+        ModPrevPageButton.IsEnabled = false;
+        ModNextPageButton.IsEnabled = false;
+        ModPageSummaryText.Text = "正在加载第 " + (requestedPageIndex + 1) + " 页…";
+        SetContextHint(ModListBox, "正在搜索模组…");
         var keyword = ModSearchBox.Text?.Trim() ?? "";
         var gameVersion = ModGameVersionBox.Text?.Trim();
         var loaderTag = (ModLoaderCombo.SelectedItem as ComboBoxItem)?.Tag as string;
@@ -1702,8 +1752,9 @@ public partial class DownloadCenterPage : UserControl
             var outcome = await GetModSearch().SearchAsync(_currentModSource, keyword,
                 string.IsNullOrEmpty(gameVersion) ? null : gameVersion,
                 string.IsNullOrEmpty(loaderTag) ? null : loaderTag,
-                _modPageIndex, PageSize);
+                requestedPageIndex, PageSize, searchToken);
 
+            searchToken.ThrowIfCancellationRequested();
             if (seq != _modSearchSeq) return; // 期间已有更新的搜索发出，这次结果已过时，丢弃
 
             _mods.Clear();
@@ -1716,7 +1767,8 @@ public partial class DownloadCenterPage : UserControl
                 _mods.Add(item);
             }
 
-            UpdatePageSummary(ModPageSummaryText, _modPageIndex, outcome.ModrinthTotal, outcome.CurseForgeTotal);
+            RecordDisplayedSearchPage("mods", requestedPageIndex, _mods.Count, outcome.ModrinthTotal, outcome.CurseForgeTotal);
+            UpdatePageSummary(ModPageSummaryText, requestedPageIndex, outcome.ModrinthTotal, outcome.CurseForgeTotal, _mods.Count);
             ModPrevPageButton.IsEnabled = _modPageIndex > 0;
             ModNextPageButton.IsEnabled = HasMorePages(_modPageIndex, outcome.ModrinthTotal, outcome.CurseForgeTotal);
 
@@ -1739,17 +1791,22 @@ public partial class DownloadCenterPage : UserControl
                 ModTranslationHintText.Visibility = Visibility.Collapsed;
             }
 
-            if (showHints)
-            {
-                if (outcome.Items.Count == 0 && outcome.Warnings.Count == 0)
-                    MessageBoxDialog.ShowInfo("没有找到匹配的 Mod，换个关键词试试。");
-                else if (outcome.Warnings.Count > 0)
-                    MessageBoxDialog.ShowWarning(string.Join("\n", outcome.Warnings), Loc.T("Str_Cs_Some_Sources_Failed_To_Return_Results", "部分来源搜索失败"));
-            }
+            if (showHints && outcome.Warnings.Count > 0)
+                ReminderCenterService.Publish("download-mod-source-warning", "部分模组来源暂不可用", string.Join("\n", outcome.Warnings));
+            SetContextHint(ModListBox, outcome.Warnings.Count > 0
+                ? "模组来源暂时未返回结果。可以更换来源或稍后重试。"
+                : "没有找到匹配的模组。可以更换关键词，或清除名称、版本和加载器筛选。",
+                "清除筛选", () => ModFilterReset_Click(this, new RoutedEventArgs()));
         }
+        catch (OperationCanceledException) { if (seq == _modSearchSeq) RestoreCanceledSearch("mods"); return; }
         catch (Exception ex)
         {
             if (seq != _modSearchSeq) return;
+            _pendingSearchScopes.Remove("mods");
+            ModPrevPageButton.IsEnabled = requestedPageIndex > 0;
+            ModNextPageButton.IsEnabled = false;
+            ModPageSummaryText.Text = "加载失败；保留原结果 " + _mods.Count + " 条";
+            SetContextHint(ModListBox, "暂时无法获取结果。请检查网络或更换下载来源后重试。", "重新搜索", () => _ = RunModSearchAsync());
             if (showHints)
                 ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Search_Failed_Most_Likely_A_Network_Prob", "搜索失败，可能是网络连接问题，请检查网络后重试。"), $"[搜索失败] {ex}", "搜索失败");
         }
@@ -1759,7 +1816,7 @@ public partial class DownloadCenterPage : UserControl
         // MC百科中文名搜索辅助：与上面的下载结果并行展示，互不影响成败
         try
         {
-            var mcHits = await GetModSearch().SearchMcModAsync(keyword);
+            var mcHits = await GetModSearch().SearchMcModAsync(keyword, searchToken);
             if (seq != _modSearchSeq) return;
             _mcModHits.Clear();
             foreach (var hit in mcHits) _mcModHits.Add(hit);
@@ -2057,14 +2114,26 @@ public partial class DownloadCenterPage : UserControl
     /// </summary>
     private async Task RunMapSearchAsync(bool showHints = false)
     {
+        if (IsSearchComposing || _applyingSearchPreset) return;
+        using var searchCancellation = BeginSearch(ref _mapSearchCancellation);
+        var searchToken = searchCancellation.Token;
+        var requestedPageIndex = _mapPageIndex;
         var seq = ++_mapSearchSeq;
+        _pendingSearchScopes.Add("maps");
+        if (showHints) CommitExperienceSearch(MapSearchBox);
+        RefreshExperiencePageButtons();
+        MapPrevPageButton.IsEnabled = false;
+        MapNextPageButton.IsEnabled = false;
+        MapPageSummaryText.Text = "正在加载第 " + (requestedPageIndex + 1) + " 页…";
+        SetContextHint(MapListBox, "正在搜索地图…");
         try
         {
             var keyword = MapSearchBox.Text?.Trim() ?? "";
             var gameVersion = MapGameVersionBox.Text?.Trim();
             var result = await GetCurseForge().SearchMapsAsync(keyword, string.IsNullOrEmpty(gameVersion) ? null : gameVersion,
-                _mapPageIndex, PageSize);
+                requestedPageIndex, PageSize, searchToken);
 
+            searchToken.ThrowIfCancellationRequested();
             if (seq != _mapSearchSeq) return; // 期间已有更新的搜索发出，这次结果已过时，丢弃
 
             _maps.Clear();
@@ -2078,16 +2147,24 @@ public partial class DownloadCenterPage : UserControl
             }
 
             var mapTotal = result.Pagination?.TotalCount ?? result.Data.Count;
-            UpdatePageSummary(MapPageSummaryText, _mapPageIndex, mapTotal, 0);
+            RecordDisplayedSearchPage("maps", requestedPageIndex, _maps.Count, mapTotal, 0);
+            UpdatePageSummary(MapPageSummaryText, requestedPageIndex, mapTotal, 0, _maps.Count);
             MapPrevPageButton.IsEnabled = _mapPageIndex > 0;
             MapNextPageButton.IsEnabled = HasMorePages(_mapPageIndex, mapTotal, 0);
 
-            if (showHints && result.Data.Count == 0)
-                MessageBoxDialog.ShowInfo("没有找到匹配的地图，换个关键词试试。");
+            SetContextHint(MapListBox, "没有找到匹配的地图。可以更换关键词，或清除名称和版本筛选。",
+                "清除筛选", ResetMapSearch);
         }
+        catch (OperationCanceledException) { if (seq == _mapSearchSeq) RestoreCanceledSearch("maps"); return; }
         catch (CurseForgeKeyMissingException ex)
         {
             if (seq != _mapSearchSeq) return;
+            _pendingSearchScopes.Remove("maps");
+            MapPrevPageButton.IsEnabled = requestedPageIndex > 0;
+            MapNextPageButton.IsEnabled = false;
+            MapPageSummaryText.Text = "地图下载需要配置 CurseForge Key。";
+            SetContextHint(MapListBox, "地图下载需要配置 CurseForge Key。可在下载设置中填写后重试。",
+                "打开设置", () => _owner.NavigateToSettings());
             if (showHints)
             {
                 MessageBoxDialog.ShowInfo(ex.Message, Loc.T("Str_Cs_No_Api_Key_Configured", "未配置 Key"));
@@ -2097,6 +2174,11 @@ public partial class DownloadCenterPage : UserControl
         catch (Exception ex)
         {
             if (seq != _mapSearchSeq) return;
+            _pendingSearchScopes.Remove("maps");
+            MapPrevPageButton.IsEnabled = requestedPageIndex > 0;
+            MapNextPageButton.IsEnabled = false;
+            MapPageSummaryText.Text = "加载失败；保留原结果 " + _maps.Count + " 条";
+            SetContextHint(MapListBox, "暂时无法获取结果。请检查网络或更换下载来源后重试。", "重新搜索", () => _ = RunMapSearchAsync());
             if (showHints)
                 ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Search_Failed_Most_Likely_A_Network_Prob", "搜索失败，可能是网络连接问题，请检查网络后重试。"), $"[搜索失败] {ex}", "搜索失败");
         }
@@ -2230,7 +2312,9 @@ public class VersionListItem : System.ComponentModel.INotifyPropertyChanged
 {
     public VersionManifestEntry Entry { get; }
     public string Id => Entry.Id;
-    public string ReleaseTime => Entry.ReleaseTime;
+    public string ReleaseTime => PresentationPreferencesService.FormatDateTime(Entry.ReleaseTime);
+
+    public void RefreshPresentationText() => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(ReleaseTime)));
 
     private bool _isFavorite;
     public bool IsFavorite

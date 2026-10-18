@@ -1,45 +1,55 @@
 using System;
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using XCL2.App.Services;
 
 namespace XCL2.App.Views.Tools;
 
-/// <summary>
-/// 百宝箱「Web2」工具：把指定网址（默认 xztx127.dpdns.org/xztx127gjx）用内嵌 WebView2 打开，
-/// 或者一键交给系统默认浏览器打开。跟「种子结构查询」工具是同一套模式（只在用户主动点开时
-/// 才创建 WebView2 实例），这里额外支持用户自己改地址框，不写死只能打开一个网址。
-/// </summary>
+/// <summary>按需创建内嵌网页；只有当前地址无法内嵌加载时才提供系统浏览器入口。</summary>
 public partial class Web2BrowserTool : UserControl
 {
     private IEmbeddedWebView? _browser;
     private bool _initializing;
-    private bool _dependencyBlocked;
     private int _lifetimeVersion;
+    private int _browserVersion;
+    private int _addressVersion;
+    private int _browserAddressVersion = -1;
+    private string? _navigationUrl;
+    private string? _fallbackUrl;
 
     public Web2BrowserTool()
     {
         InitializeComponent();
     }
 
-    private string ResolveUrl()
+    private bool TryResolveUrl(out string url)
     {
-        var url = UrlBox.Text.Trim();
-        if (string.IsNullOrEmpty(url)) url = "https://xztx127.dpdns.org/xztx127gjx";
-        if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
-            !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        var value = UrlBox.Text.Trim();
+        if (string.IsNullOrEmpty(value)) value = "https://xztx127.dpdns.org/xztx127gjx";
+        if (!value.Contains("://", StringComparison.Ordinal)) value = "https://" + value;
+        if (ExternalLinkService.TryGetWebUri(value, out var uri))
         {
-            url = "https://" + url;
+            url = uri!.AbsoluteUri;
+            return true;
         }
-        return url;
+        url = "";
+        return false;
     }
 
     private async void OpenEmbeddedButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_initializing || _dependencyBlocked) return;
+        if (_initializing) return;
+        HideExternalFallback();
+        if (!TryResolveUrl(out var url))
+        {
+            Web2StatusText.Text = "请输入有效的 http / https 网页地址。";
+            return;
+        }
         var lifetimeVersion = _lifetimeVersion;
+        var addressVersion = _addressVersion;
+        var requestBrowserVersion = _browserVersion;
         _initializing = true;
+        _browserAddressVersion = -1;
         OpenEmbeddedButton.IsEnabled = false;
         Web2StatusText.Text = "正在启动 WebView2 并加载页面…";
 
@@ -47,92 +57,139 @@ public partial class Web2BrowserTool : UserControl
         {
             if (!EmbeddedWebView.TryCheckComponents(out var detail))
             {
-                BlockEmbeddedBrowser(detail);
+                ReleaseBrowser();
+                ShowExternalFallback(url, addressVersion, EmbeddedWebView.MissingComponentsMessage);
+                ErrorPresenter.LogTechnicalDetail($"Web2 工具 WebView2 组件不可用：{detail}");
                 return;
             }
             if (!WebView2RuntimeDetector.IsAvailable())
             {
-                Web2StatusText.Text = "未检测到 WebView2 Runtime，可以点击“在浏览器中打开”继续访问。";
-                ToastService.ShowWarning("内嵌网页需要 Microsoft WebView2 Runtime；也可点击“在浏览器中打开”。");
+                ReleaseBrowser();
+                ShowExternalFallback(url, addressVersion, "未检测到 WebView2 Runtime，可改用系统浏览器访问。");
                 return;
             }
 
             BrowserCard.Visibility = Visibility.Visible;
             if (_browser == null)
             {
-                _browser = EmbeddedWebView.Create(Browser_NavigationCompleted, enableDevTools: true);
+                var browserVersion = ++_browserVersion;
+                requestBrowserVersion = browserVersion;
+                _browser = EmbeddedWebView.Create(
+                    (success, error) => Browser_NavigationCompleted(browserVersion, success, error),
+                    enableDevTools: true,
+                    navigationStarting: target => Browser_NavigationStarting(browserVersion, target));
                 BrowserHost.Children.Add(_browser.View);
                 await _browser.InitializeAsync();
             }
 
             if (lifetimeVersion != _lifetimeVersion) return;
-            _browser?.Navigate(ResolveUrl());
+            if (addressVersion != _addressVersion)
+            {
+                BrowserCard.Visibility = Visibility.Collapsed;
+                return;
+            }
+            _browserAddressVersion = addressVersion;
+            _navigationUrl = url;
+            _browser?.Navigate(url);
         }
-        catch (Exception) when (lifetimeVersion != _lifetimeVersion)
+        catch (Exception) when (lifetimeVersion != _lifetimeVersion || addressVersion != _addressVersion)
         {
-            // 页面已卸载，由 Unloaded 释放，不对正常页面切换弹错误。
+            // 页面已离开或输入地址已改变，旧请求不能改写当前地址的失败状态。
+            if (lifetimeVersion == _lifetimeVersion && requestBrowserVersion == _browserVersion)
+                ReleaseBrowser();
         }
         catch (Exception ex)
         {
             ReleaseBrowser();
-            if (EmbeddedWebView.IsComponentLoadFailure(ex))
-                BlockEmbeddedBrowser(ex.ToString());
-            else
-            {
-                Web2StatusText.Text = "内嵌打开失败，可以重试或改用“在浏览器中打开”。";
-                ErrorPresenter.LogTechnicalDetail($"Web2 工具 WebView2 初始化失败：{ex}");
-                ToastService.ShowWarning($"页面加载失败：{ex.Message}");
-            }
+            var message = EmbeddedWebView.IsComponentLoadFailure(ex)
+                ? EmbeddedWebView.MissingComponentsMessage
+                : "内嵌页面无法打开，可重试或改用系统浏览器。";
+            ShowExternalFallback(url, addressVersion, message);
+            ErrorPresenter.LogTechnicalDetail($"Web2 工具内嵌网页初始化失败：{ex}");
         }
         finally
         {
             if (lifetimeVersion == _lifetimeVersion)
             {
                 _initializing = false;
-                OpenEmbeddedButton.IsEnabled = !_dependencyBlocked;
+                OpenEmbeddedButton.IsEnabled = true;
             }
         }
     }
 
-    private void Browser_NavigationCompleted(bool isSuccess, string errorStatus)
+    private void Browser_NavigationStarting(int browserVersion, string target)
     {
-        if (!IsLoaded) return;
-        Web2StatusText.Text = isSuccess
-            ? "页面已加载。"
-            : $"页面加载失败（WebErrorStatus: {errorStatus}），可尝试“在浏览器中打开”。";
+        if (!IsCurrentBrowserRequest(browserVersion)) return;
+        HideExternalFallback();
+        _navigationUrl = ExternalLinkService.TryGetWebUri(target, out var uri) ? uri!.AbsoluteUri : null;
+        Web2StatusText.Text = "正在加载页面…";
     }
 
-    private void BlockEmbeddedBrowser(string? detail)
+    private void Browser_NavigationCompleted(int browserVersion, bool isSuccess, string errorStatus)
     {
-        _dependencyBlocked = true;
-        BrowserCard.Visibility = Visibility.Collapsed;
-        Web2StatusText.Text = EmbeddedWebView.MissingComponentsMessage;
-        ErrorPresenter.LogTechnicalDetail($"Web2 工具 WebView2 组件不可用：{detail}");
-        ToastService.ShowWarning("WebView2 程序组件缺失，请重新解压完整发布包。仍可使用系统浏览器。");
+        if (!IsCurrentBrowserRequest(browserVersion)) return;
+        if (isSuccess)
+        {
+            HideExternalFallback();
+            Web2StatusText.Text = "页面已加载。";
+        }
+        else if (_navigationUrl != null)
+        {
+            ShowExternalFallback(_navigationUrl, _browserAddressVersion,
+                $"页面加载失败（WebErrorStatus: {errorStatus}），可重试或改用系统浏览器。");
+        }
+    }
+
+    private bool IsCurrentBrowserRequest(int browserVersion) =>
+        IsLoaded && _browser != null && browserVersion == _browserVersion &&
+        _browserAddressVersion == _addressVersion;
+
+    private void ShowExternalFallback(string url, int addressVersion, string message)
+    {
+        if (addressVersion != _addressVersion) return;
+        _fallbackUrl = url;
+        OpenExternalButton.ToolTip = url;
+        OpenExternalButton.Visibility = Visibility.Visible;
+        Web2StatusText.Text = message;
+    }
+
+    private void HideExternalFallback()
+    {
+        _fallbackUrl = null;
+        if (OpenExternalButton == null) return;
+        OpenExternalButton.ToolTip = null;
+        OpenExternalButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void UrlBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _addressVersion++;
+        HideExternalFallback();
+        // TextChanged 也会在 XAML 字段尚未全部连接时触发。
+        if (Web2StatusText != null)
+            Web2StatusText.Text = "点击“在启动器内打开”加载当前网址。";
     }
 
     private void OpenExternalButton_Click(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            Process.Start(new ProcessStartInfo(ResolveUrl()) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            MessageBoxDialog.ShowError($"打开浏览器失败：{ex.Message}", "Web2");
-        }
+        if (OpenExternalButton.Visibility == Visibility.Visible && _fallbackUrl != null)
+            ExternalLinkService.Open(_fallbackUrl);
     }
 
     private void Web2BrowserTool_Unloaded(object sender, RoutedEventArgs e)
     {
         _lifetimeVersion++;
         _initializing = false;
-        OpenEmbeddedButton.IsEnabled = !_dependencyBlocked;
+        OpenEmbeddedButton.IsEnabled = true;
+        HideExternalFallback();
         ReleaseBrowser();
     }
 
     private void ReleaseBrowser()
     {
+        _browserVersion++;
+        _browserAddressVersion = -1;
+        _navigationUrl = null;
         var browser = _browser;
         _browser = null;
         try { browser?.Dispose(); }

@@ -34,7 +34,10 @@ public partial class LauncherService
         return Launch(options);
     }
     private static string LaunchIdentity(LaunchOptions options) => string.Join("\n", options.MinecraftDir, options.VersionId,
-        options.JavaPath, options.Account.Id, options.Account.Type, options.IsolateVersion, options.CustomJvmArgs);
+        options.JavaPath, options.Account.Id, options.Account.Type, options.IsolateVersion, options.CustomJvmArgs,
+        options.MinMemoryMb, options.MaxMemoryMb, options.WindowWidth, options.WindowHeight,
+        options.GameLanguage, options.GraphicsApiPreference, options.AutoJoinServerAddress,
+        options.RequireAutoJoinServerSupport, options.ExtraGameArgs, options.LaunchFullscreen);
     private static void DemandPreparedLaunch(LaunchOptions options)
     {
         if (options.PreparedPluginLaunch == null)

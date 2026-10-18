@@ -91,7 +91,20 @@
                  复用同一套"未开启=描边小胶囊、开启=强调色填充"的视觉语言（比如 AgreementsWindow
                  的"人话版"开关），不需要每个用到的地方各自复制一份同样的样式。
                  HomePage.xaml 里原来的同名局部资源已删除，改成引用这里。 -->
+            <!-- 键盘导航使用单层描边，避免叠加阴影；鼠标点击不会额外出现焦点框。 -->
+            <Style x:Key="KeyboardFocusRing" TargetType="Control">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Control">
+                            <Rectangle Margin="-2" Stroke="{DynamicResource AccentBrush}" StrokeThickness="1.5"
+                                       StrokeDashArray="2,1" RadiusX="4" RadiusY="4" IsHitTestVisible="False"/>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <Style x:Key="GuestModeToggleStyle" TargetType="ToggleButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
@@ -104,7 +117,7 @@
                             <Border x:Name="ToggleBorder" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="16" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsChecked" Value="True">
@@ -283,6 +296,7 @@
                  唯独关闭按钮悬停时按 Windows 惯例给红色背景（CloseHoverBrush 未定义过，
                  直接写死 #E81123 微软官方"关闭按钮红"，是系统级通用色，不随主题换）。 -->
             <Style TargetType="Button" x:Key="CaptionButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="BorderThickness" Value="0"/>
                 <!-- 46×32 是 Windows 10/11 原生标题栏按钮在 100% 缩放下的实际尺寸
@@ -295,7 +309,7 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bd" Background="{TemplateBinding Background}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -307,11 +321,12 @@
                 </Setter>
             </Style>
             <Style TargetType="Button" x:Key="CaptionCloseButton" BasedOn="{StaticResource CaptionButton}">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bd" Background="{TemplateBinding Background}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -344,6 +359,7 @@
                  平时完全透明看不出轮廓，只有悬停/按下时整块填充成一个实心圆，关闭按钮
                  悬停变红——这才是 PCL 标题栏按钮的观感，而不是常驻画一圈描边空心圆。 -->
             <Style TargetType="Button" x:Key="PreviewRoundCaptionButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="BorderThickness" Value="0"/>
                 <Setter Property="Width" Value="30"/>
@@ -356,7 +372,7 @@
                             <!-- 宽高必须相等（30×30）+ CornerRadius 恰好等于半径(15)才是正圆，
                                  不是随手写个大数字就行。 -->
                             <Border x:Name="bd" CornerRadius="15" Background="{TemplateBinding Background}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -368,11 +384,12 @@
                 </Setter>
             </Style>
             <Style TargetType="Button" x:Key="PreviewRoundCaptionCloseButton" BasedOn="{StaticResource PreviewRoundCaptionButton}">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bd" CornerRadius="15" Background="{TemplateBinding Background}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -403,6 +420,7 @@
             </Style>
 
             <Style TargetType="Button" x:Key="PrimaryButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
                 <Setter Property="FontSize" Value="15"/>
@@ -416,7 +434,7 @@
                             <Border x:Name="bd" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                             </ControlTemplate.Triggers>
@@ -440,6 +458,7 @@
                  已经显式引用 PrimaryButton / SideNavButton / TileButton 等具名样式的
                  按钮不受影响。 -->
             <Style TargetType="Button">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
                 <Setter Property="FontSize" Value="15"/>
@@ -453,7 +472,7 @@
                             <Border x:Name="bd" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                             </ControlTemplate.Triggers>
@@ -474,6 +493,7 @@
                  这里是透明背景 + 边框，用在"次要操作"上（重置筛选条件），避免跟"搜索"这个主操作
                  抢视觉焦点。结构基本照抄 PrimaryButton，只是配色反过来。 -->
             <Style TargetType="Button" x:Key="SecondaryButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
                 <Setter Property="FontSize" Value="15"/>
@@ -487,7 +507,7 @@
                             <Border x:Name="bd" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -506,6 +526,7 @@
 
             <!-- 右下角悬浮球按钮：圆形、带阴影/发光效果，用于 AI 助手入口 -->
             <Style TargetType="Button" x:Key="FloatingButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
                 <Setter Property="BorderThickness" Value="0"/>
@@ -517,7 +538,7 @@
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="22"
                                     Effect="{StaticResource GlowEffect}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -539,6 +560,7 @@
 
             <!-- 图标按钮样式：用于 AI 面板顶部工具栏按钮 -->
             <Style TargetType="Button" x:Key="IconButtonStyle">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="BorderThickness" Value="0"/>
@@ -547,7 +569,7 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="6" Padding="4">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -569,6 +591,7 @@
                  明显的描边——一排选择按钮如果每个都描边会显得拥挤，这里改成"默认几乎不可见的
                  浅色背景块 + 悬停/选中时才显现强调色背景"的轻量视觉，跟 PCL 截图的观感一致。 -->
             <Style TargetType="Button" x:Key="VersionChipButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="FontSize" Value="12"/>
@@ -581,7 +604,7 @@
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="bd" Background="{TemplateBinding Background}"
                                     CornerRadius="12" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
@@ -599,6 +622,7 @@
                  点哪个 Tab 就只显示对应游戏版本的分组。用 RadioButton 而不是普通 Button，
                  同一个 GroupName 下天然互斥单选，不需要在代码里手动把其它按钮的选中态复位。 -->
             <Style TargetType="RadioButton" x:Key="GameVersionTabRadioButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
                 <Setter Property="FontSize" Value="13"/>
@@ -611,7 +635,7 @@
                         <ControlTemplate TargetType="RadioButton">
                             <Border x:Name="bd" Background="{TemplateBinding Background}"
                                     CornerRadius="16" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsChecked" Value="True">
@@ -636,6 +660,7 @@
             </Style>
 
             <Style TargetType="Button" x:Key="SideNavButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="HorizontalContentAlignment" Value="Left"/>
@@ -681,6 +706,7 @@
                 额外处理）。SearchTextBox 这个 key 继续保留、内容与全局默认一致，
                 避免删掉后所有显式 Style="{StaticResource SearchTextBox}" 的引用处报错。 -->
             <Style TargetType="TextBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
@@ -767,6 +793,7 @@
                  表现出"改了但不弹提示"。改成 "PART_Popup" 后，DropDownClosed 恢复正常触发，
                  修改下拉框选项也能跟其它控件一样正确弹出保存/回退提示。 -->
             <Style TargetType="ComboBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
@@ -838,6 +865,7 @@
                  4/7≈0.571~3/5=0.6 区间内），在任意分辨率下都能一次性展开更多选项，
                  不影响其它 ComboBox 的默认 260px 高度。 -->
             <Style TargetType="ComboBox" x:Key="TallPopupComboBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
@@ -972,6 +1000,7 @@
                  隐形滚动条(ScrollViewer 内嵌 PART_ScrollBar 会自动套用上面 ScrollBar 的全局样式，
                  不需要在这里重复写)。不加 x:Key，作为全应用默认样式自动套用到所有 ListBox。 -->
             <Style TargetType="ListBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
                 <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
                 <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
@@ -1011,6 +1040,7 @@
                  不加 x:Key，自动套用到所有未显式指定 Style/ItemContainerStyle 的 ListBox 条目
                  （DownloadListItem 等显式 x:Key 引用的地方不受影响）。 -->
             <Style TargetType="ListBoxItem">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Padding" Value="8,6"/>
                 <Setter Property="Margin" Value="0,1"/>
                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -1088,6 +1118,7 @@
                  边框转强调色 + 轻微上浮阴影，明确"这是一个可点击的条目"；选中态（游戏版本列表用
                  SelectionMode）额外叠一层柔光底色。 -->
             <Style TargetType="ListBoxItem" x:Key="DownloadListItem">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Padding" Value="0"/>
                 <Setter Property="Margin" Value="0,0,0,8"/>
                 <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -1221,6 +1252,7 @@
             </Style>
 
             <Style TargetType="CheckBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="FontSize" Value="14"/>
                 <Setter Property="Cursor" Value="Hand"/>
@@ -1251,7 +1283,6 @@
                                 <Trigger Property="IsChecked" Value="True">
                                     <Setter TargetName="box" Property="Background" Value="{DynamicResource AccentBrush}"/>
                                     <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
-                                    <Setter TargetName="box" Property="Effect" Value="{StaticResource GlowEffect}"/>
                                     <Setter TargetName="check" Property="Opacity" Value="1"/>
                                 </Trigger>
                                 <Trigger Property="IsChecked" Value="{x:Null}">
@@ -1268,7 +1299,142 @@
                 </Setter>
             </Style>
 
-            <!-- 注意：这里原来还有第二份 <Style TargetType="ListBox">（不带 x:Key，用来补
+            <!-- 表格也使用全局动态画刷，避免深色界面中出现系统白底。
+                 保留 DataGrid 的默认编辑、校验、滚动和虚拟化实现，只替换视觉样式。 -->
+            <Style x:Key="ThemedDataGridText" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type DataGridCell}}}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            </Style>
+            <Style x:Key="ThemedDataGridEditor" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
+                <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
+                <Setter Property="Padding" Value="3,2"/>
+                <Setter Property="MinHeight" Value="24"/>
+            </Style>
+            <Style x:Key="ThemedDataGridCheckEditor" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
+                <Setter Property="HorizontalAlignment" Value="Center"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+                <Setter Property="Margin" Value="0"/>
+            </Style>
+            <Style x:Key="ThemedDataGridCheck" TargetType="CheckBox" BasedOn="{StaticResource ThemedDataGridCheckEditor}">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
+                <Setter Property="IsHitTestVisible" Value="False"/>
+                <Setter Property="Focusable" Value="False"/>
+            </Style>
+            <Style TargetType="DataGridColumnHeader">
+                <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}"/>
+                <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                <Setter Property="Padding" Value="8,6"/>
+                <Setter Property="HorizontalContentAlignment" Value="Left"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="DataGridColumnHeader">
+                            <Grid>
+                                <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                          VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                                        <Path x:Name="SortGlyph" Grid.Column="1" Width="8" Height="5" Margin="8,0,0,0"
+                                              Fill="{DynamicResource TextPrimaryBrush}" Data="M 0,5 L 4,0 L 8,5 Z"
+                                              Stretch="Fill" VerticalAlignment="Center" Visibility="Collapsed"
+                                              RenderTransformOrigin="0.5,0.5"/>
+                                    </Grid>
+                                </Border>
+                                <Thumb x:Name="PART_LeftHeaderGripper" Width="5" HorizontalAlignment="Left" Cursor="SizeWE">
+                                    <Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="Transparent"/></ControlTemplate></Thumb.Template>
+                                </Thumb>
+                                <Thumb x:Name="PART_RightHeaderGripper" Width="5" HorizontalAlignment="Right" Cursor="SizeWE">
+                                    <Thumb.Template><ControlTemplate TargetType="Thumb"><Border Background="Transparent"/></ControlTemplate></Thumb.Template>
+                                </Thumb>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="{DynamicResource GlowSoftBrush}"/>
+                                </Trigger>
+                                <Trigger Property="SortDirection" Value="Ascending">
+                                    <Setter TargetName="SortGlyph" Property="Visibility" Value="Visible"/>
+                                </Trigger>
+                                <Trigger Property="SortDirection" Value="Descending">
+                                    <Setter TargetName="SortGlyph" Property="Visibility" Value="Visible"/>
+                                    <Setter TargetName="SortGlyph" Property="RenderTransform"><Setter.Value><RotateTransform Angle="180"/></Setter.Value></Setter>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="DataGridRow">
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
+                <Setter Property="MinHeight" Value="32"/>
+                <Style.Triggers>
+                    <Trigger Property="IsSelected" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource SoftHeaderBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource SoftHeaderForegroundBrush}"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+            <Style TargetType="DataGridCell">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource DividerBrush}"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="Padding" Value="8,4"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="DataGridCell">
+                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+                <Style.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource GlowSoftBrush}"/>
+                    </Trigger>
+                    <Trigger Property="IsSelected" Value="True">
+                        <Setter Property="Background" Value="{DynamicResource SoftHeaderBrush}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource SoftHeaderForegroundBrush}"/>
+                    </Trigger>
+                    <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                        <Setter Property="BorderThickness" Value="1"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+            <Style TargetType="DataGrid">
+                <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+                <Setter Property="RowBackground" Value="{DynamicResource PanelBrush}"/>
+                <Setter Property="AlternatingRowBackground" Value="{DynamicResource SideBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource AppFontFamily}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource DividerBrush}"/>
+                <Setter Property="VerticalGridLinesBrush" Value="{DynamicResource DividerBrush}"/>
+                <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+                <Setter Property="EnableRowVirtualization" Value="True"/>
+                <Setter Property="EnableColumnVirtualization" Value="True"/>
+                <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
+            </Style>
+
+            <!-- 注意：这里原来还有第二份 <Style TargetType="ListBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>（不带 x:Key，用来补
                  Background/Foreground/BorderBrush，修"深色模式下 ListBox 容器还是系统白底"
                  的问题）。已删除——同一个 ResourceDictionary 里不允许出现两个未指定 x:Key
                  的同类型隐式样式，WPF 在 BAML 反序列化阶段 ResourceDictionary.SetKeys 里会用
@@ -1345,6 +1511,7 @@
             </Style>
 
             <Style TargetType="RadioButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="FontSize" Value="14"/>
                 <Setter Property="Cursor" Value="Hand"/>
@@ -1389,6 +1556,7 @@
                  层级更清楚，一眼就能看出当前在哪个分类，跟主流下载器（如截图1里的 PCL）
                  左侧导航的观感更接近。 -->
             <Style TargetType="RadioButton" x:Key="DownloadCategoryButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="Padding" Value="12,10"/>
                 <Setter Property="FontSize" Value="14"/>

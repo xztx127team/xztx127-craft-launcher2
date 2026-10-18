@@ -27,6 +27,12 @@ void Rejects(string input, string? shell = null)
     Check(result.Error != null && !result.Converted && result.Command == input, "rejects without partial conversion: " + input);
 }
 
+var chatConfig = new AiAssistantConfig { WorkMode = AiWorkMode.Chat, AllowShellCommands = true,
+    AllowAllShellCommands = true, FullDiskAccess = true, AbsoluteAccess = true,
+    UnrestrictedAccess = true, SystemControlAccess = true };
+Check(!AiShellPolicy.CanRun(chatConfig) && !AiShellPolicy.IsUnrestricted(chatConfig)
+    && AiShellPolicy.BuildPrompt(chatConfig).Length == 0, "pure chat exposes no Shell capability even with all grants saved");
+
 Converts(null, "dotnet --info > /dev/null 2>&1", "dotnet --info > $null 2>&1");
 Converts(" CMD ", "dotnet --info 2>/dev/null", "dotnet --info 2>NUL", "cmd");
 Converts(null, "Write-Output x >> '/dev/null'", "Write-Output x >> $null");
@@ -108,8 +114,9 @@ for (var bits = 0; bits < 32; bits++)
     Check(AiShellPolicy.CanRun(cfg) == canRun, "permission gate " + bits);
     Check(AiShellPolicy.RequiresConfirmation(cfg) == !unrestricted, "confirmation policy " + bits);
     var prompt = AiShellPolicy.BuildPrompt(cfg);
-    Check(!canRun ? prompt.Contains("未开启") : unrestricted ? prompt.Contains("不再弹出") && !prompt.Contains("每次执行需")
-        : prompt.Contains("每次执行需"), "prompt matches effective permission " + bits);
+    Check(!canRun ? prompt.Contains("通用 Shell 能力未开启")
+        : unrestricted ? prompt.Contains("免逐次确认") && !prompt.Contains("请求确认")
+        : prompt.Contains("请求确认"), "prompt matches effective permission " + bits);
     Check(cfg.AllowShellCommands == ((bits & 16) != 0), "policy never enables permission " + bits);
     AiShellPolicy.NormalizeGrantedShellPermission(cfg);
     Check(cfg.AllowShellCommands == canRun, "saved Shell toggle matches existing highest-access capability " + bits);
@@ -117,6 +124,17 @@ for (var bits = 0; bits < 32; bits++)
         "normalization preserves effective capability and confirmation policy " + bits);
 }
 Check(!AiShellPolicy.CanRun(null) && AiShellPolicy.RequiresConfirmation(null), "missing config is fail closed");
+var allShell = new AiAssistantConfig { AllowShellCommands = false, AllowAllShellCommands = true };
+Check(AiShellPolicy.CanRun(allShell) && !AiShellPolicy.RequiresConfirmation(allShell),
+    "explicit all-Shell grant permits shell and waives repeated confirmation");
+Check(AiShellPolicy.BuildPrompt(allShell).Contains("免逐次确认"),
+    "all-Shell grant is reflected in the prompt");
+AiShellPolicy.NormalizeGrantedShellPermission(allShell);
+Check(allShell.AllowAllShellCommands && !allShell.AllowShellCommands,
+    "normalization preserves the separate explicit all-Shell grant");
+allShell.AllowAllShellCommands = false;
+Check(!AiShellPolicy.CanRun(allShell) && AiShellPolicy.RequiresConfirmation(allShell),
+    "revoking all-Shell grant restores the generic shell gate");
 var highestAccess = new AiAssistantConfig
 {
     FullDiskAccess = true, AbsoluteAccess = true, UnrestrictedAccess = true, SystemControlAccess = true,
@@ -135,6 +153,24 @@ var activity = new AiAssistantActivity
 var restored = JsonSerializer.Deserialize<AiAssistantActivity>(JsonSerializer.Serialize(activity))!;
 Check(restored.OriginalCommand == activity.OriginalCommand && restored.Command == activity.Command
     && restored.Clone().CommandConversion == activity.CommandConversion, "conversion survives history and snapshots");
+
+var backgroundMode = AiWorkMode.Build;
+var background = new AiWorkModeContext(backgroundMode, () => backgroundMode);
+using (background.EnterScope())
+{
+    Check(AiShellPolicy.CanRun(chatConfig) && AiShellPolicy.IsUnrestricted(chatConfig)
+        && AiShellPolicy.BuildPrompt(chatConfig).Contains("run_command"),
+        "background Build prompt and effective grants use the request scope when another conversation is Chat");
+    var persistedChat = JsonSerializer.Deserialize<AiAssistantConfig>(JsonSerializer.Serialize(chatConfig))!;
+    persistedChat.AllowShellCommands = false;
+    AiShellPolicy.NormalizeGrantedShellPermission(persistedChat);
+    Check(!persistedChat.AllowShellCommands, "saving global Chat settings never inherits a background Build grant");
+    backgroundMode = AiWorkMode.Chat;
+    Check(!AiShellPolicy.CanRun(chatConfig) && AiShellPolicy.BuildPrompt(chatConfig).Length == 0,
+        "switching the same background request to Chat removes its Shell prompt");
+}
+Check(!AiShellPolicy.CanRun(chatConfig) && AiShellPolicy.BuildPrompt(chatConfig).Length == 0,
+    "disposing a background scope restores configured Chat policy");
 
 // On Windows, execute only harmless temporary-file operations using the real PowerShell 5.1 entry point.
 if (OperatingSystem.IsWindows())

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/Plugins/PluginUpgradePermissions.cs" Link="PluginUpgradePermissions.cs" />
+    <Compile Include="../../Services/Plugins/PluginUpgradeExport.cs" Link="PluginUpgradeExport.cs" />
+    <Compile Include="../../Services/Plugins/PluginUpgradeService.cs" Link="PluginUpgradeService.cs" />
+    <Compile Include="../../Services/Plugins/PluginMetadata.cs" Link="PluginMetadata.cs" />
+    <Compile Include="../../Services/Plugins/PluginPackageSignature.cs" Link="PluginPackageSignature.cs" />
+    <Compile Include="../../Services/Worlds/WorldArchiveService.cs" Link="WorldArchiveService.cs" />
+    <Compile Include="../../Services/Worlds/NbtDocument.cs" Link="NbtDocument.cs" />
+  </ItemGroup>
+</Project>

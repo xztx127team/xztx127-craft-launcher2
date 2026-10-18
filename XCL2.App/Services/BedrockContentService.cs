@@ -693,18 +693,55 @@ public class BedrockContentService
     /// （GamingServices / VCLibs / NET.Native 等，缺了客户端会闪退）。
     /// 同一次进程内只会真正执行一次：后续调用（比如下载完成后自动启动时再次触发）
     /// 直接跳过，不会重新下载/重新安装。</summary>
-    public static async Task EnsureSupportLibrariesInstalledAsync(IProgress<ProgressInfo>? progress = null)
+    public static async Task EnsureSupportLibrariesInstalledAsync(IProgress<ProgressInfo>? progress = null,
+        CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (_supportLibrariesEnsured)
         {
             progress?.Report(new ProgressInfo("运行库就绪", 1, 1, ""));
             return;
         }
 
+        await RunRuntimeTaskAsync("补全基岩版运行库", progress, ct, EnsureSupportLibrariesCoreAsync);
+    }
+
+    private static async Task RunRuntimeTaskAsync(string name, IProgress<ProgressInfo>? progress,
+        CancellationToken ct, Func<IProgress<ProgressInfo>?, CancellationToken, Task> work)
+    {
+        var queue = DownloadQueueService.Instance;
+        if (queue.CurrentItem is { } current)
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, current.Cts.Token);
+            var queueProgress = current.CreateProgress();
+            var combined = new Progress<ProgressInfo>(info =>
+            {
+                queueProgress.Report(info);
+                progress?.Report(info);
+            });
+            await work(combined, linked.Token);
+            return;
+        }
+        await queue.RunAndWaitAsync(name, async (item, token) =>
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, token);
+            var queueProgress = item.CreateProgress();
+            var combined = new Progress<ProgressInfo>(info =>
+            {
+                queueProgress.Report(info);
+                progress?.Report(info);
+            });
+            await work(combined, linked.Token);
+            return true;
+        }, ct);
+    }
+
+    private static async Task EnsureSupportLibrariesCoreAsync(IProgress<ProgressInfo>? progress, CancellationToken ct)
+    {
         // 用锁而不是简单判断标记：避免"下载前预装"和"下载完自动启动前再次确保"
         // 这两次调用时间上挨得很近时，第二次在第一次还没写完标记前就抢跑，
         // 结果又并发下载一次 vc_redist.x64.exe。
-        await _supportLibrariesLock.WaitAsync();
+        await _supportLibrariesLock.WaitAsync(ct);
         try
         {
             if (_supportLibrariesEnsured)
@@ -725,11 +762,11 @@ public class BedrockContentService
                     using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) })
                     {
                         http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 XCL2-Launcher/1.0");
-                        using var resp = await http.GetAsync(VcRedistUrl, HttpCompletionOption.ResponseHeadersRead);
+                        using var resp = await http.GetAsync(VcRedistUrl, HttpCompletionOption.ResponseHeadersRead, ct);
                         resp.EnsureSuccessStatusCode();
-                        await using var src = await resp.Content.ReadAsStreamAsync();
+                        await using var src = await resp.Content.ReadAsStreamAsync(ct);
                         await using var dst = File.Create(tmpFile);
-                        await src.CopyToAsync(dst);
+                        await src.CopyToAsync(dst, ct);
                     }
 
                     var psi = new ProcessStartInfo(tmpFile)
@@ -739,16 +776,29 @@ public class BedrockContentService
                         Verb = "runas",          // 安装运行库需要管理员权限
                         WindowStyle = ProcessWindowStyle.Hidden,
                     };
-                    var proc = Process.Start(psi);
-                    if (proc != null)
+                    ct.ThrowIfCancellationRequested();
+                    async Task<int> InstallAsync()
                     {
-                        proc.WaitForExit();
-                        progress?.Report(new ProgressInfo("VC++ 运行库安装完成", 1, 1, ""));
+                        using var proc = Process.Start(psi) ?? throw new InvalidOperationException("无法启动 VC++ 运行库安装程序。");
+                        await proc.WaitForExitAsync();
+                        return proc.ExitCode;
                     }
+                    var item = DownloadQueueService.Instance.CurrentItem;
+                    var exitCode = item != null ? await item.RunInstallerPhaseAsync(InstallAsync) : await InstallAsync();
+                    ct.ThrowIfCancellationRequested();
+                    if (exitCode is not (0 or 1638 or 3010))
+                        throw new InvalidOperationException($"VC++ 运行库安装失败（退出码 {exitCode}）。");
+                    progress?.Report(new ProgressInfo(exitCode == 3010 ? "VC++ 运行库已安装，需要重启计算机" : "VC++ 运行库安装完成", 1, 1, ""));
+                    if (exitCode == 3010 && item != null) item.CompletionText = "运行库已安装，需要重启计算机";
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+                {
+                    throw new OperationCanceledException("未授予管理员权限，VC++ 运行库安装已取消。", ex);
                 }
                 catch (Exception ex)
                 {
-                    progress?.Report(new ProgressInfo($"自动安装 VC++ 运行库失败：{ex.Message}，可手动下载 vc_redist.x64.exe 安装", 1, 1, ""));
+                    throw new InvalidOperationException($"自动安装 VC++ 运行库失败：{ex.Message}，可手动下载 vc_redist.x64.exe 安装", ex);
                 }
                 finally
                 {
@@ -759,8 +809,8 @@ public class BedrockContentService
             // UWP 前置框架包：只查一次（PowerShell 查询慢），缺了就自动下载安装
             if (!_uwpDependenciesChecked)
             {
+                await InstallMissingUwpDependenciesCoreAsync(progress, ct);
                 _uwpDependenciesChecked = true;
-                await InstallMissingUwpDependenciesAsync(progress);
             }
 
             progress?.Report(new ProgressInfo("运行库就绪", 1, 1, ""));
@@ -775,16 +825,17 @@ public class BedrockContentService
     // ==================== UWP 前置依赖（移植自 BedrockBoot） ====================
 
     /// <summary>列出缺失的 UWP 前置框架包（PowerShell 查询已安装 Appx 包，逐个比对版本）。</summary>
-    public static async Task<List<(string Name, string? MinVersion)>> GetMissingUwpDependenciesAsync()
+    public static async Task<List<(string Name, string? MinVersion)>> GetMissingUwpDependenciesAsync(CancellationToken ct = default)
     {
         var installed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
             var (exitCode, output) = await RunPowershellAsync(
-                "-NoProfile -ExecutionPolicy Bypass -Command \"Get-AppxPackage | Select-Object Name, Version | ConvertTo-Csv -NoTypeInformation\"");
+                "-NoProfile -ExecutionPolicy Bypass -Command \"Get-AppxPackage | Select-Object Name, Version | ConvertTo-Csv -NoTypeInformation\"", ct);
             if (exitCode == 0 && !string.IsNullOrWhiteSpace(output))
                 ParseAppxPackageCsv(output, installed);
         }
+        catch (OperationCanceledException) { throw; }
         catch { /* 查询失败按全部缺失处理 */ }
 
         var missing = new List<(string, string?)>();
@@ -803,24 +854,29 @@ public class BedrockContentService
     }
 
     /// <summary>自动下载并安装缺失的 UWP 前置框架包（rg-adguard 换直链 → 下载 → Add-AppxPackage）。</summary>
-    public static async Task InstallMissingUwpDependenciesAsync(IProgress<ProgressInfo>? progress = null)
+    public static Task InstallMissingUwpDependenciesAsync(IProgress<ProgressInfo>? progress = null,
+        CancellationToken ct = default) =>
+        RunRuntimeTaskAsync("补全 UWP 前置框架包", progress, ct, InstallMissingUwpDependenciesCoreAsync);
+
+    private static async Task InstallMissingUwpDependenciesCoreAsync(IProgress<ProgressInfo>? progress, CancellationToken ct)
     {
-        var missing = await GetMissingUwpDependenciesAsync();
+        var missing = await GetMissingUwpDependenciesAsync(ct);
         if (missing.Count == 0) return;
 
         progress?.Report(new ProgressInfo($"发现 {missing.Count} 个缺失的 UWP 前置框架包，开始自动安装", 0, 1, ""));
 
+        var failures = new List<string>();
         foreach (var (name, minVersion) in missing)
         {
+            ct.ThrowIfCancellationRequested();
             try
             {
                 progress?.Report(new ProgressInfo($"正在获取 {name} 下载链接", 0, 1, ""));
 
-                var url = await ResolveUwpPackageUrlAsync(name, minVersion);
+                var url = await ResolveUwpPackageUrlAsync(name, minVersion, ct);
                 if (string.IsNullOrEmpty(url))
                 {
-                    progress?.Report(new ProgressInfo($"{name} 未找到可用的下载地址，跳过", 1, 1, ""));
-                    continue;
+                    throw new InvalidOperationException($"{name} 未找到可用的下载地址。");
                 }
 
                 var tmpFile = Path.Combine(Path.GetTempPath(), $"{name}_{Guid.NewGuid():N}.appx");
@@ -831,16 +887,16 @@ public class BedrockContentService
                     using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(30) })
                     {
                         http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 XCL2-Launcher/1.0");
-                        using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                        using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
                         resp.EnsureSuccessStatusCode();
-                        await using var src = await resp.Content.ReadAsStreamAsync();
+                        await using var src = await resp.Content.ReadAsStreamAsync(ct);
                         await using var dst = File.Create(tmpFile);
-                        await src.CopyToAsync(dst);
+                        await src.CopyToAsync(dst, ct);
                     }
 
-                    var (exitCode, error) = await RunPowershellAsync($"-NoProfile -Command \"Add-AppxPackage -Path '{tmpFile}'\"");
+                    var (exitCode, error) = await RunPowershellAsync($"-NoProfile -Command \"Add-AppxPackage -Path '{tmpFile.Replace("'", "''")}'\"", ct, isInstaller: true);
                     if (exitCode != 0)
-                        progress?.Report(new ProgressInfo($"{name} 安装失败：{error.Trim()}", 1, 1, ""));
+                        throw new InvalidOperationException($"{name} 安装失败：{error.Trim()}");
                     else
                         progress?.Report(new ProgressInfo($"{name} 安装完成", 1, 1, ""));
                 }
@@ -849,19 +905,22 @@ public class BedrockContentService
                     try { File.Delete(tmpFile); } catch { }
                 }
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 ErrorPresenter.LogFallback($"自动安装 UWP 前置依赖 {name} 失败", ex);
                 progress?.Report(new ProgressInfo($"{name} 安装失败：{ex.Message}", 1, 1, ""));
+                failures.Add(name + "：" + ex.Message);
             }
         }
+        if (failures.Count > 0) throw new InvalidOperationException("部分 UWP 前置框架包补全失败：" + string.Join("；", failures));
     }
 
     /// <summary>
     /// 从 store.rg-adguard.net 获取 UWP 框架包的下载直链（与 BedrockBoot 的
     /// UwpFileUrl 相同：按 PackageFamilyName 查，挑 x64/neutral 里版本最高的 appx）。
     /// </summary>
-    public static async Task<string?> ResolveUwpPackageUrlAsync(string packageName, string? minVersion)
+    public static async Task<string?> ResolveUwpPackageUrlAsync(string packageName, string? minVersion, CancellationToken ct = default)
     {
         var pfn = $"{packageName}_8wekyb3d8bbwe";
 
@@ -869,7 +928,7 @@ public class BedrockContentService
         client.DefaultRequestHeaders.Add("Origin", "https://store.rg-adguard.net");
         client.DefaultRequestHeaders.Add("Referer", "https://store.rg-adguard.net/");
 
-        var content = new FormUrlEncodedContent(new[]
+        using var content = new FormUrlEncodedContent(new[]
         {
             new KeyValuePair<string, string>("type", "PackageFamilyName"),
             new KeyValuePair<string, string>("url", pfn),
@@ -877,8 +936,9 @@ public class BedrockContentService
             new KeyValuePair<string, string>("lang", "en-US"),
         });
 
-        var response = await client.PostAsync("https://store.rg-adguard.net/api/GetFiles", content);
-        var html = await response.Content.ReadAsStringAsync();
+        using var response = await client.PostAsync("https://store.rg-adguard.net/api/GetFiles", content, ct);
+        response.EnsureSuccessStatusCode();
+        var html = await response.Content.ReadAsStringAsync(ct);
 
         var regex = new Regex(@"<a\s+href=""([^""]+)""[^>]*>([^<]+\.(?:appx|appxbundle|msixbundle|msix))</a>",
             RegexOptions.IgnoreCase);
@@ -995,23 +1055,46 @@ public class BedrockContentService
         return result;
     }
 
-    private static async Task<(int ExitCode, string Output)> RunPowershellAsync(string arguments)
+    private static async Task<(int ExitCode, string Output)> RunPowershellAsync(string arguments,
+        CancellationToken ct = default, bool isInstaller = false)
     {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "powershell.exe",
-            Arguments = arguments,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        using var process = Process.Start(psi);
-        if (process == null) return (1, "无法启动 PowerShell");
+        ct.ThrowIfCancellationRequested();
+        var item = DownloadQueueService.Instance.CurrentItem;
+        return isInstaller && item != null
+            ? await item.RunInstallerPhaseAsync(RunProcessAsync)
+            : await RunProcessAsync();
 
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
-        return (process.ExitCode, output + error);
+        async Task<(int ExitCode, string Output)> RunProcessAsync()
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = arguments,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var process = Process.Start(psi);
+            if (process == null) return (1, "无法启动 PowerShell");
+
+            // 两路同时读取，避免大量 stderr 填满管道后互相等待。
+            var output = process.StandardOutput.ReadToEndAsync();
+            var error = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync(isInstaller ? CancellationToken.None : ct);
+            }
+            catch (OperationCanceledException)
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+                await process.WaitForExitAsync();
+                await Task.WhenAll(output, error);
+                throw;
+            }
+            await Task.WhenAll(output, error);
+            ct.ThrowIfCancellationRequested();
+            return (process.ExitCode, (await output) + (await error));
+        }
     }
 }

@@ -1,0 +1,12 @@
+{
+  "kind": "static validation; no build or runtime verification",
+  "projects": 23,
+  "xaml_files": 130,
+  "target_event_handlers": 242,
+  "target_x_names": 348,
+  "new_service_contracts": 24,
+  "errors": [],
+  "warnings": [],
+  "plugin_contract_check": "passed",
+  "preview_interaction_check": "not run: missing tree_sitter"
+}

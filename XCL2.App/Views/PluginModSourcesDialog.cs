@@ -37,7 +37,7 @@ internal sealed class PluginModSourcesDialog : OverlayDialogControl
         root.Children.Add(back);
         back.Click += (_, _) => CloseWith(false);
         _sources.ItemsSource = PluginProviderRegistry.Snapshot("mod"); _sources.SelectedIndex = 0;
-        RequestClose += (_, _) => { Interlocked.Increment(ref _selection); _stop.Cancel(); };
+        OverlayClosed += (_, _) => { Interlocked.Increment(ref _selection); _stop.Cancel(); };
         _sources.SelectionChanged += (_, _) =>
         {
             Interlocked.Increment(ref _selection);

@@ -15,11 +15,13 @@ internal sealed class PluginExtensionPanel : UserControl, IDisposable
     private long _revision = -1;
     private bool _disposed;
     private bool _building;
+    private bool _refreshEnabled;
 
-    internal PluginExtensionPanel(string target, PluginUiService? owner = null)
+    internal PluginExtensionPanel(string target, PluginUiService? owner = null, bool deferInitialRefresh = false)
     {
         _target = target;
         _owner = owner;
+        _refreshEnabled = !deferInitialRefresh;
         Content = _items;
         Visibility = Visibility.Collapsed;
         Loaded += OnLoaded;
@@ -36,9 +38,16 @@ internal sealed class PluginExtensionPanel : UserControl, IDisposable
 
     private void OnUnloaded(object sender, RoutedEventArgs e) => PluginUiRegistry.Changed -= Refresh;
 
+    internal void EnableRefresh()
+    {
+        if (_disposed || _refreshEnabled) return;
+        _refreshEnabled = true;
+        if (IsLoaded) Refresh();
+    }
+
     private void Refresh()
     {
-        if (_disposed || _building || _revision == PluginUiRegistry.Revision) return;
+        if (_disposed || !_refreshEnabled || _building || _revision == PluginUiRegistry.Revision) return;
         _building = true;
         _revision = PluginUiRegistry.Revision;
         try
@@ -203,7 +212,8 @@ internal sealed class PluginOverlayView : DockPanel, IDisposable
     private readonly PluginExtensionPanel _extensions;
     internal PluginOverlayView(IOverlayDialog dialog)
     {
-        _extensions = new PluginExtensionPanel(PluginUiRegistry.Target(dialog));
+        // 插件工厂可能同步执行耗时工作；由 Overlay 宿主在卡片已经呈现后激活。
+        _extensions = new PluginExtensionPanel(PluginUiRegistry.Target(dialog), deferInitialRefresh: true);
         var scroll = new ScrollViewer { Content = _extensions, MaxHeight = 220,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         SetDock(scroll, Dock.Bottom);
@@ -211,6 +221,7 @@ internal sealed class PluginOverlayView : DockPanel, IDisposable
         _dialog = new ContentControl { Content = dialog };
         Children.Add(_dialog);
     }
+    internal void ActivateExtensions() => _extensions.EnableRefresh();
     public void Dispose() { _extensions.Dispose(); _dialog.Content = null; Children.Clear(); }
 }
 

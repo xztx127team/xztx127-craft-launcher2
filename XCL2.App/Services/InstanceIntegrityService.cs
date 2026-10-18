@@ -22,7 +22,7 @@ public class InstanceIntegrityService
     {
         /// <summary>version json 本身缺失/解析失败——这种情况下面所有其它检查都无意义，直接判定不完整。</summary>
         public bool VersionJsonMissing { get; set; }
-        /// <summary>client jar 缺失或 0 字节。原版直接检查自己的 jar；有 inheritsFrom 的（Forge/NeoForge 等）检查父版本的 jar。</summary>
+        /// <summary>client jar 缺失或 0 字节。按统一继承解析器找到实际 client 所属层，支持多层继承与 jar 重定向。</summary>
         public bool ClientJarMissing { get; set; }
         /// <summary>复用 LauncherService.CheckMissingLibraries 的结果，原样透传，不重复实现一遍。</summary>
         public List<string> MissingLibraries { get; set; } = new();
@@ -34,6 +34,9 @@ public class InstanceIntegrityService
 
         /// <summary>解析出来的 VersionDetail，供调用方后续"继续启动并补全"时直接复用，不用重新读一次 json。</summary>
         public VersionDetail? Detail { get; set; }
+        public VersionDetail? EffectiveDetail { get; set; }
+        public VersionDetail? ClientDetail { get; set; }
+        public string? ClientVersionId { get; set; }
     }
 
     private readonly LauncherService _launcherService;
@@ -43,61 +46,47 @@ public class InstanceIntegrityService
         _launcherService = launcherService;
     }
 
-    public IntegrityCheckResult Check(string minecraftDir, string versionId, IntegrityCheckMode mode)
+    public IntegrityCheckResult Check(string minecraftDir, string versionId, IntegrityCheckMode mode, CancellationToken ct = default)
+        => Check(minecraftDir, versionId, mode, ct, null);
+
+    public IntegrityCheckResult Check(string minecraftDir, string versionId, IntegrityCheckMode mode, CancellationToken ct,
+        string? architecture)
     {
+        ct.ThrowIfCancellationRequested();
         var result = new IntegrityCheckResult();
-        var versionDir = Path.Combine(minecraftDir, "versions", versionId);
-
-        // 版本文件夹被用户改过名，内部 json/jar 文件名不一定等于文件夹名——跟 FolderService.ScanVersions
-        // 用的是同一套"文件夹里唯一 json 就认它"兜底规则，两边口径保持一致。
-        var jsonPath = ResolveVersionFile(versionDir, versionId, "json");
-        if (jsonPath == null)
-        {
-            result.VersionJsonMissing = true;
-            return result;
-        }
-
-        VersionDetail detail;
+        VersionInheritanceResolver.Resolution inheritance;
         try
         {
-            detail = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(jsonPath)) ?? new VersionDetail();
+            inheritance = VersionInheritanceResolver.Load(minecraftDir, versionId, FolderService.ResolveVersionJson, architecture);
         }
         catch
         {
             result.VersionJsonMissing = true;
             return result;
         }
+        var detail = inheritance.Layers[^1].Detail;
         if (string.IsNullOrEmpty(detail.Id)) detail.Id = versionId;
-        result.Detail = detail;
-
-        // client jar：原版查自己，继承类（Forge/NeoForge/Fabric profile）查父版本的 jar，
-        // 跟 FolderService.ScanVersions 判定 IsInstalled 用的是同一条逻辑。
-        var jarBaseName = string.IsNullOrEmpty(detail.Id) ? versionId : detail.Id;
-        var ownJarPath = Path.Combine(versionDir, $"{jarBaseName}.jar");
-        var ownJarOk = File.Exists(ownJarPath) && new FileInfo(ownJarPath).Length > 0;
-        var inheritedJarOk = false;
-        if (!ownJarOk && !string.IsNullOrEmpty(detail.InheritsFrom))
+        result.Detail = detail; // Keep the selected layer for callers which inspect inheritsFrom.
+        result.EffectiveDetail = inheritance.Effective;
+        if (string.IsNullOrWhiteSpace(inheritance.Effective.MainClass))
         {
-            var parentDir = Path.Combine(minecraftDir, "versions", detail.InheritsFrom);
-            var parentJsonPath = ResolveVersionFile(parentDir, detail.InheritsFrom, "json");
-            if (parentJsonPath != null)
-            {
-                try
-                {
-                    var parentDetail = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(parentJsonPath));
-                    var parentJarBaseName = string.IsNullOrEmpty(parentDetail?.Id) ? detail.InheritsFrom : parentDetail!.Id;
-                    var parentJarPath = Path.Combine(parentDir, $"{parentJarBaseName}.jar");
-                    inheritedJarOk = File.Exists(parentJarPath) && new FileInfo(parentJarPath).Length > 0;
-                }
-                catch { /* 父版本 json 本身损坏，视为继承链不完整，下面按缺失处理 */ }
-            }
+            result.VersionJsonMissing = true;
+            return result;
         }
-        result.ClientJarMissing = !ownJarOk && !inheritedJarOk;
+        var client = inheritance.ClientLayer;
+        result.ClientDetail = client.Detail;
+        result.ClientVersionId = client.VersionId;
+        var jarBaseName = string.IsNullOrEmpty(client.Detail.Id) ? client.VersionId : client.Detail.Id;
+        var jar = LauncherService.ResolveVersionFile(client.Directory, jarBaseName, "jar");
+        try { result.ClientJarMissing = jar == null || new FileInfo(jar).Length == 0; }
+        catch (IOException) { result.ClientJarMissing = true; }
+        catch (UnauthorizedAccessException) { result.ClientJarMissing = true; }
+        ct.ThrowIfCancellationRequested();
 
         // libraries + natives：直接复用已有实现，不重复一遍同样的解析逻辑。
         try
         {
-            result.MissingLibraries = _launcherService.CheckMissingLibraries(minecraftDir, versionId);
+            result.MissingLibraries = _launcherService.CheckMissingLibraries(minecraftDir, versionId, architecture);
         }
         catch
         {
@@ -105,13 +94,14 @@ public class InstanceIntegrityService
         }
 
         // assets：原来完全没有人检查过，这里是新增的部分。
-        CheckAssets(minecraftDir, detail, mode, result.MissingAssets);
+        CheckAssets(minecraftDir, inheritance.Effective, mode, result.MissingAssets, ct);
 
         return result;
     }
 
-    private static void CheckAssets(string minecraftDir, VersionDetail detail, IntegrityCheckMode mode, List<string> missingAssets)
+    private static void CheckAssets(string minecraftDir, VersionDetail detail, IntegrityCheckMode mode, List<string> missingAssets, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         if (detail.AssetIndex == null) return; // 极少数远古版本没有独立资源索引，没有可查的东西
 
         var indexPath = Path.Combine(minecraftDir, "assets", "indexes", $"{detail.AssetIndex.Id}.json");
@@ -140,6 +130,7 @@ public class InstanceIntegrityService
             // 调用方（UI 线程）应当在后台线程里跑这个方法，避免卡界面。
             foreach (var (name, obj) in index.Objects)
             {
+                ct.ThrowIfCancellationRequested();
                 if (string.IsNullOrEmpty(obj.Hash) || obj.Hash.Length < 2) continue;
                 var path = Path.Combine(objectsDir, obj.Hash[..2], obj.Hash);
                 if (!File.Exists(path))
@@ -166,6 +157,7 @@ public class InstanceIntegrityService
             {
                 foreach (var (_, obj) in index.Objects)
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (string.IsNullOrEmpty(obj.Hash) || obj.Hash.Length < 2) continue;
                     if (File.Exists(Path.Combine(objectsDir, obj.Hash[..2], obj.Hash))) existing++;
                 }
@@ -179,14 +171,4 @@ public class InstanceIntegrityService
         }
     }
 
-    /// <summary>跟 LauncherService/FolderService 里同名私有方法保持一致的兜底规则：
-    /// 优先按"文件夹名.json"找，找不到再退而求其次找文件夹里唯一的 .json。</summary>
-    private static string? ResolveVersionFile(string dir, string id, string ext)
-    {
-        var exact = Path.Combine(dir, $"{id}.{ext}");
-        if (File.Exists(exact)) return exact;
-        if (!Directory.Exists(dir)) return null;
-        var candidates = Directory.GetFiles(dir, $"*.{ext}");
-        return candidates.Length == 1 ? candidates[0] : null;
-    }
 }

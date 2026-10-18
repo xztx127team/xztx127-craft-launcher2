@@ -53,7 +53,7 @@ public partial class PluginManagerDialog : OverlayDialogControl
         {
             PluginListPanel.Children.Add(new TextBlock
             {
-                Text = "还没有发现插件。拖入 DLL / EXE / .xclplugin，或点击“导入插件”选择文件。",
+                Text = "还没有发现插件。拖入 XCL / DLL / EXE / .xclplugin，或点击“导入插件”选择文件。",
                 Foreground = (Brush)FindResource("TextSecondaryBrush"),
                 TextWrapping = TextWrapping.Wrap,
                 FontSize = 12,
@@ -143,7 +143,7 @@ public partial class PluginManagerDialog : OverlayDialogControl
             titleLine.Children.Add(authorize);
         }
         titleLine.Children.Add(configButton);
-        var upgrade = new Button { Content = "升级 / 新签名", Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(8, 0, 0, 0) };
+        var upgrade = new Button { Content = "升级插件", Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(8, 0, 0, 0) };
         upgrade.Click += (_, _) => OverlayDialogService.ShowModal(new PluginUpgradeDialog(_manager, info));
         titleLine.Children.Add(upgrade);
         var delete = new Button { Content = "删除", Padding = new Thickness(10, 3, 10, 3),
@@ -277,7 +277,7 @@ public partial class PluginManagerDialog : OverlayDialogControl
         var picker = new Microsoft.Win32.OpenFileDialog
         {
             Title = "选择第三方插件",
-            Filter = "插件 (*.dll;*.exe;*.xclplugin)|*.dll;*.exe;*.xclplugin",
+            Filter = "插件 (*.xcl;*.dll;*.exe;*.xclplugin)|*.xcl;*.dll;*.exe;*.xclplugin",
             Multiselect = true
         };
         if (picker.ShowDialog() != true) return;

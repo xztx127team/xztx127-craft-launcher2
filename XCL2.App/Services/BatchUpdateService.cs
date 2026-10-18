@@ -16,10 +16,14 @@ public class UpdateCandidate
     public string ProjectId { get; set; } = "";
     public string CurrentVersionName { get; set; } = "";
     public string NewVersionName { get; set; } = "";
+    public string NewVersionId { get; set; } = "";
     public string NewFileName { get; set; } = "";
     public string NewDownloadUrl { get; set; } = "";
     public string NewSha1 { get; set; } = "";
     public long NewFileSize { get; set; }
+    public string UpdateNotes { get; set; } = "";
+    public string CompatibilitySummary { get; set; } = "";
+    public string DependencySummary { get; set; } = "";
 
     /// <summary>用户在确认对话框里是否勾选了这一项参与本次批量升级。</summary>
     public bool Selected { get; set; } = true;
@@ -45,7 +49,7 @@ public class BatchUpdateService : IDisposable
 {
     private const string ModrinthBaseUrl = "https://api.modrinth.com/v2";
     private readonly HttpClient _http;
-    private readonly GenericFileDownloadService _downloader = new();
+    private static readonly SemaphoreSlim UpdateGate = new(1, 1);
 
     public BatchUpdateService()
     {
@@ -90,6 +94,7 @@ public class BatchUpdateService : IDisposable
                 var candidate = await CheckOneAsync(file, mcVersion, loader, ct);
                 if (candidate != null) result.Add(candidate);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch
             {
                 // 单个文件识别失败（网络抖动/不是 Modrinth 资源/哈希查无结果）静默跳过，
@@ -103,7 +108,7 @@ public class BatchUpdateService : IDisposable
     private async Task<UpdateCandidate?> CheckOneAsync(string filePath, string mcVersion, string? loader, CancellationToken ct)
     {
         var isDisabled = filePath.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase);
-        var sha1 = ComputeSha1(filePath);
+        var sha1 = await Task.Run(() => ComputeSha1(filePath), ct);
 
         // 第一步：哈希反查"这是 Modrinth 上哪个项目的哪个版本"。查不到说明这个文件不是
         // （或不确定是）Modrinth 上的资源，直接放弃，不当作错误处理。
@@ -142,7 +147,7 @@ public class BatchUpdateService : IDisposable
             if (f.TryGetProperty("primary", out var isPrimary) && isPrimary.GetBoolean()) { primaryFile = f; break; }
         }
 
-        var projectResp = await _http.GetAsync($"{ModrinthBaseUrl}/project/{projectId}", ct);
+        using var projectResp = await _http.GetAsync($"{ModrinthBaseUrl}/project/{projectId}", ct);
         string displayName = projectId;
         if (projectResp.IsSuccessStatusCode)
         {
@@ -159,11 +164,34 @@ public class BatchUpdateService : IDisposable
             ProjectId = projectId,
             CurrentVersionName = currentVersionNumber,
             NewVersionName = latestVersionNumber,
+            NewVersionId = latestVersionId,
             NewFileName = primaryFile.GetProperty("filename").GetString() ?? $"{projectId}.jar",
             NewDownloadUrl = primaryFile.GetProperty("url").GetString() ?? "",
             NewSha1 = primaryFile.TryGetProperty("hashes", out var hashes) && hashes.TryGetProperty("sha1", out var h1) ? h1.GetString() ?? "" : "",
             NewFileSize = primaryFile.TryGetProperty("size", out var sizeEl) ? sizeEl.GetInt64() : 0,
+            UpdateNotes = latest.TryGetProperty("changelog", out var changeEl) && changeEl.ValueKind == JsonValueKind.String ? LimitPreview(changeEl.GetString() ?? "", 16000) : "此版本未提供更新说明。",
+            CompatibilitySummary = "Minecraft：" + ArrayPreview(latest, "game_versions") + "；加载器：" + ArrayPreview(latest, "loaders"),
+            DependencySummary = DependencyPreview(latest),
         };
+    }
+
+    private static string LimitPreview(string value, int maximum) => value.Length <= maximum ? value : value[..maximum] + "\n（更新说明过长，已截取）";
+    private static string ArrayPreview(JsonElement root, string key) => root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.Array
+        ? string.Join(" / ", value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Take(24).Select(v => v.GetString())) : "未提供";
+    private static string DependencyPreview(JsonElement root)
+    {
+        if (!root.TryGetProperty("dependencies", out var deps) || deps.ValueKind != JsonValueKind.Array) return "未提供依赖信息。";
+        var rows = new List<string>();
+        foreach (var dep in deps.EnumerateArray().Take(60))
+        {
+            var kind = dep.TryGetProperty("dependency_type", out var type) ? type.GetString() : "unknown";
+            var label = kind switch { "required" => "必需", "optional" => "可选", "incompatible" => "不兼容", "embedded" => "已内置", _ => "其他" };
+            var project = dep.TryGetProperty("project_id", out var projectId) && projectId.ValueKind == JsonValueKind.String ? projectId.GetString() : null;
+            var version = dep.TryGetProperty("version_id", out var versionId) && versionId.ValueKind == JsonValueKind.String ? versionId.GetString() : null;
+            var file = dep.TryGetProperty("file_name", out var fileName) && fileName.ValueKind == JsonValueKind.String ? fileName.GetString() : null;
+            rows.Add(label + "：" + (project ?? file ?? "未标注项目") + (version == null ? "" : " · 版本 " + version));
+        }
+        return rows.Count == 0 ? "该版本未声明依赖。" : string.Join("\n", rows) + "\n仅展示声明，不会自动下载或启用依赖。";
     }
 
     /// <summary>
@@ -172,49 +200,133 @@ public class BatchUpdateService : IDisposable
     /// mod 意外唤醒）。单个下载失败不影响其它文件继续升级，失败的会在返回结果里标出来，
     /// 由调用方决定怎么提示用户（成功了几个/失败了哪几个）。
     /// </summary>
-    public async Task<(List<string> succeeded, List<(string name, string error)> failed)> ApplyAsync(
+    public Task<(List<string> succeeded, List<(string name, string error)> failed)> ApplyAsync(
         string folderPath, List<UpdateCandidate> candidates,
         IProgress<ProgressInfo>? progress = null, CancellationToken ct = default)
-    {
-        var succeeded = new List<string>();
-        var failed = new List<(string, string)>();
+        => Task.Run(() => ApplyCoreAsync(folderPath, candidates, progress, ct), ct);
 
-        var selected = candidates.Where(c => c.Selected).ToList();
-        var done = 0;
-        foreach (var c in selected)
+    private async Task<(List<string> succeeded, List<(string name, string error)> failed)> ApplyCoreAsync(
+        string folderPath, List<UpdateCandidate> candidates, IProgress<ProgressInfo>? progress, CancellationToken ct)
+    {
+        await UpdateGate.WaitAsync(ct);
+        try
         {
-            done++;
-            progress?.Report(new ProgressInfo("正在升级", done, selected.Count, c.DisplayName));
+            var succeeded = new List<string>();
+            var failed = new List<(string, string)>();
+
+            var selected = candidates.Where(c => c.Selected).ToList();
+            if (selected.Count == 0) return (succeeded, failed);
+            folderPath = Path.GetFullPath(folderPath);
+            // 所有目标先校验；绝不接受远程元数据把文件写出所选 mods / resourcepacks 目录。
+            var names = new List<string>();
+            foreach (var candidate in selected)
+            {
+                var old = ModUpdateSnapshotStore.ResolveFile(folderPath, candidate.CurrentFileName);
+                if (!string.Equals(old, Path.GetFullPath(candidate.CurrentFilePath), StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("更新候选不属于所选目录。");
+                ModUpdateSnapshotStore.ResolveFile(folderPath, candidate.NewFileName);
+                var finalName = candidate.NewFileName + (candidate.IsCurrentlyDisabled ? ".disabled" : "");
+                ModUpdateSnapshotStore.ResolveFile(folderPath, finalName);
+                names.Add(candidate.CurrentFileName); names.Add(finalName);
+            }
+            var cfg = ConfigService.Active?.Config;
+            var store = new ModUpdateSnapshotStore(Path.Combine(App.DataDir, "mod_update_snapshots"));
+            ModUpdateSnapshot? snapshot = null;
+            if (cfg?.SnapshotBeforeModUpdates != false)
+                snapshot = await Task.Run(() => store.Create(folderPath, names,
+                    Math.Clamp(cfg?.ModUpdateSnapshotRetentionCount ?? 10, 1, 100),
+                    Math.Clamp(cfg?.ModUpdateSnapshotMaxMb ?? 1024, 64, 16384) * 1048576L, ct), ct);
             try
             {
-                var tempName = c.NewFileName + ".xcl2tmp";
-                await _downloader.DownloadAsync(c.NewDownloadUrl, folderPath, tempName, userAgent: null, progress: null, ct);
+                var done = 0;
+                foreach (var c in selected)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    done++;
+                    progress?.Report(new ProgressInfo("正在升级", done, selected.Count, c.DisplayName));
+                    var staging = Path.Combine(folderPath, ".xcl2-update-" + Guid.NewGuid().ToString("N"));
+                    try
+                    {
+                        var finalName = c.IsCurrentlyDisabled ? c.NewFileName + ".disabled" : c.NewFileName;
+                        var finalPath = ModUpdateSnapshotStore.ResolveFile(folderPath, finalName);
+                        var oldPath = ModUpdateSnapshotStore.ResolveFile(folderPath, c.CurrentFileName);
+                        string? Before(string name, string path) => snapshot == null ? ModUpdateSnapshotStore.Hash(path)
+                            : snapshot.Files.Single(file => string.Equals(file.Name, name, StringComparison.OrdinalIgnoreCase)).BeforeHash;
+                        var oldHash = Before(c.CurrentFileName, oldPath); var targetHash = Before(finalName, finalPath);
+                        Directory.CreateDirectory(staging);
+                        var tempPath = Path.Combine(staging, "download.bin");
+                        await DownloadEndpoints.DownloadFileWithFallbackAsync(_http, c.NewDownloadUrl, DownloadEndpoints.PreferMirror,
+                            tempPath, "更新文件下载失败", ct: ct, expectedSha1: c.NewSha1,
+                            expectedSize: c.NewFileSize > 0 ? c.NewFileSize : null);
+                        var newHash = ModUpdateSnapshotStore.Hash(tempPath);
+                        ct.ThrowIfCancellationRequested();
+                        if (ModUpdateSnapshotStore.Hash(oldPath) != oldHash || ModUpdateSnapshotStore.Hash(finalPath) != targetHash)
+                            throw new IOException("下载期间原文件有后续修改，已停止替换。");
+                        var renamed = !string.Equals(oldPath, finalPath, StringComparison.OrdinalIgnoreCase);
+                        var displaced = Path.Combine(staging, "target-before.bin");
+                        if (renamed && targetHash != null)
+                        {
+                            File.Copy(finalPath, displaced);
+                            if (ModUpdateSnapshotStore.Hash(displaced) != targetHash) throw new IOException("目标文件在备份期间发生变化。");
+                        }
 
-                var finalName = c.IsCurrentlyDisabled ? c.NewFileName + ".disabled" : c.NewFileName;
-                var finalPath = Path.Combine(folderPath, finalName);
-                var tempPath = Path.Combine(folderPath, tempName);
+                        // 新旧文件名可能不同（mod 作者改过命名规则），新文件落地成功后才删旧文件，
+                        // 避免"新文件没下完/校验失败"却已经把旧文件删了、两头落空的中间状态。
+                        File.Move(tempPath, finalPath, true);
+                        if (File.Exists(oldPath) && renamed)
+                        {
+                            try
+                            {
+                                if (snapshot != null) store.RecordAfter(snapshot, finalName, newHash);
+                                if (ModUpdateSnapshotStore.Hash(oldPath) != oldHash) throw new IOException("原文件在更新期间变化，保留原文件和快照供核对。");
+                                File.Delete(oldPath);
+                                if (snapshot != null) store.RecordAfter(snapshot, c.CurrentFileName, null);
+                            }
+                            catch
+                            {
+                                // 旧文件未能移除时撤回本次新文件，避免留下同一个模组的两个版本。
+                                if (File.Exists(oldPath) && ModUpdateSnapshotStore.Hash(finalPath) == newHash)
+                                {
+                                    if (targetHash == null) File.Delete(finalPath);
+                                    else File.Move(displaced, finalPath, true);
+                                    if (snapshot != null) store.RecordAfter(snapshot, finalName, targetHash);
+                                }
+                                throw;
+                            }
+                        }
+                        else if (snapshot != null) store.RecordAfter(snapshot, finalName, newHash);
 
-                // 新旧文件名可能不同（mod 作者改过命名规则），新文件落地成功后才删旧文件，
-                // 避免"新文件没下完/校验失败"却已经把旧文件删了、两头落空的中间状态。
-                if (File.Exists(finalPath)) File.Delete(finalPath);
-                File.Move(tempPath, finalPath);
-                if (File.Exists(c.CurrentFilePath) && !string.Equals(c.CurrentFilePath, finalPath, StringComparison.OrdinalIgnoreCase))
-                    File.Delete(c.CurrentFilePath);
-
-                succeeded.Add(c.DisplayName);
+                        succeeded.Add(c.DisplayName);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception ex)
+                    {
+                        failed.Add((c.DisplayName, ex.Message));
+                    }
+                    finally { try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch { } }
+                }
             }
-            catch (Exception ex)
+            finally
             {
-                failed.Add((c.DisplayName, ex.Message));
+                if (snapshot != null)
+                {
+                    await Task.Run(() => store.Complete(snapshot));
+                    ReminderCenterService.Publish("mod-snapshot-" + snapshot.Id, "更新前的文件快照已保存",
+                        "模组 / 资源包更新前的原文件已保存。确认游戏运行正常后可按保留规则清理；需要时可查看并恢复。",
+                        "查看快照", () =>
+                        {
+                            (System.Windows.Application.Current?.MainWindow as XCL2.App.Views.MainWindow)?.OpenModUpdateSnapshots();
+                            return Task.CompletedTask;
+                        });
+                }
             }
+            return (succeeded, failed);
         }
-
-        return (succeeded, failed);
+        finally { UpdateGate.Release(); }
     }
 
     public void Dispose()
     {
         _http.Dispose();
-        _downloader.Dispose();
     }
 }

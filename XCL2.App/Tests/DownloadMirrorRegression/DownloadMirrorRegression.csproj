@@ -7,5 +7,8 @@
     <Compile Include="../../Models/DownloadMirrorConfig.cs" Link="DownloadMirrorConfig.cs" />
     <Compile Include="../../Services/DownloadMirrorPolicy.cs" Link="DownloadMirrorPolicy.cs" />
     <Compile Include="../../Services/DownloadEndpoints.cs" Link="DownloadEndpoints.cs" />
+    <Compile Include="../../Services/DownloadTargetLock.cs" Link="DownloadTargetLock.cs" />
+    <Compile Include="../../Services/DownloadTransferPolicy.cs" Link="DownloadTransferPolicy.cs" />
+    <Compile Include="../../Services/DownloadRateLimiter.cs" Link="DownloadRateLimiter.cs" />
   </ItemGroup>
 </Project>

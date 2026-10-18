@@ -77,6 +77,38 @@ public static class AiEndpointRouting
         (keys ?? Array.Empty<string>()).Where(k => !string.IsNullOrWhiteSpace(k))
             .Select(k => k.Trim()).Distinct(StringComparer.Ordinal).ToArray();
 
+    /// <summary>统一解析接口地址；完整的聊天/模型列表地址也可以作为输入，查询参数始终留在路径之后。</summary>
+    public static string NormalizeBaseUrl(string? baseUrl) => BuildEndpointUrl(baseUrl, "");
+
+    public static string BuildChatCompletionsUrl(string? baseUrl) => BuildEndpointUrl(baseUrl, "/chat/completions");
+
+    public static string BuildModelsUrl(string? baseUrl) => BuildEndpointUrl(baseUrl, "/models");
+
+    private static string BuildEndpointUrl(string? baseUrl, string suffix)
+    {
+        var value = (baseUrl ?? "").Trim();
+        if (value.IndexOfAny(new[] { '\r', '\n' }) >= 0
+            || !Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(uri.Host) || !string.IsNullOrEmpty(uri.UserInfo))
+            throw new ArgumentException("AI 接口地址无效，请填写 http/https 地址，并将 API 密钥填写在密钥栏。", nameof(baseUrl));
+
+        var path = uri.AbsolutePath.TrimEnd('/');
+        foreach (var knownSuffix in new[] { "/chat/completions", "/models" })
+            if (path.EndsWith(knownSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                path = path[..^knownSuffix.Length].TrimEnd('/');
+                break;
+            }
+        // Preserve custom API prefixes, escaped path segments and required query parameters.
+        // A fragment is local browser navigation and is never part of an HTTP API request.
+        return uri.GetLeftPart(UriPartial.Authority) + path + suffix + uri.Query;
+    }
+
+    /// <summary>只针对密钥/额度错误切换同一接口的备用密钥；权限或参数错误不会遍历密钥。</summary>
+    public static bool ShouldRetryWithNextKey(int statusCode, string? responseBody) =>
+        AiRequestExecutionPolicy.Classify(statusCode, responseBody ?? "") == AiRequestExecutionPolicy.FailureKind.Credential;
+
     public static IReadOnlyList<AiRequestTarget> GetCandidates(AiAssistantConfig config, string modelKeyOrId)
     {
         var primary = AiModelIds.FindInCatalog(config, modelKeyOrId);
@@ -138,11 +170,16 @@ public static class AiEndpointRouting
 
     public static IReadOnlyList<string> ResolveApiKeys(AiRequestTarget target) =>
         target.ProviderId == AiModelIds.BuiltInProviderId
-            ? CleanKeys(new[] { BuiltInAiDefaults.GetApiKey() }) : target.ApiKeys;
+            ? CleanKeys(new[] { BuiltInAiDefaults.GetApiKey() }) : CustomApiKeys(target);
 
     public static async Task<IReadOnlyList<string>> ResolveApiKeysAsync(AiRequestTarget target, CancellationToken ct = default)
     {
-        if (target.ProviderId != AiModelIds.BuiltInProviderId) return target.ApiKeys;
+        if (target.ProviderId != AiModelIds.BuiltInProviderId) return CustomApiKeys(target);
         return CleanKeys(new[] { await BuiltInAiDefaults.GetApiKeyAsync(ct).ConfigureAwait(false) });
     }
+
+    // Local OpenAI-compatible servers may explicitly use no authentication. Never borrow a
+    // different endpoint's key to fill this gap; an empty key means omit Authorization.
+    private static IReadOnlyList<string> CustomApiKeys(AiRequestTarget target) =>
+        target.ApiKeys.Count > 0 ? target.ApiKeys : new[] { "" };
 }

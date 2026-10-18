@@ -26,7 +26,7 @@ public partial class MainWindow
         if (_refreshingPluginUi) return; _refreshingPluginUi = true;
         try
         {
-            foreach (var button in _pluginNavButtons) NavButtonsPanel.Children.Remove(button); _pluginNavButtons.Clear();
+            foreach (var button in _pluginNavButtons) RemovePreviewPluginNavigationButton(button); _pluginNavButtons.Clear();
             var navigation = PluginUiContributionRegistry.Snapshot("navigation").Where(entry =>
             {
                 var definition = (PluginNavigationPageDefinition)entry.Definition;
@@ -61,11 +61,11 @@ public partial class MainWindow
                                 entry.Context.Log("PageCreationFailed: " + ex.GetType().Name);
                                 throw;
                             }
-                        }, _ => _activePluginPage = entry.Id);
+                        }, _ => { _activePluginPage = entry.Id; UpdatePreviewNavigationSelection(); });
                     }
                     catch (Exception ex) { entry.Context.Log("PageCreationFailed: " + ex.GetType().Name); MessageBoxDialog.ShowWarning(Loc.T("Str_Plugin_PageFailed", "插件页面创建失败，可以返回首页。"), definition.Title); }
                 };
-                NavButtonsPanel.Children.Add(button); _pluginNavButtons.Add(button);
+                AddPreviewPluginNavigationButton(button, entry.Id); _pluginNavButtons.Add(button);
             }
             var background = PluginUiContributionRegistry.Snapshot("background").FirstOrDefault(e => e.Id == ConfigService.Config.PluginBackgroundId);
             if (background != null)

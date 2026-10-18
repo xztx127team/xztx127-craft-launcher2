@@ -248,9 +248,19 @@ for control, (handler, target) in navigation.items():
     check("Real navigation implementation reachable: " + control, wired, {"handler": handler, "target": target})
     navigation_report.append({"button": control, "handler": handler, "business_page_or_dialog": target, "reachable_from_handler": wired})
 collapse = combined_body(main_methods, "ApplySidebarCollapsedState")
-for suffix in ("ApiDocumentation", "Plugins"):
+for suffix in ("Plugins",):
     expected = f"(Nav{suffix}Button, Nav{suffix}Icon, Nav{suffix}Label)"
     check("New sidebar entry supports icon-only collapse: " + suffix, expected in collapse)
+check("API documentation entry remains reachable through original navigation", reaches_type("NavigateToApiDocumentation", "PluginApiDocumentationPage"))
+check("Preview has five top categories above its content row", len([e for e in main_tree.iter() if e.get("Click") == "PreviewCategory_Click"]) == 5 and "PreviewCategoryBar.Visibility" in combined_body(main_methods, "ApplyPreviewLayout"))
+category = combined_body(main_methods, "PreviewCategory_Click")
+check("Top categories reuse original Click handlers rather than create replacement pages", "target.RaiseEvent(new RoutedEventArgs(Button.ClickEvent))" in category and not re.search(r"new\s+(?:HomePage|SettingsPage|VersionSelectPage)", category))
+preview_navigation = combined_body(main_methods, "UpdatePreviewNavigationSelection")
+check("Category filter changes wrappers while real feature visibility remains on buttons", "host.Visibility" in preview_navigation and "item.Button.Visibility == Visibility.Visible && item.Button.IsEnabled" in preview_navigation)
+check("Category selection resynchronizes after original navigation including cancellation", "UpdatePreviewNavigationSelection();" in category and "_previewNavigation.ObservePage(active)" in preview_navigation)
+for name in ("OverlayRoot", "DragHintLayer", "ToastHost", "ActionToastHost", "BrightnessOverlay", "AiFloatingButton", "AprilFoolsFlagButton"):
+    element = next((e for e in main_tree.iter() if e.get(X + "Name") == name), None)
+    check("Overlay spans both preview navigation rows: " + name, element is not None and element.get("Grid.RowSpan") == "2")
 for destination in ("home", "instances", "worlds", "settings", "ai", "downloads", "plugins"):
     check("Plugin home card routes to live functionality: " + destination, 'case "' + destination + '"' in combined_body(home_methods, "NavigatePreviewCard"))
 check("Plugin home cards are actual clickable buttons", "button.Click += (_, _) => NavigatePreviewCard(card.Destination)" in home_source)

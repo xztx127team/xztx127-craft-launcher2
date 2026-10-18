@@ -174,7 +174,7 @@ public static partial class AiFileAccessService
     {
         var result = new List<string>();
         var ai = ConfigService.Active?.Config.AiAssistant;
-        if (ai == null) return result;
+        if (ai == null || AiWorkModeContext.ResolveCurrentMode(ai.WorkMode) == AiWorkMode.Chat) return result;
         var candidates = new List<string>();
         if (!string.IsNullOrWhiteSpace(ai.WorkingDirectory)) candidates.Add(ai.WorkingDirectory!);
         if (ai.WorkingDirectories != null) candidates.AddRange(ai.WorkingDirectories);
@@ -193,7 +193,7 @@ public static partial class AiFileAccessService
     }
 
     public static bool IsFullAccess()
-        => ConfigService.Active?.Config.AiAssistant?.FullDiskAccess == true;
+        => ConfigService.Active?.Config.AiAssistant is { FullDiskAccess: true } ai && AiWorkModeContext.ResolveCurrentMode(ai.WorkMode) != AiWorkMode.Chat;
 
     private static bool IsInside(string root, string candidate)
     {
@@ -217,11 +217,14 @@ public static partial class AiFileAccessService
         return protectedRoots.Any(r => !string.IsNullOrWhiteSpace(r) && IsInside(Path.GetFullPath(r), fullPath));
     }
 
-    private static bool TryResolveWorkspacePath(string? inputPath, bool allowRoot, out string fullPath, out string error)
+    private static bool TryResolveWorkspacePath(string? inputPath, bool allowRoot, out string fullPath, out string error, bool forRead = false)
     {
         fullPath = "";
         error = "";
+        if (AiWorkModeContext.ResolveCurrentMode(ConfigService.Active?.Config.AiAssistant?.WorkMode ?? AiWorkMode.Build) == AiWorkMode.Chat)
+        { error = AiWorkModePolicy.ChatDeniedMessage; return false; }
         var roots = GetApprovedRoots();
+        if (forRead) roots.AddRange(AiAttachmentService.GetReadOnlyRoots().Where(r => !roots.Contains(r, StringComparer.OrdinalIgnoreCase)));
         var full = IsFullAccess();
         if (roots.Count == 0 && !full)
         {
@@ -244,6 +247,12 @@ public static partial class AiFileAccessService
                 ? Path.GetFullPath(raw)
                 : Path.GetFullPath(Path.Combine(roots.Count > 0 ? roots[0] : Environment.CurrentDirectory, raw));
 
+            var isAttachmentLocation = AiAttachmentService.IsManagedAttachmentPath(candidate);
+            if (isAttachmentLocation && !forRead)
+            { error = "上传附件临时目录仅支持读取，不能写入、删除或执行。"; return false; }
+            if (isAttachmentLocation && forRead && roots.Any(root => IsInside(root, candidate))
+                && !AiAttachmentService.IsReadOnlyAttachmentPath(candidate) && !GetApprovedRoots().Any(root => IsInside(root, candidate)))
+            { error = "附件路径包含链接或已失效，无法安全读取。"; return false; }
             if (!full && !roots.Any(r => IsInside(r, candidate)))
             {
                 error = "路径不在已批准的目录内，已拒绝。可以用 request_directory 向用户申请该目录。";
@@ -279,21 +288,21 @@ public static partial class AiFileAccessService
     public static bool IsAbsoluteAccess()
     {
         var ai = ConfigService.Active?.Config.AiAssistant;
-        return ai != null && ai.FullDiskAccess && ai.AbsoluteAccess;
+        return ai != null && AiWorkModeContext.ResolveCurrentMode(ai.WorkMode) != AiWorkMode.Chat && ai.FullDiskAccess && ai.AbsoluteAccess;
     }
 
     /// <summary>彻底完全访问是否生效：必须同时开启完全访问、绝对访问、完全绝对访问。生效后 AI 可改注册表、执行系统命令。</summary>
     public static bool IsSystemControlAccess()
     {
         var ai = ConfigService.Active?.Config.AiAssistant;
-        return ai != null && ai.FullDiskAccess && ai.AbsoluteAccess && ai.UnrestrictedAccess && ai.SystemControlAccess;
+        return ai != null && AiWorkModeContext.ResolveCurrentMode(ai.WorkMode) != AiWorkMode.Chat && ai.FullDiskAccess && ai.AbsoluteAccess && ai.UnrestrictedAccess && ai.SystemControlAccess;
     }
 
     /// <summary>完全绝对访问是否生效：必须同时开启完全访问和绝对访问。生效后不再有任何受保护路径。</summary>
     public static bool IsUnrestrictedAccess()
     {
         var ai = ConfigService.Active?.Config.AiAssistant;
-        return ai != null && ai.FullDiskAccess && ai.AbsoluteAccess && ai.UnrestrictedAccess;
+        return ai != null && AiWorkModeContext.ResolveCurrentMode(ai.WorkMode) != AiWorkMode.Chat && ai.FullDiskAccess && ai.AbsoluteAccess && ai.UnrestrictedAccess;
     }
 
     /// <summary>启动器自己的配置/账户/密钥所在位置（含 API 密钥、登录令牌）：
@@ -335,6 +344,8 @@ public static partial class AiFileAccessService
     /// <summary>文件类操作的统一确认入口：绝对访问下静默通过并记日志；否则弹窗。</summary>
     private static bool ConfirmFileAction(ConfirmCallback confirm, string title, string message, string logAction, string targetPath, bool isWrite = false)
     {
+        if (!isWrite && AiAttachmentService.IsReadOnlyAttachmentPath(targetPath))
+        { AuditLog($"读取已上传附件：{targetPath}"); return true; }
         if (IsAbsoluteAccess() && (IsUnrestrictedAccess() || !IsLauncherPrivatePath(targetPath)))
         {
             AuditLog($"{logAction}：{targetPath}（未弹窗，{(IsUnrestrictedAccess() ? "完全绝对访问" : "绝对访问")}已授权）");
@@ -379,6 +390,8 @@ public static partial class AiFileAccessService
     {
         replyText ??= string.Empty;
         workMode ??= CaptureWorkMode();
+        using var workModeScope = workMode.EnterScope();
+        using var attachmentScope = AiAttachmentService.BeginReadScope(workMode.AttachmentRoots);
         var parsedRequest = AiControlProtocol.Parse(replyText);
         if (parsedRequest.Kind != "ACCESS") return (replyText, null);
         var displayText = parsedRequest.DisplayText;
@@ -386,10 +399,12 @@ public static partial class AiFileAccessService
             return (displayText, "系统：" + parsedRequest.Error + " 请修正请求 JSON 后继续。未执行任何操作。");
         var root = parsedRequest.Request;
         var action = OptionalString(root, "action");
-        if (!workMode.Allows(action)) return (displayText, AiWorkModePolicy.DeniedMessage);
+        if (!workMode.Allows(action)) return (displayText, workMode.DeniedMessage);
         var argumentError = AiControlProtocol.ValidateAccessArguments(root);
         if (argumentError != null)
             return (displayText, "系统：工具参数无效：" + argumentError + " 未执行任何操作。请修正参数后继续。");
+        var permissionDenial = AiCommandPermissionService.GetAccessDenial(ConfigService.Active?.Config.AiAssistant, action, OptionalString(root, "path"), workMode.EffectiveMode);
+        if (permissionDenial != null) return (displayText, permissionDenial);
         var key = OptionalString(root, "key");
         var value = AiControlProtocol.Scalar(root, "value");
         var path = OptionalString(root, "path");
@@ -399,10 +414,15 @@ public static partial class AiFileAccessService
         {
             case "read_log":
             {
+                if (workMode.EffectiveMode == AiWorkMode.Chat && ConfigService.Active?.Config.AiAssistant?.AllowCrashLogReading != true)
+                    return (displayText, AiWorkModePolicy.ChatDeniedMessage);
                 const string msg = "AI 助手想读取【本次启动器运行期间的启动器日志】（不是游戏日志，也不是崩溃报告）来帮你排查问题。\n\n是否同意？";
                 if (!confirm("AI 请求访问数据", msg))
                     return (displayText, "用户拒绝了读取启动器日志的请求，未执行任何操作。请在不依赖日志内容的前提下继续回答，或直接说明缺少这部分信息就无法进一步判断。");
 
+                if (!workMode.Allows("read_log") || workMode.EffectiveMode == AiWorkMode.Chat
+                    && ConfigService.Active?.Config.AiAssistant?.AllowCrashLogReading != true)
+                    return (displayText, workMode.DeniedMessage);
                 var log = LauncherLogService.GetBufferedText();
                 if (string.IsNullOrWhiteSpace(log)) log = "(本次会话日志目前是空的)";
                 // 日志可能很长，只把最后一段喂回去，避免一次占满上下文。
@@ -419,6 +439,7 @@ public static partial class AiFileAccessService
                 var msg = $"AI 助手想查看当前的【{readable.Label}】设置值。\n\n是否同意？";
                 if (!confirm("AI 请求访问数据", msg))
                     return (displayText, $"用户拒绝了查看【{readable.Label}】当前值的请求，未执行任何操作。请继续回答，但不要假设这个值是多少。");
+                if (!workMode.Allows(action)) return (displayText, workMode.DeniedMessage);
 
                 var cfg = ConfigService.Active?.Config;
                 if (cfg == null)
@@ -441,7 +462,7 @@ public static partial class AiFileAccessService
                 if (cfg == null)
                     return (displayText, "系统：当前无法访问启动器配置（未初始化），未执行。");
 
-                if (!workMode.Allows(action)) return (displayText, AiWorkModePolicy.DeniedMessage);
+                if (!workMode.Allows(action)) return (displayText, workMode.DeniedMessage);
                 var (ok, error, applied) = writable.TryApply(cfg.Config, value ?? "");
                 if (!ok)
                     return (displayText, $"系统：用户同意了，但这个值不合法，没有修改成功（原因：{error}）。请告诉用户具体原因，可以请他提供一个合法值再试一次，或引导去设置页手动改。");
@@ -485,7 +506,7 @@ public static partial class AiFileAccessService
                         $"AI 助手申请把下面这个目录加入可访问范围：\n{dirFull}\n\n理由：{reason}\n\n同意后，AI 之后可以在这个目录内发起列出/读取/写入请求（每次具体操作仍会再弹窗确认）。你可以随时在 AI 设置里移除。\n\n是否同意？"))
                     return (displayText, "用户拒绝了这个目录的使用申请，未做任何改动。请不要再次申请同一个目录，也不要猜测里面的内容。");
 
-                if (!workMode.Allows(action)) return (displayText, AiWorkModePolicy.DeniedMessage);
+                if (!workMode.Allows(action)) return (displayText, workMode.DeniedMessage);
                 aiCfg.WorkingDirectories ??= new List<string>();
                 aiCfg.WorkingDirectories.Add(dirFull);
                 ConfigService.Active!.Save();
@@ -505,6 +526,7 @@ public static partial class AiFileAccessService
                             : "AI 助手想查看这台电脑的磁盘列表。\n\n是否同意？",
                             "查看目录入口列表", roots.Count > 1 ? "(已批准目录)" : "(磁盘列表)"))
                         return (displayText, "用户拒绝了这次请求。请不要假设有哪些目录。");
+                    if (!workMode.Allows(action)) return (displayText, workMode.DeniedMessage);
                     string[] roots2 = roots.Count > 1
                         ? roots.ToArray()
                         : DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => d.Name).ToArray();
@@ -512,12 +534,13 @@ public static partial class AiFileAccessService
                         "\n请用绝对路径继续。");
                 }
 
-                if (!TryResolveWorkspacePath(path, allowRoot: true, out var folder, out var pathError))
+                if (!TryResolveWorkspacePath(path, allowRoot: true, out var folder, out var pathError, forRead: true))
                     return (displayText, $"系统：无法列出目录：{pathError}");
                 if (!Directory.Exists(folder))
                     return (displayText, "系统：请求列出的路径不是目录或已经不存在。");
                 if (!ConfirmFileAction(confirm, "AI 请求访问目录", $"AI 助手想列出目录中的文件：\n{folder}\n\n是否同意？", "列出目录", folder))
                     return (displayText, "用户拒绝了列出目录的请求。请不要假设目录中有哪些文件。");
+                if (!workMode.Allows(action)) return (displayText, workMode.DeniedMessage);
 
                 string[] entries;
                 try
@@ -535,12 +558,13 @@ public static partial class AiFileAccessService
 
             case "read_workspace_file":
             {
-                if (!TryResolveWorkspacePath(path, allowRoot: false, out var file, out var pathError))
+                if (!TryResolveWorkspacePath(path, allowRoot: false, out var file, out var pathError, forRead: true))
                     return (displayText, $"系统：无法读取文件：{pathError}");
                 if (!File.Exists(file))
                     return (displayText, "系统：请求读取的文件不存在。");
                 if (!ConfirmFileAction(confirm, "AI 请求读取文件", $"AI 助手想读取：\n{file}\n\n是否同意？", "读取文件", file))
                     return (displayText, "用户拒绝了读取该文件的请求。请不要猜测文件内容。");
+                if (!workMode.Allows(action)) return (displayText, workMode.DeniedMessage);
                 if (LooksBinary(file))
                     return (displayText, "系统：该文件看起来是二进制文件，不提供读取。请只处理文本文件。");
                 try
@@ -560,6 +584,13 @@ public static partial class AiFileAccessService
                 return ProcessCommandReplySynchronously(replyText, confirm, workMode);
 
             case "run_command":
+            case "mouse_move":
+            case "mouse_click":
+            case "mouse_right_click":
+            case "key_press":
+            case "keyboard_type":
+            case "window_open":
+            case "window_close":
                 return ProcessCommandReplySynchronously(replyText, confirm, workMode);
 
             case "registry_read":
@@ -646,7 +677,7 @@ public static partial class AiFileAccessService
 
     private static string RegistryWrite(string? path, string? valueName, string? value, string? type, AiWorkModeContext workMode)
     {
-        if (!workMode.Allows("registry_write")) return AiWorkModePolicy.DeniedMessage;
+        if (!workMode.Allows("registry_write")) return workMode.DeniedMessage;
         if (valueName == null) return "系统：registry_write 缺少值名称（key 字段，默认值请传空字符串）。";
         if (value == null) return "系统：registry_write 缺少 value，未修改注册表。";
         // Prepare and validate the value before opening/creating a registry key.
@@ -670,7 +701,7 @@ public static partial class AiFileAccessService
             return $"系统：写入注册表失败：{error}（修改 HKEY_LOCAL_MACHINE 通常需要以管理员身份运行启动器）";
         using (key)
         {
-            if (!workMode.Allows("registry_write")) return AiWorkModePolicy.DeniedMessage;
+            if (!workMode.Allows("registry_write")) return workMode.DeniedMessage;
             key!.SetValue(valueName, data, kind);
         }
         AuditSystemLog($"写入注册表：{path} -> {valueName} = {value}（{type ?? "String"}）");

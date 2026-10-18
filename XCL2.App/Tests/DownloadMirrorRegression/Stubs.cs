@@ -6,6 +6,8 @@ namespace XCL2.App.Models
         public DownloadSource Source { get; set; }
         public DownloadMirrorConfig DownloadMirrors { get; set; } = new();
         public int DownloadSpeedLimitKBps { get; set; }
+        public bool ReduceDownloadSpeedWhileGaming { get; set; }
+        public int GamingDownloadSpeedLimitKBps { get; set; } = 1024;
     }
 }
 namespace XCL2.App.Services
@@ -15,7 +17,7 @@ namespace XCL2.App.Services
         public static ConfigService? Active { get; set; } = new();
         public Models.AppConfig Config { get; } = new();
     }
-    public record ProgressInfo(string Stage, int Done, int Total, string CurrentFile);
+    public record ProgressInfo(string Stage, int Done, int Total, string CurrentFile) { public string Unit { get; init; } = "项"; }
 }
 namespace XCL2.App.Services.Plugins
 {

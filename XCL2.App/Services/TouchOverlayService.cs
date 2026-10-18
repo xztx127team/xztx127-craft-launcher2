@@ -165,8 +165,9 @@ public class TouchOverlayService
                         ? new OriginalTouchOverlayWindow(hwnd, cfg.TouchOverlayButtonScale,
                             cfg.TouchOverlayOpacityPercent, cfg.TouchOverlayLookSensitivity, info.Pid, CanTakeOver)
                         : new TouchOverlayWindow(hwnd, cfg.TouchOverlayButtonScale,
-                            cfg.TouchOverlayOpacityPercent, cfg.TouchOverlayLookSensitivity, info.Pid, CanTakeOver);
-                    LauncherLogService.AppendLine($"[触屏模式] 版本={info.VersionId}，路径={(originalInput ? "26.3 T4+ 第二份源码实现" : "26.3 T4 前 GLFW/LWJGL 兼容实现")}");
+                            cfg.TouchOverlayOpacityPercent, cfg.TouchOverlayLookSensitivity, info.Pid, CanTakeOver,
+                            info.TouchWorldEvidence);
+                    LauncherLogService.AppendLine($"[触屏模式] 版本={info.VersionId}，路径={(originalInput ? "SDL3（26.3 第 4 快照及以后）" : "GLFW/LWJGL（26.3 第 3 快照及以前）")}");
                     lock (Gate)
                     {
                         Active.Add(overlay);

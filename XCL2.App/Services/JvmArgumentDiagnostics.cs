@@ -308,7 +308,7 @@ public static class JvmArgumentDiagnostics
     /// <param name="launcherMinMb">设置里的最小内存（启动器会生成 -Xms）。</param>
     /// <param name="launcherMaxMb">设置里的最大内存（启动器会生成 -Xmx）。</param>
     /// <param name="javaMajor">本次要用的 Java 主版本，未知传 null（跳过按版本判断的检查）。</param>
-    public static List<JvmArgIssue> Lint(string? customJvmArgs, int launcherMinMb, int launcherMaxMb, int? javaMajor)
+    public static List<JvmArgIssue> Lint(string? customJvmArgs, int launcherMinMb, int launcherMaxMb, int? javaMajor, int? javaBitness = null)
     {
         var issues = new List<JvmArgIssue>();
         var tokens = new List<string>();
@@ -496,6 +496,13 @@ public static class JvmArgumentDiagnostics
                 "如果这不是你想要的，把自定义参数里的 -Xmx 删掉。",
                 JvmIssueSeverity.Warning));
 
+        // 32 位 Java 的地址空间不是整台机器的内存；显式自定义 -Xmx 不能被动态设置悄悄覆盖。
+        if (javaBitness == 32 && effectiveXmx > 1536L * Mb)
+            issues.Add(new JvmArgIssue("lint-x86-heap",
+                $"当前选择的是 32 位 Java，最大堆内存为 {effectiveXmx / Mb} MB，可能无法保留连续的堆空间。",
+                "建议改用同一主版本的 64 位 Java；如果必须使用 32 位 Java，请将最大内存调低至 1536 MB 或以下。自定义 -Xmx 也需要一并修改。",
+                JvmIssueSeverity.Warning));
+
         // 致命的排前面
         return issues.OrderByDescending(i => i.Severity).ToList();
     }
@@ -507,7 +514,7 @@ public static class JvmArgumentDiagnostics
         {
             issues.Add(new JvmArgIssue("lint-module-opt-old-java",
                 $"自定义参数「{token}」是 Java 9 以上才有的模块参数，当前用的是 Java {major}。",
-                "Java 会报 Unrecognized option 并拒绝启动。换成 Java 17/21，或删掉这个参数。",
+                "Java 会报 Unrecognized option 并拒绝启动。删除这个参数，或选择同时兼容游戏与这些参数的 Java；旧版 Launchwrapper 通常应保留 Java 8。",
                 JvmIssueSeverity.Fatal, Option: token));
             return;
         }

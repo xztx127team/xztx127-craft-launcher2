@@ -8,5 +8,6 @@
   <ItemGroup>
     <Compile Include="../../Services/CrashAiLogService.cs" Link="CrashAiLogService.cs"/>
     <Compile Include="../../Models/GameProcessInfo.cs" Link="GameProcessInfo.cs"/>
+    <Compile Include="../../Services/LegacyTouchWorldEvidence.cs" Link="LegacyTouchWorldEvidence.cs"/>
   </ItemGroup>
 </Project>

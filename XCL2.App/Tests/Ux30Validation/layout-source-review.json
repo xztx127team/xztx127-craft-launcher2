@@ -1,0 +1,49 @@
+{
+  "kind": "source-only independent layout review; no Windows render or C# execution",
+  "changed_xaml_parsed": [
+    "App.xaml",
+    "Views/ServerManagerPage.xaml",
+    "Views/ModUpdateSelectionDialog.xaml",
+    "Views/MessageBoxDialog.xaml",
+    "Views/SettingsPage.xaml",
+    "Views/DownloadCenterPage.xaml",
+    "Views/VersionSelectPage.xaml",
+    "Views/MainWindow.xaml",
+    "Views/LogsPage.xaml",
+    "Views/ToolboxPage.xaml",
+    "Views/HomePage.xaml",
+    "Views/CrashReportDialog.xaml",
+    "Views/LoginPage.xaml",
+    "Views/ModManagerPage.xaml"
+  ],
+  "code_dialogs_reviewed": [
+    "Views/ScreenshotBrowserDialog.cs",
+    "Views/ModCompatibilityPreviewDialog.cs",
+    "Views/LaunchSummaryDialog.cs",
+    "Views/DiagnosticsExportDialog.cs",
+    "Views/TaskResultHistoryDialog.cs",
+    "Views/FriendlyErrorDialog.cs",
+    "Views/InstanceIconCropDialog.cs",
+    "Views/InstancePersonalizationDialog.cs",
+    "Views/SaveBackupsDialog.cs"
+  ],
+  "new_drop_shadow_additions": [],
+  "fixed": [
+    "Window placement display removal while minimized is deferred until user restores",
+    "Download encyclopedia sidebar no longer reserves220px on narrow list; contextual click-open popup",
+    "Download category navigation scrolls on short windows",
+    "Toolbox pinned navigation scrolls without breaking button captions",
+    "Toolbox filter retains system arrow/Enter keyboard behavior"
+  ],
+  "coordinated_fixes": [
+    "Instance note/crop dialogs owner-relative maxheight",
+    "Task history list star row and viewport bounds",
+    "Diagnostic options capped and scrollable",
+    "Mod update selector list and whole-dialog viewport cap; reduced header actions"
+  ],
+  "runtime_pending": [
+    "854x480/1000x640 and100/125/150/200% actual WPF rendering",
+    "Mixed-DPI multi-monitor unplug/reconnect and CLI geometry persistence",
+    "Keyboard focus, touch long-press and clipboard live interaction"
+  ]
+}

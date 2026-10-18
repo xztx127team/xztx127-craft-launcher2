@@ -25,6 +25,18 @@ public class GameVersion
     public string FolderPath { get; set; } = "";
     public bool IsInstalled { get; set; }
 
+    // 仅实例页的个人显示状态；扫描其它页面时保持默认，不影响启动逻辑。
+    [System.Text.Json.Serialization.JsonIgnore] public bool IsFavorite { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? CustomIconPath { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public bool HasCustomIcon => !string.IsNullOrEmpty(CustomIconPath);
+    [System.Text.Json.Serialization.JsonIgnore] public string MetadataSummary { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public string PersonalNotes { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore] public bool SharesGameDirectory { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string DisplayTitle => (IsFavorite ? "★ " : "") + Id;
+    [System.Text.Json.Serialization.JsonIgnore] public string Details => ModLoader is null ? McVersion : $"{McVersion} · {ModLoader} {ModLoaderVersion}";
+    [System.Text.Json.Serialization.JsonIgnore] public string FullDisplayToolTip => string.Join("\n", new[] { Id, Details, MetadataSummary, PersonalNotes.Length > 500 ? PersonalNotes[..500] + "…" : PersonalNotes }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+
     // 需求修复："一键启动所选的实例"选择版本的下拉框没有显示用户自己设置的名称"：
     // Id 就是 versions/<Id> 的文件夹名，也正是用户改名时（TryRenameInstalledInstance）
     // 实际写回的那个值——SubTitle 之前完全没用到 Id，只拼了 McVersion/加载器，导致

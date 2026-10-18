@@ -13,13 +13,13 @@ public static class FeatureSearchMatcher
     /// Equal-ranked entries retain catalog order, so previous/next navigation is stable.
     /// </summary>
     public static IReadOnlyList<FeatureSearchEntry> Match(
-        IEnumerable<FeatureSearchEntry> entries, string? query, string? pageKey = null)
+        IEnumerable<FeatureSearchEntry> entries, string? query, string? pageKey = null, bool multipleKeywords = true)
     {
         ArgumentNullException.ThrowIfNull(entries);
         var normalizedQuery = Normalize(query);
         if (normalizedQuery.Length == 0) return Array.Empty<FeatureSearchEntry>();
-        var words = normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Distinct(StringComparer.Ordinal).ToArray();
+        var words = multipleKeywords ? normalizedQuery.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.Ordinal).ToArray() : new[] { normalizedQuery };
         var scope = Normalize(pageKey);
         return entries
             .Where(entry => scope.Length == 0 || Normalize(entry.PageKey) == scope || entry.PageKey == "main")

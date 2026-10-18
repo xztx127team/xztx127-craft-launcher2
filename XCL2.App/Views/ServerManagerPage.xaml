@@ -309,21 +309,10 @@
                         <StackPanel Grid.Column="0">
                             <TextBlock Text="{DynamicResource Str_Ui_Server_List}" FontSize="18" FontWeight="Bold" Margin="0,0,0,4"/>
                             <TextBlock Text="{DynamicResource Str_Ui_Start_Or_Stop_A_Server_You_Ve_Created_Or}"
-                                       Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
+                                       Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
-                        <!-- 内网穿透/公网访问教程的常驻入口：之前这个教程(ServerNetworkGuideWindow)只在
-                             "启动服务器成功后"自动弹一次，用户点掉/关闭"下次不再提示"之后就再也找不到入口了，
-                             只能靠重新触发一次自动弹窗。这里在服务器列表页顶部加一个显眼的常驻按钮，
-                             随时可以手动打开，不依赖"刚启动完服务器"这个时机，也不受
-                             ShowServerNetworkGuideOnStart 这个"是否自动弹"开关影响。 -->
-                        <!-- 之前这里额外写了 Background="{DynamicResource AccentBrush}"，把 PrimaryButton
-                             本来的浅蓝底色（ButtonBackgroundBrush）覆盖成了强调色的深蓝，导致这个按钮
-                             看起来比其它同样用 PrimaryButton 样式的按钮颜色深很多。去掉这个内联覆盖，
-                             跟"创建服务器"按钮保持一致的浅蓝底色。 -->
-                        <Button Grid.Column="1" Content="{DynamicResource Str_Ui_Multiplayer_Port_Forwarding_Guide}" Style="{StaticResource PrimaryButton}"
-                                Padding="14,10" Margin="0,0,10,0"
-                                Click="OpenNetworkGuide_Click"
-                                ToolTip="{DynamicResource Str_Ui_How_To_Let_Friends_Connect_From_Outside_}"/>
+                        <Button x:Name="ServerListMenuButton" Grid.Column="1" Content="筛选与更多 ▾" Style="{StaticResource SideNavButton}"
+                                Padding="12,8" Margin="10,0" VerticalAlignment="Center" Click="ServerListMenu_Click"/>
                         <Button Grid.Column="2" Content="{DynamicResource Str_Ui_Create_Server}" Style="{StaticResource PrimaryButton}"
                                 Padding="16,10" Click="CreateServer_Click"/>
                     </Grid>

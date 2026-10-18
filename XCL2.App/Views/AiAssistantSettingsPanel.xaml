@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="XCL2.App.Views.AiAssistantSettingsPanel"
+<UserControl x:Class="XCL2.App.Views.AiAssistantSettingsPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:services="clr-namespace:XCL2.App.Services"
@@ -24,12 +24,21 @@
                     <CheckBox x:Name="EnabledCheck" Content="启用 AI 助手" Margin="0,0,0,8"/>
                     <CheckBox x:Name="FloatingButtonCheck" Content="显示右下角常驻 AI 悬浮按钮"/>
                     <TextBlock Text="默认工作模式" FontWeight="SemiBold" Margin="0,12,0,0"/>
-                    <ComboBox x:Name="WorkModeCombo" Margin="0,4,0,6">
+                    <ComboBox x:Name="WorkModeCombo" Margin="0,4,0,6" SelectionChanged="WorkModeCombo_SelectionChanged">
                         <ComboBoxItem Content="Build · 执行" Tag="Build"/>
                         <ComboBoxItem Content="Plan · 规划" Tag="Plan"/>
+                        <ComboBoxItem Content="Agent · 智能体" Tag="Agent"/>
+                        <ComboBoxItem Content="纯聊天模式" Tag="Chat"/>
                     </ComboBox>
-                    <TextBlock Text="Plan：分析问题、读取资料并给出实施方案，不修改文件或执行命令。Build：在已授权范围内实施修改和执行操作。"
+                    <TextBlock Text="纯聊天：仅聊天，不使用工作目录或任何命令权限；本轮明确要求读取日志时，仍需开启日志分析并逐次确认。Plan：只读调查和规划。Build：在已有权限内执行。Agent：复杂任务建议保存计划，简单需求可直接处理。"
                                TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <TextBlock Text="Agent 动画预设" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                    <ComboBox x:Name="AgentAnimationProfileCombo" Margin="0,4,0,6">
+                        <ComboBoxItem Content="保持当前强度" Tag="Balanced"/>
+                        <ComboBoxItem Content="低功耗 · 强度 20%" Tag="LowPower"/>
+                        <ComboBoxItem Content="高性能 · 强度 100%" Tag="HighPerformance"/>
+                    </ComboBox>
+                    <TextBlock Text="Agent 模式保存或切换预设后，同步各动画强度拉杆；现有动画开关保持当前选择。" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
                     <TextBlock Text="聊天中也可切换模式。工作模式与推理等级独立；切换到 Build 不会新增文件或命令权限。"
                                TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0"/>
                 </StackPanel>
@@ -51,8 +60,34 @@
                             <TextBlock Text="最大输出 token（0 = 由接口决定，64–32768）"/><TextBox x:Name="MaxOutputTokensBox"/>
                             <TextBlock Text="每轮工具 / 命令操作上限（0 = 不限次数，默认 0）"/><TextBox x:Name="MaxToolActionsBox"/>
                             <TextBlock Text="每轮子智能体上限（0–4，0 = 关闭）"/><TextBox x:Name="MaxSubAgentsBox"/>
-                            <CheckBox x:Name="AllowShellCommandsCheck" Content="允许 AI 请求运行 Shell 命令（完全绝对访问时免确认）" Margin="0,8"/>
-                            <TextBlock Text="PowerShell / cmd 以当前用户权限运行。普通模式每次显示实际命令和工作目录并确认；开启「完全绝对访问」后免弹窗执行。Linux 命令自动转换时会在右下角提示仍可能存在执行问题。工作目录不是安全沙箱；可随时停止，输出实时显示。" TextWrapping="Wrap" FontSize="11"/>
+                            <CheckBox x:Name="AllowShellCommandsCheck" Content="预先允许 Shell 命令（未开启时逐次申请本次权限）" Margin="0,8"/>
+                            <TextBlock Text="PowerShell / cmd / Python 以当前用户权限运行。普通命令显示实际命令并确认。工作目录为“无”时禁止任何命令，除非开启完全访问或默许全部 Shell。工作目录不是安全沙箱。" TextWrapping="Wrap" FontSize="11"/>
+                            <Expander x:Name="CommandPermissionsExpander" Header="Shell / 命令权限" Margin="0,10,0,0" IsExpanded="False">
+                                <StackPanel Margin="0,8">
+                                    <CheckBox x:Name="AllowAllShellCommandsCheck" Content="默许全部 Shell 指令（包括“其他”，免逐次确认）" Margin="0,4"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6">
+                                        <Button Content="全选 · 全部放行" Click="SelectAllCommandPermissions_Click" Padding="10,4"/>
+                                        <Button Content="全部关闭" Click="ClearCommandPermissions_Click" Padding="10,4" Margin="8,0,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Text="大类" FontWeight="SemiBold"/>
+                                    <WrapPanel x:Name="CommandCategoryPermissionsPanel" Margin="0,4"/>
+                                    <TextBlock Text="小类 / 操作" FontWeight="SemiBold" Margin="0,6,0,0"/>
+                                    <WrapPanel x:Name="CommandOperationPermissionsPanel" Margin="0,4"/>
+                                    <TextBlock Text="鼠标、键盘与窗口操作默认关闭。关闭时胖虎会建议去设置打开；分类在本地校验，未识别的复合命令归“其他”。默认已授权工作区内新建文件及受限 Python 计算。" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="逐命令覆盖（完整命令精确匹配；拒绝优先）" FontWeight="SemiBold" Margin="0,10,0,4"/>
+                                    <DataGrid x:Name="ExactCommandPermissionsGrid" AutoGenerateColumns="False" CanUserAddRows="True" CanUserDeleteRows="True" MinHeight="100" MaxHeight="220" HeadersVisibility="Column">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="解释器" Binding="{Binding Shell}" Width="100"
+                                                                ElementStyle="{StaticResource ThemedDataGridText}" EditingElementStyle="{StaticResource ThemedDataGridEditor}"/>
+                                            <DataGridTextColumn Header="完整命令" Binding="{Binding Command}" Width="*"
+                                                                ElementStyle="{StaticResource ThemedDataGridText}" EditingElementStyle="{StaticResource ThemedDataGridEditor}"/>
+                                            <DataGridCheckBoxColumn Header="允许" Binding="{Binding Allowed}" Width="60"
+                                                                    ElementStyle="{StaticResource ThemedDataGridCheck}" EditingElementStyle="{StaticResource ThemedDataGridCheckEditor}"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <TextBlock Text="解释器填写 powershell、cmd 或 python。精确允许不会打开关闭的电脑操作功能，也不会绕过 Plan。选中一行后按 Delete 可删除规则。" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4"/>
+                                </StackPanel>
+                            </Expander>
                         </StackPanel>
                     </Expander>
                     <Expander Header="用量卡片 · 每个模型的上下文与估计单价" Margin="0,8" IsExpanded="False">
@@ -89,7 +124,7 @@
                     <Expander Header="公共接口的备用密钥（按顺序轮换）" Margin="0,0,0,8">
                         <StackPanel Margin="0,6">
                             <ListBox x:Name="DefaultKeysList" MaxHeight="100" DisplayMemberPath="Label"/>
-                            <PasswordBox x:Name="DefaultExtraKeyBox" Margin="0,5" ToolTip="输入备用密钥，添加后隐藏显示"/>
+                            <PasswordBox x:Name="DefaultExtraKeyBox" Margin="0,5" ToolTip="输入备用密钥，添加后隐藏显示；拉取或保存时也会自动添加"/>
                             <StackPanel Orientation="Horizontal"><Button Content="添加密钥" Click="AddDefaultKey_Click" Padding="10,4"/><Button Content="移除选中" Click="RemoveDefaultKey_Click" Padding="10,4" Margin="6,0,0,0"/></StackPanel>
                         </StackPanel>
                     </Expander>
@@ -103,8 +138,13 @@
                                 <CheckBox x:Name="EndpointEnabledCheck" Content="启用此接口" Margin="0,6" Checked="EndpointEnabled_Changed" Unchecked="EndpointEnabled_Changed"/>
                                 <TextBlock Text="密钥列表（按顺序使用，内容隐藏）" FontSize="11"/>
                                 <ListBox x:Name="EndpointKeysList" DisplayMemberPath="Label" MaxHeight="100"/>
-                                <PasswordBox x:Name="EndpointNewKeyBox" Margin="0,5" ToolTip="输入此接口的一个密钥后点击添加"/>
+                                <PasswordBox x:Name="EndpointNewKeyBox" Margin="0,5" ToolTip="输入此接口的密钥；添加、切换接口、拉取或保存时会自动加入此接口"/>
                                 <StackPanel Orientation="Horizontal"><Button Content="添加密钥" Click="AddEndpointKey_Click" Padding="10,4"/><Button Content="移除选中密钥" Click="RemoveEndpointKey_Click" Padding="10,4" Margin="6,0,0,0"/></StackPanel>
+                                <Button x:Name="FetchEditedEndpointButton" Content="拉取此接口模型" Click="FetchEditedEndpoint_Click"
+                                        HorizontalAlignment="Left" Padding="12,5" Margin="0,8,0,0"
+                                        ToolTip="使用当前命名接口自己的地址和密钥拉取模型"/>
+                                <TextBlock Text="密钥只属于当前接口；未点击添加的密钥会在切换接口、拉取或保存时自动加入。"
+                                           TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,5,0,0"/>
                             </StackPanel>
                         </StackPanel>
                     </Expander>
@@ -121,11 +161,12 @@
 
                     <StackPanel x:Name="CustomModelsEditor" Visibility="Collapsed" Margin="0,4,0,0">
                         <TextBlock Text="自定义模型列表（支持多供应商）" FontSize="11" FontWeight="SemiBold" Margin="0,2,0,6"/>
-                        <TextBlock Text="先选择该模型所属接口。同一模型可添加到不同接口；旧配置的独立供应商地址与密钥仍可使用。"
+                        <TextBlock Text="先选择该模型所属接口。同一模型可添加到不同接口；命名接口选择与下方来源同步。"
                                    TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"/>
 
                         <TextBlock Text="添加 / 拉取模型使用的接口" FontSize="11"/>
-                        <ComboBox x:Name="ModelEndpointCombo" DisplayMemberPath="Name" SelectedValuePath="Id" Margin="0,4,0,8"/>
+                        <ComboBox x:Name="ModelEndpointCombo" DisplayMemberPath="Name" SelectedValuePath="Id" Margin="0,4,0,8"
+                                  SelectionChanged="ModelEndpointCombo_SelectionChanged"/>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
                             <Button x:Name="FetchModelsButton" Content="拉取所选接口模型" Padding="12,5"
                                     Click="FetchModels_Click"
@@ -135,7 +176,7 @@
                         <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto" Margin="0,5,0,6">
                             <TextBlock x:Name="FetchModelsStatusText" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         </ScrollViewer>
-                        <TextBlock Text="选择上方接口后可分别拉取，也可一键拉取全部已启用接口。拉取只添加缺少的模型，不覆盖已有名称、分组和能力设置。"
+                        <TextBlock Text="所选接口拉取只使用该接口的地址和密钥；下方独立地址不会覆盖它。拉取只添加缺少的模型，仍需右下角保存设置。"
                                    TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -153,21 +194,25 @@
                             <TextBlock Grid.Column="1" Text="显示名称（界面用）" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         </Grid>
 
-                        <Grid Margin="0,6,0,0">
+                        <CheckBox x:Name="CustomModelUseStandaloneCheck" Content="此模型使用独立接口地址和密钥" Margin="0,6,0,4"/>
+                        <Grid Margin="0,0,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <TextBox x:Name="CustomModelProviderBaseUrlBox" Grid.Column="0" Margin="0,0,6,0"
-                                     ToolTip="兼容旧配置：留空使用所选接口，填写后使用这个模型的独立地址"/>
+                                     ToolTip="兼容旧配置：勾选使用独立接口时用于手动添加模型；也可点击下方按钮单独拉取"/>
                             <PasswordBox x:Name="CustomModelProviderApiKeyBox" Grid.Column="1"
-                                         ToolTip="兼容旧配置：独立地址的 API Key；两个字段都留空使用所选接口"/>
+                                         ToolTip="独立地址自己的 API Key；不会用于上方所选接口的拉取"/>
                         </Grid>
                         <Grid Margin="0,3,0,2">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <TextBlock Text="独立地址（旧配置兼容，可留空）" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
                             <TextBlock Grid.Column="1" Text="独立 API Key（可留空）" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         </Grid>
+                        <Button x:Name="FetchStandaloneModelsButton" Content="拉取此独立地址模型" HorizontalAlignment="Left"
+                                Padding="10,4" Margin="0,4,0,0" Click="FetchStandaloneModels_Click"
+                                ToolTip="只使用上面两个独立地址与密钥字段，兼容旧配置"/>
 
                         <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
                             <TextBlock Text="分组：" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0"/>
@@ -216,21 +261,21 @@
             <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
                     BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
                 <StackPanel>
-                    <TextBlock Text="工作目录与轻量编程" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="工作目录与轻量编程（纯聊天模式下不生效）" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6"/>
                     <TextBlock Text="设置后，AI 可在你逐次确认的前提下列出、读取和写入这个目录里的文本文件，也可继续使用白名单设置工具调整 XCL2。留空即完全关闭文件访问。"
                                TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8"/>
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                         <TextBox x:Name="WorkingDirectoryBox" Padding="7" ToolTip="AI 只能访问此目录及子目录，不能越过这个边界。"/>
-                        <Button Grid.Column="1" Content="选择目录" Margin="8,0,0,0" Padding="10,5" Click="BrowseWorkingDirectory_Click"/>
-                        <Button Grid.Column="2" Content="清空" Margin="8,0,0,0" Padding="10,5" Click="ClearWorkingDirectory_Click"/>
+                        <Button x:Name="BrowseWorkingDirectoryButton" Grid.Column="1" Content="选择目录" Margin="8,0,0,0" Padding="10,5" Click="BrowseWorkingDirectory_Click"/>
+                        <Button x:Name="ClearWorkingDirectoryButton" Grid.Column="2" Content="清空" Margin="8,0,0,0" Padding="10,5" Click="ClearWorkingDirectory_Click"/>
                     </Grid>
 
                     <TextBlock Text="额外目录（可添加多个；AI 也可以向你申请新的目录）" FontWeight="SemiBold" Margin="0,12,0,0"/>
                     <ListBox x:Name="ExtraDirectoriesList" Margin="0,4,0,0" MinHeight="40" MaxHeight="130"/>
                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                        <Button Content="添加目录" Padding="10,5" Click="AddExtraDirectory_Click"/>
-                        <Button Content="移除选中" Padding="10,5" Margin="8,0,0,0" Click="RemoveExtraDirectory_Click"/>
+                        <Button x:Name="AddExtraDirectoryButton" Content="添加目录" Padding="10,5" Click="AddExtraDirectory_Click"/>
+                        <Button x:Name="RemoveExtraDirectoryButton" Content="移除选中" Padding="10,5" Margin="8,0,0,0" Click="RemoveExtraDirectory_Click"/>
                     </StackPanel>
 
                     <CheckBox x:Name="FullAccessCheck" Margin="0,14,0,0"
@@ -332,6 +377,7 @@
             <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
                     BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
                 <StackPanel>
+                    <CheckBox x:Name="ShowTaskSelectionBarCheck" Content="在模型下方显示任务选择栏" Margin="0,0,0,10"/>
                     <TextBlock Text="执行过程显示" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
                     <CheckBox x:Name="ShowSubAgentsCheck" Content="显示 AI 调用的子智能体" Margin="0,0,0,6"/>
                     <CheckBox x:Name="ShowCodeChangesCheck" Content="显示修改的代码" Margin="0,0,0,6"/>

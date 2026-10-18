@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using System.Windows;
 using System.Windows.Navigation;
+using XCL2.App.Services;
 
 namespace XCL2.App.Views;
 
@@ -26,15 +26,7 @@ public partial class ServerNetworkGuideWindow : OverlayDialogControl
 
     private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
     {
-        try
-        {
-            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
-        }
-        catch
-        {
-            // 极少数环境下默认浏览器关联异常，静默失败即可，不弹错误打断用户看教程的流程，
-            // 链接文本本身就是可读的网址，用户可以自己手动复制去浏览器打开。
-        }
+        ExternalLinkService.Open(e.Uri?.AbsoluteUri);
         e.Handled = true;
     }
 
@@ -43,6 +35,4 @@ public partial class ServerNetworkGuideWindow : OverlayDialogControl
         DontShowAgain = DontShowAgainCheck.IsChecked == true;
         CloseWith(null);
     }
-    private void OpenExternalPage_Click(object sender, RoutedEventArgs e)
-        => XCL2.App.Services.ExternalLinkService.Open((sender as System.Windows.Controls.Button)?.Tag as string);
 }

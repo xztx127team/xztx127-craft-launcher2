@@ -7,6 +7,7 @@
              "边缘发光"科技感悬浮语言保持一致（原来 hover 时整块背景变成 AccentBrush 太生硬，
              跟输入框/按钮的 hover 效果不是一套视觉体系，这里改成跟它们一致的浅色背景 + 细描边）。 -->
         <Style x:Key="TileButton" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
             <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
@@ -65,6 +66,7 @@
              InvalidOperationException("TargetType 与元素类型不匹配")。这里单独复制一份同样的
              胶囊外观，只去掉 IsChecked 触发器，其余（背景/圆角/hover 发光）完全一致。 -->
         <Style x:Key="LanguageEntryButtonStyle" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
             <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
@@ -81,7 +83,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ToggleBorder" Property="Effect" Value="{StaticResource GlowEffect}"/>
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{DynamicResource GlowBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -217,6 +219,18 @@
         <StackPanel VerticalAlignment="Center">
             <TextBlock Text="{DynamicResource Str_Home_Welcome}" FontSize="28" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
             <TextBlock Text="{DynamicResource Str_Home_Subtitle}" FontSize="14" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,24"/>
+
+            <Border x:Name="HomeContextHint" Visibility="Collapsed" Margin="0,0,0,16"
+                    Padding="12" Background="{DynamicResource SideBrush}" CornerRadius="6">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock x:Name="HomeContextHintText" TextWrapping="Wrap" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,12,0"/>
+                    <Button Grid.Column="1" Content="选择实例" Style="{StaticResource SecondaryButton}"
+                            MinWidth="88" VerticalAlignment="Center" Click="HomeContextHint_Click"
+                            ToolTip="打开实例选择页面；不会自动下载或启动游戏"/>
+                </Grid>
+            </Border>
 
             <!-- 磁贴总控台：首页不再放"普通模式/高手模式"这种设置项(已经搬到「设置」页，
                  见 SettingsPage.xaml 的 AdvancedModeCheck)，改成一排功能磁贴，点哪个就直接

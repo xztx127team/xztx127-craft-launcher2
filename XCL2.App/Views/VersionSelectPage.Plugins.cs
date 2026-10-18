@@ -13,6 +13,7 @@ public partial class VersionSelectPage
         if (sender is not ContextMenu menu) return;
         foreach (var item in menu.Items.OfType<MenuItem>().Where(i => i.Tag is PluginUiContributionRegistry.Entry).ToArray()) menu.Items.Remove(item);
         if (menu.PlacementTarget is not FrameworkElement target || target.DataContext is not GameVersion version) return;
+        PopulateInstanceUxMenu(menu, version);
         var root = _owner.ConfigService.Config.SelectedFolderPath;
         if (string.IsNullOrWhiteSpace(root)) return;
         var instanceId = PluginHostBridge.InstanceId(root, version.Id);

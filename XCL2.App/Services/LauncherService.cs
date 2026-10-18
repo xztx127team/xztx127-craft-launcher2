@@ -119,6 +119,9 @@ public partial class LauncherService
         /// 传了也不会有任何效果，BuildArguments 内部会自动判断，不需要调用方关心版本号）。
         /// </summary>
         public string? AutoJoinServerAddress { get; set; }
+        public bool RequireAutoJoinServerSupport { get; set; }
+        public string? ExtraGameArgs { get; set; }
+        public bool LaunchFullscreen { get; set; }
         internal Plugins.PluginChain<Plugins.PluginLaunchPlan>? PreparedPluginLaunch { get; set; }
         internal string? PreparedPluginIdentity { get; set; }
     }
@@ -149,30 +152,27 @@ public partial class LauncherService
     public static int? GetRequiredJavaMajorVersion(string minecraftDir, string versionId, bool isolateVersion = true)
     {
         int? fromVersionJson = null;
+        int? metadataFallback = null;
         try
         {
-            var versionDir = Path.Combine(minecraftDir, "versions", versionId);
-            var versionJsonPath = ResolveVersionFile(versionDir, versionId, "json");
-            if (versionJsonPath != null)
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var currentId = versionId;
+            for (var depth = 0; depth < 32 && !string.IsNullOrWhiteSpace(currentId) && visited.Add(currentId); depth++)
             {
+                var versionDir = Path.Combine(minecraftDir, "versions", currentId);
+                var versionJsonPath = ResolveVersionFile(versionDir, currentId, "json");
+                if (versionJsonPath == null) break;
                 var detail = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(versionJsonPath));
-
                 var ownMajor = detail?.JavaVersion?.MajorVersion;
-                if (ownMajor is int v && v > 0) fromVersionJson = v;
-
-                // 当前版本自己没写 javaVersion 时，很多 Fabric/Forge 等加载器版本继承自原版，
-                // 原版 json 里才有这个字段，需要顺着 inheritsFrom 往上找一层。
-                if (fromVersionJson == null && !string.IsNullOrEmpty(detail?.InheritsFrom))
-                {
-                    var parentDir = Path.Combine(minecraftDir, "versions", detail.InheritsFrom);
-                    var parentJsonPath = ResolveVersionFile(parentDir, detail.InheritsFrom, "json");
-                    if (parentJsonPath != null)
-                    {
-                        var parent = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(parentJsonPath));
-                        var parentMajor = parent?.JavaVersion?.MajorVersion;
-                        if (parentMajor is int pv && pv > 0) fromVersionJson = pv;
-                    }
-                }
+                if (fromVersionJson == null && ownMajor is int v && v > 0) fromVersionJson = v;
+                // 文件夹允许改名。优先采信 JSON 自己的版本号，而不是只解析文件夹名。
+                metadataFallback ??= LegacyMinecraftCompatibility.EstimateJavaMajor(
+                    ExtractBaseMinecraftVersion(detail?.ClientVersion ?? ""));
+                metadataFallback ??= LegacyMinecraftCompatibility.EstimateJavaMajor(
+                    ExtractBaseMinecraftVersion(detail?.Id ?? ""));
+                if (metadataFallback == null && LegacyMinecraftCompatibility.UsesPositionalIdentity(detail?.MinecraftArgumentsLegacy))
+                    metadataFallback = 8;
+                currentId = detail?.InheritsFrom ?? "";
             }
         }
         catch (Exception ex)
@@ -190,20 +190,10 @@ public partial class LauncherService
             ErrorPresenter.LogFallback($"扫描 Mod Java 要求失败，已尝试其它来源：{versionId}", ex);
         }
 
-        // 修复：1.17 之前的原版 version json 根本不会写 javaVersion 字段(Mojang 从 1.17 起
-        // 才开始发布这个字段)，也不一定顺着 inheritsFrom 能找到，导致 fromVersionJson 和
-        // fromMods 都是 null，上层就完全不限定版本，随手抓到系统里第一个 Java(常见是新装的
-        // Java 21+)去启动 1.16 及更早的游戏，结果崩溃。这里在两路都拿不到结果时，兜底按
-        // Mojang 官方"最低 Java 主版本要求"历史表估算一个版本号，跟 ServerJavaRequirement
-        // 用的是同一套换算规则(1.16 及更早 -> Java 8；1.17 -> Java 16；1.18~1.20.4 -> Java 17；
-        // 1.20.5+ -> Java 21 等)，不再让旧版本"裸奔"去匹配任意 Java。
-        if (fromVersionJson == null && fromMods == null)
-        {
-            var baseMcVersion = ExtractBaseMinecraftVersion(versionId);
-            if (baseMcVersion != null)
-                return ServerJavaRequirement.EstimateMajorVersionForMcVersion(baseMcVersion);
-            return null;
-        }
+        // 旧缓存/第三方 JSON 可能没有 javaVersion。不要随手用系统中第一个 Java 21+ 去
+        // 运行依赖 Java 8 URLClassLoader 的 Launchwrapper；已声明的要求始终优先。
+        fromVersionJson ??= metadataFallback ?? LegacyMinecraftCompatibility.EstimateJavaMajor(
+            ExtractBaseMinecraftVersion(versionId));
 
         if (fromVersionJson == null) return fromMods;
         if (fromMods == null) return fromVersionJson;
@@ -234,6 +224,9 @@ public partial class LauncherService
     /// 不强制打断任何人。
     /// </summary>
     public List<string> CheckMissingLibraries(string minecraftDir, string versionId)
+        => CheckMissingLibraries(minecraftDir, versionId, null);
+
+    public List<string> CheckMissingLibraries(string minecraftDir, string versionId, string? architecture)
     {
         var missing = new List<string>();
         var versionDir = Path.Combine(minecraftDir, "versions", versionId);
@@ -246,38 +239,17 @@ public partial class LauncherService
             return missing;
         }
 
-        VersionDetail detail;
-        try { detail = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(versionJsonPath)) ?? new VersionDetail(); }
-        catch (Exception ex)
-        {
-            ErrorPresenter.LogFallback($"启动前完整性检查读取 version json 失败，跳过本次检查：{versionId}", ex);
-            return missing;
-        }
-
-        VersionDetail? parent = null;
-        if (!string.IsNullOrEmpty(detail.InheritsFrom))
-        {
-            var parentDir = Path.Combine(minecraftDir, "versions", detail.InheritsFrom);
-            var parentJsonPath = ResolveVersionFile(parentDir, detail.InheritsFrom, "json");
-            if (parentJsonPath != null)
-            {
-                try { parent = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(parentJsonPath)); }
-                catch (Exception ex)
-                {
-                    ErrorPresenter.LogFallback($"启动前完整性检查读取父版本 json 失败，跳过本次检查：{detail.InheritsFrom}", ex);
-                    return missing;
-                }
-            }
-        }
+        var inheritance = VersionInheritanceResolver.Load(minecraftDir, versionId, FolderService.ResolveVersionJson, architecture);
+        var detail = inheritance.Effective;
 
         var librariesDir = Path.Combine(minecraftDir, "libraries");
-        var clientJarDir = parent != null ? Path.Combine(minecraftDir, "versions", detail.InheritsFrom!) : versionDir;
-        var nativesDir = Path.Combine(clientJarDir, "natives");
+        var clientJarDir = inheritance.ClientLayer.Directory;
+        var nativesDir = NativeDirectoryPolicy.Resolve(clientJarDir, architecture);
         var hasClassifierNativesEntry = false;
 
         void Scan(VersionDetail d)
         {
-            foreach (var lib in d.Libraries.Where(l => l.IsApplicableToCurrentOs()))
+            foreach (var lib in d.Libraries.Where(l => l.IsApplicableToCurrentOs(architecture)))
             {
                 // 跟 BuildArguments.AddLibs 里的判断保持一致：纯 classifier-natives 条目
                 // 不进 classpath，但需要单独确认它对应的 dll 确实已经解压出来了。
@@ -317,13 +289,11 @@ public partial class LauncherService
                 }
             }
         }
-        if (parent != null) Scan(parent);
         Scan(detail);
 
         if (hasClassifierNativesEntry)
         {
-            var hasAnyExtractedNative = Directory.Exists(nativesDir)
-                && Directory.EnumerateFiles(nativesDir, "*.dll", SearchOption.TopDirectoryOnly).Any();
+            var hasAnyExtractedNative = NativeDirectoryPolicy.HasCompatibleDll(nativesDir, architecture);
             if (!hasAnyExtractedNative)
             {
                 missing.Add($"natives 运行库(lwjgl/openal 等 .dll 文件，目录: {nativesDir})");
@@ -811,28 +781,11 @@ public partial class LauncherService
             }
         }
 
-        // 版本文件夹允许被用户改名(不少第三方启动器都支持这么整理)；改名只影响"文件夹"这一层，
-        // 文件夹里面的 .json 文件名本身不会跟着变，所以这里做改名容错查找。
-        var versionJsonPath = ResolveVersionFile(versionDir, opts.VersionId, "json");
-        if (versionJsonPath == null)
-            throw new InvalidOperationException(
-                $"找不到版本「{opts.VersionId}」对应的 version json 文件（文件夹：{versionDir}）。" +
-                "如果你手动改过这个版本文件夹的名字，请确认文件夹里的 .json 文件本身没有被误删。");
-        var detail = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(versionJsonPath)) ?? new VersionDetail();
-
-        // 支持 inheritsFrom（Fabric/Forge/NeoForge/Quilt 的版本 json 通常继承原版）
-        VersionDetail? parent = null;
-        string? parentDir = null;
-        if (!string.IsNullOrEmpty(detail.InheritsFrom))
-        {
-            parentDir = Path.Combine(opts.MinecraftDir, "versions", detail.InheritsFrom);
-            var parentJsonPath = ResolveVersionFile(parentDir, detail.InheritsFrom, "json");
-            if (parentJsonPath != null)
-                parent = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(parentJsonPath));
-        }
-
+        // Resolve every ancestor once; missing parents and cycles are explicit launch errors.
+        var argumentArchitecture = JavaExecutableArchitecture.TryReadArchitecture(opts.JavaPath) ?? LaunchArgumentRulePolicy.CurrentArchitecture;
+        var inheritance = VersionInheritanceResolver.Load(opts.MinecraftDir, opts.VersionId, FolderService.ResolveVersionJson, argumentArchitecture);
+        var detail = inheritance.Effective;
         var mainClass = detail.MainClass;
-        if (string.IsNullOrEmpty(mainClass) && parent != null) mainClass = parent.MainClass;
 
         var librariesDir = Path.Combine(opts.MinecraftDir, "libraries");
         var classpath = new List<string>();
@@ -843,7 +796,7 @@ public partial class LauncherService
             // 版本 json 里经常混杂 Linux/macOS 专用的 native 库条目（用 rules 按操作系统限定），
             // 这些条目在下载阶段本来就不会为 Windows 用户下载。之前这里没有做同样的平台过滤，
             // 导致把"压根没打算下载"的 Linux/macOS 库也当成"缺失"，纯净原版都会报依赖库缺失。
-            foreach (var lib in d.Libraries.Where(l => l.IsApplicableToCurrentOs()))
+            foreach (var lib in d.Libraries.Where(l => l.IsApplicableToCurrentOs(argumentArchitecture)))
             {
                 // 远古版本(1.8 及更早)的 lwjgl-platform / jinput-platform / twitch-platform 等条目，
                 // 是"纯 natives 聚合库"：完全没有 downloads.artifact（不需要放进 classpath 的普通
@@ -886,7 +839,6 @@ public partial class LauncherService
                     missingLibraries.Add($"{lib.Name} (期望路径: {p})");
             }
         }
-        if (parent != null) AddLibs(parent);
         AddLibs(detail);
 
         // 根因（1.21.3 Fabric/Quilt 一启动就崩：Fabric Loader 启动早期会 verifyClasspath，
@@ -904,22 +856,21 @@ public partial class LauncherService
         // 只有 downloads.artifact 的主 jar 会走到这一步，所以按 (group:artifact) 去重是安全的。
         DeduplicateClasspathByMavenCoordinates(classpath, librariesDir);
 
-        // clientJar 所在的文件夹：有 inheritsFrom 就是父版本(原版)的文件夹，没有就是当前选中的文件夹。
-        var clientJarDir = parent != null ? parentDir! : versionDir;
-        // clientJar 的文件名：理想情况下等于文件夹名，但文件夹被改名后 jar 文件名不会跟着变——
-        // 这时优先用 json 内部自带的 "id" 字段（不受文件夹改名影响）来定位真正的文件。
-        var clientJarFolderName = parent != null ? detail.InheritsFrom! : opts.VersionId;
-        var clientJarBaseName = parent != null
-            ? (!string.IsNullOrEmpty(parent.Id) ? parent.Id : clientJarFolderName)
-            : (!string.IsNullOrEmpty(detail.Id) ? detail.Id : clientJarFolderName);
+        // The vanilla/client owner can be several ancestors away from the selected loader.
+        var clientLayer = inheritance.ClientLayer;
+        var clientJarDir = clientLayer.Directory;
+        var clientJarBaseName = string.IsNullOrEmpty(clientLayer.Detail.Id) ? clientLayer.VersionId : clientLayer.Detail.Id;
         var clientJar = ResolveVersionFile(clientJarDir, clientJarBaseName, "jar");
-
-        var nativesDir = Path.Combine(clientJarDir, "natives");
-        var assetsId = detail.Assets ?? parent?.Assets ?? "legacy";
+        var nativesDir = NativeDirectoryPolicy.Resolve(clientJarDir, argumentArchitecture);
+        var assetsId = detail.Assets ?? detail.AssetIndex?.Id ?? "legacy";
 
         if (string.IsNullOrEmpty(mainClass))
             throw new InvalidOperationException(
                 $"版本 {opts.VersionId} 的 version json 中没有 mainClass，且父版本也没有，无法确定启动入口类。");
+
+        if (detail.Libraries.Any(lib => lib.Natives?.ContainsKey("windows") == true) &&
+            !NativeDirectoryPolicy.HasCompatibleDll(nativesDir, argumentArchitecture))
+            missingLibraries.Add($"{argumentArchitecture} 本机运行库缺失或架构不匹配（目录: {nativesDir}）");
 
         if (missingLibraries.Count > 0)
         {
@@ -957,8 +908,7 @@ public partial class LauncherService
         // jvm 参数（如果有），原版必需的那批要从父版本(原版) json 里拿，所以父子两份都要读、
         // 都要应用，不能只读当前选中版本这一份。
         var jvmArgsFromJson = new List<string>();
-        if (parent?.Arguments?.Jvm != null) jvmArgsFromJson.AddRange(ParseArgumentEntries(parent.Arguments.Jvm));
-        if (detail.Arguments?.Jvm != null) jvmArgsFromJson.AddRange(ParseArgumentEntries(detail.Arguments.Jvm));
+        if (detail.Arguments?.Jvm != null) jvmArgsFromJson.AddRange(ParseArgumentEntries(detail.Arguments.Jvm, architecture: argumentArchitecture));
 
         // 根因（"java.lang.module.ResolutionException: Module minecraft contains package
         // com.mojang.blaze3d.systems, module xxx exports package com.mojang.blaze3d.systems to
@@ -1048,6 +998,18 @@ public partial class LauncherService
                 jvmArgsFromJson.Add($"-DmergeModules={string.Join(",", mergeModuleJars)}");
         }
 
+        var legacyArgsText = detail.MinecraftArgumentsLegacy;
+        var usesPositionalIdentity = detail.Arguments?.Game is not { Count: > 0 } &&
+            LegacyMinecraftCompatibility.UsesPositionalIdentity(legacyArgsText);
+        var authenticated = opts.Account.Type is AccountType.Microsoft or AccountType.AuthServer;
+        var accessToken = authenticated ? opts.Account.MinecraftAccessToken ?? "0" : "0";
+        var uuid = opts.Account.Uuid.Replace("-", "");
+        var displayVersion = BuildDisplayVersion(opts.VersionId, detail, null);
+        var usesLegacyAssets = legacyArgsText?.Contains("${game_assets}", StringComparison.Ordinal) == true;
+        var gameAssets = usesLegacyAssets ? LegacyAssetLayout.GetGameAssetsDirectory(opts.MinecraftDir, assetsId)
+            : Path.Combine(opts.MinecraftDir, "assets");
+        if (!preview && usesLegacyAssets) LegacyAssetLayout.PrepareForLaunch(opts.MinecraftDir, gameDir, assetsId);
+
         var variables = new Dictionary<string, string>
         {
             ["natives_directory"] = nativesDir,
@@ -1073,8 +1035,17 @@ public partial class LauncherService
             // MissingRequiredOptionException ['userProperties'] 退出码 1。
             ["user_properties"] = "{}",
             ["profile_properties"] = "{}",
-            ["auth_session"] = "0",
-            ["game_assets"] = Path.Combine(opts.MinecraftDir, "assets"),
+            ["auth_player_name"] = opts.Account.Username,
+            ["auth_uuid"] = uuid,
+            ["auth_access_token"] = accessToken,
+            ["auth_session"] = LegacyMinecraftCompatibility.BuildAuthSession(uuid, accessToken, authenticated),
+            ["game_directory"] = gameDir,
+            ["game_assets"] = gameAssets,
+            ["assets_root"] = Path.Combine(opts.MinecraftDir, "assets"),
+            ["assets_index_name"] = assetsId,
+            ["version_name"] = displayVersion,
+            ["version_type"] = string.IsNullOrWhiteSpace(opts.VersionTypeLabel) ? "release" : opts.VersionTypeLabel,
+            ["user_type"] = opts.Account.Type == AccountType.Microsoft ? "msa" : "legacy",
         };
         var resolvedJvmArgsFromJson = jvmArgsFromJson
             .Select(a => SubstituteVariables(a, variables))
@@ -1142,17 +1113,18 @@ public partial class LauncherService
         args.Add(string.Join(";", classpath.Distinct()));
         args.Add(mainClass);
 
-        args.AddRange(new List<string>
+        // 1.0 / Alpha / Beta 的官方模板以“玩家名 会话”开头。Launchwrapper 把未识别的
+        // 现代选项也作为位置参数交给游戏；在前面塞 --username 会让玩家名和会话位置错位。
+        // 此分支直接保留旧模板的顺序，1.6+ 的 --username 模板仍使用原有的现代路径。
+        if (!usesPositionalIdentity) args.AddRange(new List<string>
         {
             "--username", opts.Account.Username,
-            "--version", BuildDisplayVersion(opts.VersionId, detail, parent),
+            "--version", displayVersion,
             "--gameDir", gameDir,
             "--assetsDir", Path.Combine(opts.MinecraftDir, "assets"),
             "--assetIndex", assetsId,
-            "--uuid", opts.Account.Uuid.Replace("-", ""),
-            "--accessToken", opts.Account.Type is AccountType.Microsoft or AccountType.AuthServer
-                ? (opts.Account.MinecraftAccessToken ?? "0")
-                : "0",
+            "--uuid", uuid,
+            "--accessToken", accessToken,
             "--userType", opts.Account.Type == AccountType.Microsoft ? "msa" : "legacy",
             // 游戏内左下角水印文字：见 LaunchOptions.VersionTypeLabel 注释。为空/null 时
             // 退回官方原始的 "release"，跟这个功能加入之前的行为完全一致，不影响没有
@@ -1182,23 +1154,24 @@ public partial class LauncherService
         // "未购买游戏、Mojang 服务器判定为试玩用户"的场景，离线模式的本意是跳过在线校验、
         // 完整解锁游戏，不应该被 version json 里 features.is_demo_user 相关规则命中，
         // 见 ParseArgumentEntries 内的详细说明。
-        var currentFeatures = new Dictionary<string, bool> { ["is_demo_user"] = false };
+        var currentFeatures = new Dictionary<string, bool>
+        {
+            ["is_demo_user"] = false,
+            ["has_quick_playsupport"] = !string.IsNullOrWhiteSpace(opts.AutoJoinServerAddress),
+            ["is_quick_play_multiplayer"] = !string.IsNullOrWhiteSpace(opts.AutoJoinServerAddress)
+        };
         var gameArgsFromJson = new List<string>();
-        if (parent?.Arguments?.Game != null) gameArgsFromJson.AddRange(ParseArgumentEntries(parent.Arguments.Game, currentFeatures));
-        if (detail.Arguments?.Game != null) gameArgsFromJson.AddRange(ParseArgumentEntries(detail.Arguments.Game, currentFeatures));
+        if (detail.Arguments?.Game != null) gameArgsFromJson.AddRange(ParseArgumentEntries(detail.Arguments.Game, currentFeatures, argumentArchitecture));
 
         // 老格式 minecraftArguments（单个字符串）：之前完全没读，导致两类问题——
         //  1) 1.7.x/1.8.x 必填的 --userProperties 缺失，游戏一启动就 MissingRequiredOptionException 退出；
         //  2) OptiFine/老 Forge/LiteLoader 靠 "--tweakClass xxx" 注入，没传就等于启动原版。
         // 当前版本自己声明了就用当前的（loader json 通常是完整覆盖），否则回退到父版本的。
         // 新格式(arguments.game)已有内容时不再重复读取，避免同一参数出现两次。
-        var legacyArgsText = !string.IsNullOrWhiteSpace(detail.MinecraftArgumentsLegacy)
-            ? detail.MinecraftArgumentsLegacy
-            : parent?.MinecraftArgumentsLegacy;
         if (!string.IsNullOrWhiteSpace(legacyArgsText) && gameArgsFromJson.Count == 0)
         {
-            try { gameArgsFromJson.AddRange(SplitArgsRespectingQuotes(legacyArgsText!)); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[XCL2] minecraftArguments 解析失败，已忽略: {ex.Message}"); }
+            // 模板错误不能静默忽略，否则游戏会以缺少身份/加载器参数的半套命令启动。
+            gameArgsFromJson.AddRange(SplitArgsRespectingQuotes(legacyArgsText!));
         }
 
         // 双保险：上面 ParseArgumentEntries 已经按 features.is_demo_user 正确过滤了 --demo，
@@ -1213,6 +1186,7 @@ public partial class LauncherService
             "--username", "--version", "--gameDir", "--assetsDir", "--assetIndex", "--uuid",
             "--accessToken", "--userType", "--versionType", "--width", "--height"
         };
+        if (usesPositionalIdentity) alreadyHandledKeys.Clear();
 
         // 根因（"Only one quick play option can be specified" 崩溃，1.20.6+ 的 Fabric/Forge/
         // NeoForge/Quilt/纯原版都会中招）：Mojang 从 1.20.6 起在 version json 的 arguments.game
@@ -1250,11 +1224,16 @@ public partial class LauncherService
                 for (var i = 0; i < rawTokens.Count - 1; i++)
                 {
                     if (string.Equals(rawTokens[i], "--quickPlayMultiplayer", StringComparison.OrdinalIgnoreCase)
-                        && HasUnresolvedPlaceholder(rawTokens[i + 1]))
+                        && !rawTokens[i + 1].StartsWith("--", StringComparison.Ordinal))
                     {
+                        if (quickPlayMultiplayerInjected)
+                        {
+                            rawTokens.RemoveRange(i, 2);
+                            i--;
+                            continue;
+                        }
                         rawTokens[i + 1] = opts.AutoJoinServerAddress.Trim();
                         quickPlayMultiplayerInjected = true;
-                        break; // 这个键在 arguments.game 里只会出现一次，找到就不用继续扫了
                     }
                 }
             }
@@ -1308,7 +1287,9 @@ public partial class LauncherService
         // 客户端（老版本、部分魔改客户端），多出来的参数会被直接忽略，不会影响正常启动——
         // 跟 --lang 在新版本里被忽略是同一种"传了也无害，不传就是完全没有这个能力"的关系，
         // 至少给"客户端本身认识这个参数、只是 json 没declare"的情况留一条生路。
-        if (!quickPlayMultiplayerInjected && !string.IsNullOrWhiteSpace(opts.AutoJoinServerAddress))
+        if (opts.RequireAutoJoinServerSupport && !quickPlayMultiplayerInjected)
+            throw new NotSupportedException("这个客户端清单没有声明可用的 Quick Play 服务器参数，无法使用 --server；请在游戏中手动连接服务器。");
+        if (!usesPositionalIdentity && !quickPlayMultiplayerInjected && !string.IsNullOrWhiteSpace(opts.AutoJoinServerAddress))
         {
             args.Add("--quickPlayMultiplayer");
             args.Add(opts.AutoJoinServerAddress!.Trim());
@@ -1319,19 +1300,23 @@ public partial class LauncherService
         // 26.1 不强塞未知参数，只保留上面的游戏 options.txt 设置。
         var graphicsPreference = NormalizeGraphicsApiPreference(opts.GraphicsApiPreference);
         if (graphicsPreference is InstanceConfigService.GraphicsApiOpenGl or InstanceConfigService.GraphicsApiVulkan &&
-            SupportsForcedGraphicsBackendArgument(opts.VersionId, detail.Id, parent?.Id))
+            SupportsForcedGraphicsBackendArgument(opts.VersionId, detail.Id, inheritance.Layers[0].Detail.Id))
         {
             SetOrAppendArgument(args, "--graphicsBackend", graphicsPreference);
         }
 
         // --lang 只在很老的版本(约 1.12 以前)里被读取，新版本已不认这个参数，
         // 但加上也无害，作为老版本的兼容兜底一起传。真正生效的是上面写的 options.txt。
-        if (!string.IsNullOrWhiteSpace(opts.GameLanguage))
+        if (!usesPositionalIdentity && !string.IsNullOrWhiteSpace(opts.GameLanguage))
         {
             args.Add("--lang");
             args.Add(opts.GameLanguage!);
         }
 
+        if (opts.LaunchFullscreen && usesPositionalIdentity)
+            throw new NotSupportedException("这个远古客户端使用位置身份参数，暂不支持 --fullscreen；请在游戏内切换全屏。");
+        if (opts.LaunchFullscreen && !args.Contains("--fullscreen")) args.Add("--fullscreen");
+        if (!string.IsNullOrWhiteSpace(opts.ExtraGameArgs)) args.AddRange(SplitArgsRespectingQuotes(opts.ExtraGameArgs));
         return (mainClass, args);
     }
 
@@ -1349,7 +1334,8 @@ public partial class LauncherService
     /// 永远是 false）。参数保留扩展性，未来如果要支持 has_custom_resolution 等其它
     /// features 规则可以继续往这个字典里加。
     /// </summary>
-    private static List<string> ParseArgumentEntries(List<object> entries, IReadOnlyDictionary<string, bool>? features = null)
+    private static List<string> ParseArgumentEntries(List<object> entries, IReadOnlyDictionary<string, bool>? features = null,
+        string? architecture = null)
     {
         var result = new List<string>();
         foreach (var entry in entries)
@@ -1365,58 +1351,7 @@ public partial class LauncherService
 
             if (el.ValueKind != JsonValueKind.Object) continue;
 
-            // 条件对象：先判断 rules 是否允许当前系统(Windows)+当前 features 组合。
-            //
-            // 根因修复（"离线账户/微软正版账户启动出来的游戏窗口标题栏带星号、左下角写
-            // 'Demo（已修改）'，进游戏还只有『开始试玩世界』"）：
-            // Mojang 从 1.16 前后的 version json 起，在 arguments.game 里用这种写法声明
-            // --demo 参数：
-            //   {"rules":[{"action":"allow","features":{"is_demo_user":true}}],"value":"--demo"}
-            // 也就是说这条 --demo 只应该在 features.is_demo_user 为 true（也就是账户没有
-            // 购买游戏、Mojang 判定为试玩用户）时才生效。但下面这段规则判断之前只看了
-            // rule.os，完全没读 rule.features 这个键——一条只带 features、不带 os 的规则，
-            // matchesOs 会因为"没有 os 字段"直接维持默认值 true，于是无论真实的 features
-            // 状态是什么，这条规则永远被判定为"匹配"，allow 直接被 action=="allow" 决定，
-            // 等于完全无视了 is_demo_user 这个开关本身。结果是：不管账户是正版微软账户还是
-            // 离线账户，只要游戏版本的 arguments.game 里有这一条（绝大多数现代版本都有），
-            // --demo 都会被无条件加进最终启动参数，Minecraft 收到 --demo 会直接强制进入
-            // 试玩模式——这跟账户到底是否登录、token 是否有效完全无关，是启动参数拼接这一层
-            // 的规则解析漏洞，之前误以为是账户/token 问题，实际上启动参数在离开这一层之前
-            // 就已经被错误地塞进了 --demo。
-            // 修复：rules 里除了 os 还要看 features，只有 features 字典跟调用方传入的
-            // 当前 features 状态完全匹配（我们目前唯一关心的是 is_demo_user，值必须匹配传入
-            // 的 features["is_demo_user"]，且我们永远传 false，因为启动器里"没有正版校验"
-            // 不等于"这是一个试玩账户"——离线模式的本意是跳过在线校验、完整解锁游戏，
-            // 不是官方那种功能阉割的 Demo）才算匹配；规则没声明 features 键则视为不限制。
-            var allow = true;
-            if (el.TryGetProperty("rules", out var rulesEl) && rulesEl.ValueKind == JsonValueKind.Array)
-            {
-                allow = false;
-                foreach (var rule in rulesEl.EnumerateArray())
-                {
-                    var matches = true;
-                    if (rule.TryGetProperty("os", out var osEl) && osEl.ValueKind == JsonValueKind.Object &&
-                        osEl.TryGetProperty("name", out var osNameEl))
-                    {
-                        matches = osNameEl.GetString() == "windows";
-                    }
-                    if (matches && rule.TryGetProperty("features", out var featuresEl) && featuresEl.ValueKind == JsonValueKind.Object)
-                    {
-                        foreach (var featureProp in featuresEl.EnumerateObject())
-                        {
-                            var expected = featureProp.Value.ValueKind == JsonValueKind.True;
-                            var actual = features != null && features.TryGetValue(featureProp.Name, out var v) && v;
-                            if (expected != actual) { matches = false; break; }
-                        }
-                    }
-                    if (matches)
-                    {
-                        var action = rule.TryGetProperty("action", out var actionEl) ? actionEl.GetString() : "allow";
-                        allow = action == "allow";
-                    }
-                }
-            }
-            if (!allow) continue;
+            if (!LaunchArgumentRulePolicy.Allows(el, features, architecture)) continue;
 
             if (!el.TryGetProperty("value", out var valueEl)) continue;
 

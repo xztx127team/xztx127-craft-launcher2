@@ -23,10 +23,7 @@ public partial class AiAssistantPanel : UserControl
     private AiAssistantConfig _config = new();
     private AiChatSession _session = new();
     private readonly ObservableCollection<BubbleVm> _bubbles = new();
-    private CancellationTokenSource? _sendCts;
-    private long _sendGeneration;
     private bool _sending;
-    private TaskCompletionSource<bool>? _sendCompletion;
     private bool _overlayClosed;
     internal bool RequireCrashLogPermission { get; set; }
     internal bool SuppressPrewarm { get; set; }
@@ -45,6 +42,7 @@ public partial class AiAssistantPanel : UserControl
     {
         InitializeComponent();
         MessagesItemsControl.ItemsSource = _bubbles;
+        PendingAttachmentsItemsControl.ItemsSource = PendingAttachments;
         _waitTimer.Tick += (_, _) => UpdateWaitHint();
     }
 
@@ -122,6 +120,8 @@ public partial class AiAssistantPanel : UserControl
             config.LastSessionId = _session.Id;
 
         _config = config;
+        if (CurrentRun is { } run) run.SetWorkMode(config.WorkMode);
+        _sessionWorkModes[_session.Id] = AiWorkModePolicy.Normalize(config.WorkMode);
         NormalizeConfigModels();
         _service?.UpdateConfig(_config);
 
@@ -134,12 +134,14 @@ public partial class AiAssistantPanel : UserControl
         UpdateConfigHint();
         UpdateTokenBadge();
         RefreshActivityVisibility();
+        RefreshTaskSelection();
+        RefreshTaskUi();
     }
 
     public async Task SubmitExternalPromptAsync(string text, string sessionTitle = "日志分析", bool isCrashLogContext = false)
     {
         if (_service == null || _sending || string.IsNullOrWhiteSpace(text)) return;
-        _session = _service.CreateNewSession(string.IsNullOrWhiteSpace(sessionTitle) ? "日志分析" : sessionTitle);
+        SwitchToSession(_service.CreateNewSession(string.IsNullOrWhiteSpace(sessionTitle) ? "日志分析" : sessionTitle));
         RememberCurrentSession();
         RebuildBubbles();
         RefreshHistory();
@@ -151,10 +153,12 @@ public partial class AiAssistantPanel : UserControl
     internal async Task StopForOverlayCloseAsync()
     {
         _overlayClosed = true;
+        _uploadCts?.Cancel();
+        DiscardAllAttachmentDrafts();
         _waitTimer.Stop();
-        var completion = _sendCompletion;
-        _sendCts?.Cancel();
-        if (completion != null) await completion.Task;
+        var runs = _runningSessions.Values.ToArray();
+        foreach (var run in runs) run.Cancellation.Cancel();
+        await Task.WhenAll(runs.Select(run => run.Completion.Task));
     }
 
     private string ModelDisplayName(string? modelKey)
@@ -238,8 +242,16 @@ public partial class AiAssistantPanel : UserControl
     private void RefreshHistory()
     {
         if (_service == null) return;
-        var items = _service.ListSessions()
-            .Select(s => new AiSessionListItemVm(s))
+        List<AiChatSession> sessions;
+        try { sessions = _service.ListSessions(); }
+        catch (Exception ex)
+        {
+            ToastService.ShowWarning("读取会话历史失败：" + ex.Message);
+            sessions = new List<AiChatSession>();
+        }
+        var items = sessions.Where(s => !_unsavedSessions.ContainsKey(s.Id)).Concat(_unsavedSessions.Values)
+            .OrderByDescending(s => s.UpdatedUtc)
+            .Select(s => new AiSessionListItemVm(s, _runningSessions.ContainsKey(s.Id)))
             .ToList();
 
         _suppressHistorySelection = true;
@@ -257,66 +269,13 @@ public partial class AiAssistantPanel : UserControl
         _bubbles.Clear();
         foreach (var m in _session.Messages.Where(m => m.Role != AiMessageRole.System))
             _bubbles.Add(BubbleVm.From(m, _config));
+        if (CurrentRun is { } run)
+        {
+            run.Pending.RefreshActivities(_config);
+            _bubbles.Add(run.Pending);
+        }
         UpdateTokenBadge();
         ScrollToBottom();
-    }
-
-    private void UpdateTokenBadge()
-    {
-        AiRequestUsage[] requests;
-        _session.UsageRequests ??= new();
-        lock (_session.UsageRequests) requests = _session.UsageRequests.Select(x => x.Clone()).ToArray();
-        long total = requests.Sum(x => x.TotalTokens);
-        bool estimated = requests.Any(x => x.IsEstimated);
-        var current = requests.LastOrDefault(x => x.AffectsContext && x.TotalTokens > 0);
-        TokenUsageText.Text = requests.Length == 0 ? "本对话 · 暂无 API 用量" : $"本对话 · {(estimated ? "约 " : "")}{total:N0} token";
-        CacheUsageText.Text = current?.CachedInputTokens is long cached
-            ? current.HasReportedInput && current.InputTokens > 0
-                ? $"当前缓存命中率：{(double)cached / current.InputTokens:P1}（{cached:N0} / {current.InputTokens:N0} 输入 token）"
-                : $"缓存命中 {cached:N0} token（等待接口返回有效输入总量后计算命中率）"
-            : "当前缓存命中率：供应商未返回缓存数据";
-        var priced = requests.Where(x => x.EstimatedCostUsd.HasValue).ToArray();
-        string cost = requests.Length == 0 ? "暂无 API 请求" : priced.Length == 0 ? "未配置模型单价"
-            : $"${priced.Sum(x => x.EstimatedCostUsd!.Value):0.######} USD" + (priced.Length < requests.Length ? " + 未知部分" : "");
-        CostUsageText.Text = "本对话估计成本：" + cost;
-        TotalUsageText.Text = $"累计输入 {requests.Sum(x => x.InputTokens):N0} · 输出 {requests.Sum(x => x.OutputTokens):N0} · 合计 {total:N0} token";
-        var currentModelKey = current == null ? "" : string.IsNullOrWhiteSpace(current.ModelKey) ? current.Model : current.ModelKey;
-        var configuredLimit = current == null ? 0 : AiUsageAccounting.Settings(_config, currentModelKey).ContextWindowTokens;
-        var contextLimit = Math.Clamp(configuredLimit > 0 ? configuredLimit : current?.ContextWindowTokens ?? 0, 0, 10_000_000);
-        long occupied = current == null ? 0 : current.InputTokens + Math.Max(current.OutputTokens, current.InProgress ? current.ReservedOutputTokens : 0);
-        double remaining = contextLimit > 0 ? Math.Clamp(1.0 - (double)occupied / contextLimit, 0, 1) : -1;
-        DrawUsageRing(remaining);
-        ContextUsageText.Text = current == null ? "当前上下文：发送请求后显示"
-            : contextLimit <= 0 ? $"当前上下文约 {occupied:N0} token；请为该模型设置上限以显示剩余比例。"
-            : $"当前上下文{(current.IsEstimated ? "约 " : "")}{occupied:N0} / {contextLimit:N0}，剩余 {Math.Max(0, contextLimit - occupied):N0} token"
-                + (current.InProgress && current.ReservedOutputTokens > 0 ? "（含预留输出）" : "");
-        UsageSummaryText.Text = current == null ? "点击查看用量；可在设置中填写模型上限与单价"
-            : (remaining >= 0 ? $"上下文剩余 {remaining:P0} · " : "上下文上限未设置 · ") + cost;
-        UsageSourceText.Text = (current == null ? "" : "当前模型："
-            + (string.IsNullOrWhiteSpace(current.ProviderName) ? ModelDisplayName(currentModelKey) : current.ProviderName + " · " + current.Model) + "\n")
-            + (estimated ? "包含本地估算；供应商未返回完整 usage 或请求中断时，token 与费用可能有偏差。" : "token 采用供应商返回的 usage。")
-            + " 费用按你设置的 USD 单价估算；未返回缓存字段或未设置缓存价时按普通输入价计。"
-            + (requests.Any(x => x.IsIncomplete) ? " 包含失败或中断请求，可能无法获得完整 usage。" : "")
-            + " 累计包含本对话的工具续答、压缩、子任务；不含预热、连接测试及此功能启用前的历史请求。圆环只计算当前主请求。";
-    }
-
-    private void DrawUsageRing(double remaining)
-    {
-        UsageRingLabel.Text = remaining < 0 ? "—" : $"{remaining:P0}";
-        UsageRemainingRing.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty,
-            remaining >= 0 && remaining <= 0.1 ? "DangerBrush" : "AccentBrush");
-        if (remaining <= 0) { UsageRemainingRing.Data = Geometry.Empty; return; }
-        if (remaining >= 0.9999) { UsageRemainingRing.Data = new EllipseGeometry(new Point(20, 20), 17, 17); return; }
-        double angle = remaining * Math.PI * 2;
-        var geometry = new StreamGeometry();
-        using (var ctx = geometry.Open())
-        {
-            ctx.BeginFigure(new Point(20, 3), false, false);
-            ctx.ArcTo(new Point(20 + Math.Sin(angle) * 17, 20 - Math.Cos(angle) * 17),
-                new Size(17, 17), 0, remaining > 0.5, SweepDirection.Clockwise, true, false);
-        }
-        geometry.Freeze();
-        UsageRemainingRing.Data = geometry;
     }
 
     private void UpdateWaitHint()
@@ -346,10 +305,12 @@ public partial class AiAssistantPanel : UserControl
 
     private void StopButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_sending) return;
-        RouteStatusText.Text = "正在停止生成…";
+        // Resolve ownership at the moment of the click. Switching conversations or a
+        // late background completion must never leave a shared cancellation alias.
+        if (CurrentRun is not { Completed: false } run || run.Cancellation.IsCancellationRequested) return;
+        RouteStatusText.Text = run.RouteStatus = "正在停止生成…";
         StopButton.IsEnabled = false;
-        _sendCts?.Cancel();
+        run.Cancellation.Cancel();
     }
 
     private void RoutingModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -413,14 +374,22 @@ public partial class AiAssistantPanel : UserControl
         _suppressWorkModeSelection = true;
         try
         {
-            var displayedMode = AnalysisOnly ? AiWorkMode.Plan : _config.WorkMode;
+            var displayedMode = AnalysisOnly && _config.WorkMode != AiWorkMode.Chat ? AiWorkMode.Plan : _config.WorkMode;
             WorkModeCombo.SelectedItem = WorkModeCombo.Items.OfType<ComboBoxItem>()
                 .FirstOrDefault(item => string.Equals(item.Tag as string, displayedMode.ToString(), StringComparison.Ordinal))
                 ?? WorkModeCombo.Items[0];
-            WorkModeCombo.IsEnabled = !AnalysisOnly && !_sending;
-            WorkModeHintText.Text = AnalysisOnly ? "崩溃分析：只读调查并提供修复建议，不自动修改文件或运行命令。"
+            WorkModeCombo.IsEnabled = !AnalysisOnly && !_newSessionDecisionPending;
+            WebSearchCheck.IsEnabled = _config.WorkMode != AiWorkMode.Chat;
+            UploadAttachmentButton.ToolTip = _config.WorkMode == AiWorkMode.Chat
+                ? "纯聊天支持图片；文字或日志请直接粘贴到消息中。"
+                : "支持图片和文件；ZIP 会安全解压到临时只读目录，上传不会授予命令权限。";
+            WorkModeHintText.Text = _config.WorkMode == AiWorkMode.Chat
+                ? "纯聊天：仅用于交流；不使用工作目录或命令权限。需要分析日志时请明确提出，并开启日志分析设置。"
+                : AnalysisOnly ? "崩溃分析：只读调查并提供修复建议，不自动修改文件或运行命令。"
                 : _config.WorkMode == AiWorkMode.Plan
-                ? "Plan：只读调查与规划，不修改文件、不运行命令。切换 Build 后发送消息才开始执行。"
+                ? "Plan：只读调查与规划，不修改文件、不运行命令。切换 Build 或 Agent 后发送消息才开始执行。"
+                : _config.WorkMode == AiWorkMode.Agent
+                ? "Agent：复杂任务建议保存 Plan，简单需求可直接处理；每个操作仍遵守 AI 设置中的命令权限。"
                 : "Build：按已有权限执行任务。已有计划可发送“按计划继续”开始执行。";
         }
         finally { _suppressWorkModeSelection = false; }
@@ -429,17 +398,20 @@ public partial class AiAssistantPanel : UserControl
     private void WorkModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressWorkModeSelection || AnalysisOnly) return;
-        if (_sending)
-        {
-            RefreshWorkModeUi();
-            return;
-        }
         if (WorkModeCombo.SelectedItem is not ComboBoxItem { Tag: string tag }
             || !Enum.TryParse<AiWorkMode>(tag, out var mode)) return;
 
         _config.WorkMode = mode;
+        _sessionWorkModes[_session.Id] = mode;
+        if (CurrentRun is { } run) run.SetWorkMode(mode);
+        if (mode == AiWorkMode.Agent && ConfigService.Active is { } active)
+        {
+            active.Config.AiAssistant = _config;
+            if (AiAgentAnimationService.ApplyProfile(active.Config, _config.AgentAnimationProfile)) active.Save();
+        }
         _service?.UpdateConfig(_config);
         RefreshWorkModeUi();
+        RefreshTaskUi();
         PersistQuickConfig();
     }
 
@@ -501,7 +473,8 @@ public partial class AiAssistantPanel : UserControl
     {
         if (_owner == null) return;
         _owner.AiAssistantConfig = _config;
-        _owner.PersistAiAssistantConfig();
+        try { _owner.PersistAiAssistantConfig(); }
+        catch (Exception ex) { ToastService.ShowWarning("保存 AI 设置失败：" + ex.Message); }
     }
 
     private void UpdateRoutingText()
@@ -563,9 +536,10 @@ public partial class AiAssistantPanel : UserControl
 
     private async Task SendCurrentInputAsync(bool isCrashLogContext = false)
     {
-        if (_overlayClosed || _sending || _service == null) return;
+        if (_overlayClosed || _sending || _uploadingAttachments || _newSessionDecisionPending || _service == null) return;
         var text = InputTextBox.Text.Trim();
-        if (text.Length == 0) return;
+        if (text.Length == 0 && PendingAttachments.Count == 0) return;
+        if (text.Length == 0) text = "请分析上传的附件。";
 
         isCrashLogContext |= RequireCrashLogPermission;
         if (isCrashLogContext && !_config.AllowCrashLogReading)
@@ -609,8 +583,17 @@ public partial class AiAssistantPanel : UserControl
             if (!proceed) return;
         }
 
+        List<AiAttachment> attachments;
+        try { attachments = AiAttachmentService.ValidateForMessage(PendingAttachments); }
+        catch (Exception ex) { ToastService.ShowWarning(ex.Message); return; }
+        if (_config.WorkMode == AiWorkMode.Chat && attachments.Any(a => a.Kind != AiAttachmentKind.Image))
+        {
+            ToastService.ShowWarning("纯聊天模式支持图片和直接粘贴的文字。请移除文件附件后发送；需要讨论的日志或文件文字可直接粘贴。");
+            return;
+        }
         ClearInputAndResetUndo();
-        await GenerateAsync(text, isCrashLogContext);
+        ClearPendingAttachments(deleteUnused: false);
+        await GenerateAsync(text, isCrashLogContext, attachments);
     }
 
     /// <summary>清空待发送框，并把它的 Ctrl+Z 撤销历史一起清掉：撤销只应该能撤回"这一次还没发出去
@@ -625,7 +608,7 @@ public partial class AiAssistantPanel : UserControl
         InputTextBox.UndoLimit = int.MaxValue;
     }
 
-    private async Task GenerateAsync(string text, bool isCrashLogContext)
+    private async Task GenerateAsync(string text, bool isCrashLogContext, IReadOnlyList<AiAttachment>? attachments = null)
     {
         if (_overlayClosed || _service == null || _sending) return;
         isCrashLogContext |= RequireCrashLogPermission;
@@ -638,34 +621,32 @@ public partial class AiAssistantPanel : UserControl
         var service = _service;
         var session = _session;
         var previousAssistant = session.Messages.LastOrDefault(message => message.Role == AiMessageRole.Assistant);
-        long generation = ++_sendGeneration;
-        _bubbles.Add(BubbleVm.UserBubble(text));
+        _bubbles.Add(BubbleVm.UserBubble(text, attachments));
         var pending = BubbleVm.AssistantBubble("", null);
         pending.IsGenerating = true;
         pending.RefreshActivities(_config);
         _bubbles.Add(pending);
         ScrollToBottom();
 
-        _sendCts?.Dispose();
         var sendCts = new CancellationTokenSource();
-        _sendCts = sendCts;
-        var sendCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _sendCompletion = sendCompletion;
+        var run = new SessionRun(session, pending, sendCts, AnalysisOnly ? AiWorkMode.Plan : _config.WorkMode);
+        _runningSessions.Add(session.Id, run);
         var sendToken = sendCts.Token;
         SetSendingState(true);
+        RouteStatusText.Text = run.RouteStatus;
+        RefreshHistory();
         // Progress 在 UI 上下文接收快照；生成结束后排队到达的旧通知不能污染下一轮回复。
         var progress = new Progress<AiAssistantActivity>(activity =>
         {
-            if (generation != _sendGeneration || !_sending || sendToken.IsCancellationRequested ||
-                !ReferenceEquals(session, _session) || !_bubbles.Contains(pending)) return;
+            if (run.Completed || sendToken.IsCancellationRequested) return;
             // 离开页面仍允许请求完成，但不再触发隐藏页面的布局；返回时统一刷新快照。
-            pending.UpdateActivity(activity, _config, refresh: IsLoaded);
-            if (activity.Status == AiActivityStatus.Completed) RefreshTaskUi();
+            pending.UpdateActivity(activity, _config, refresh: IsLoaded && IsCurrentRun(run));
+            if (activity.Status == AiActivityStatus.Completed && IsCurrentRun(run)) RefreshTaskUi();
         });
 
         try
         {
-            var reply = await service.SendMessageAsync(
+            var replyTask = service.SendMessageAsync(
                 session, text,
                 isCrashLogContext: isCrashLogContext,
                 forcedModel: null,
@@ -675,58 +656,71 @@ public partial class AiAssistantPanel : UserControl
                 progress: progress,
                 textProgress: new Progress<string>(value =>
                 {
-                    if (generation != _sendGeneration || !_sending || sendToken.IsCancellationRequested || !ReferenceEquals(session, _session)) return;
+                    if (run.Completed || sendToken.IsCancellationRequested) return;
                     pending.DisplayContent = value;
                 }),
                 usageProgress: new Progress<AiRequestUsage>(_ =>
                 {
-                    if (generation == _sendGeneration && ReferenceEquals(session, _session)) UpdateTokenBadge();
+                    if (!run.Completed && IsCurrentRun(run)) UpdateTokenBadge();
                 }),
-                reasoningLevel: SelectedReasoningLevel);
+                reasoningLevel: SelectedReasoningLevel,
+                askQuestionAsync: (set, token) => ShowSessionQuestionAsync(run, set, token),
+                attachments: attachments,
+                currentWorkMode: () => run.EffectiveWorkMode);
+            // BeginTask runs synchronously before the first model request; expose the new task
+            // while it is running instead of waiting for the first completed activity/reply.
+            if (IsCurrentRun(run)) RefreshTaskUi();
+            var reply = await replyTask;
 
-            if (generation != _sendGeneration || !ReferenceEquals(session, _session)) return;
+            _unsavedSessions.Remove(session.Id);
+            run.RouteStatus = BuildReplyRouteStatus(reply);
+            if (!IsCurrentRun(run)) return;
             RememberCurrentSession();
-            RebuildBubbles();
-            RefreshHistory();
-            RouteStatusText.Text = BuildReplyRouteStatus(reply);
         }
         catch (OperationCanceledException)
         {
-            if (generation != _sendGeneration || !ReferenceEquals(session, _session)) return;
-            service.SaveSession(session);
+            run.RouteStatus = "生成已停止";
+            run.FailureText = "已停止生成。";
+            SaveEarlyRunFailure(service, run, previousAssistant);
+            if (!IsCurrentRun(run)) return;
             RememberCurrentSession();
-            RebuildBubbles();
-            RefreshHistory();
-            AddFailureBubbleIfMissing(pending, "已停止生成。", previousAssistant);
-            RouteStatusText.Text = "生成已停止";
         }
         catch (Exception ex)
         {
-            if (generation != _sendGeneration || !ReferenceEquals(session, _session)) return;
-            service.SaveSession(session);
-            RememberCurrentSession();
-            RebuildBubbles();
-            RefreshHistory();
             var friendly = FriendlyAiError(ex.Message);
-            AddFailureBubbleIfMissing(pending, "出错了：" + friendly, previousAssistant);
-            RouteStatusText.Text = ex.Message.Contains("模型 ID", StringComparison.OrdinalIgnoreCase)
+            run.FailureText = "出错了：" + friendly;
+            run.RouteStatus = ex.Message.Contains("模型 ID", StringComparison.OrdinalIgnoreCase)
                 ? "模型配置错误 · 请检查 model ID"
                 : "请求失败";
+            SaveEarlyRunFailure(service, run, previousAssistant);
+            if (IsCurrentRun(run)) RememberCurrentSession();
         }
         finally
         {
-            sendCompletion.TrySetResult(true);
-            if (ReferenceEquals(_sendCompletion, sendCompletion)) _sendCompletion = null;
-            if (generation == _sendGeneration)
-            {
-                ++_sendGeneration;
-                pending.IsGenerating = false;
-                SetSendingState(false);
-                UpdateTokenBadge();
-                ScrollToBottom();
-                if (ReferenceEquals(_sendCts, sendCts)) _sendCts = null;
-            }
+            run.Completed = true;
+            _runningSessions.Remove(session.Id);
+            pending.IsGenerating = false;
+            run.Completion.TrySetResult(true);
             sendCts.Dispose();
+            if (ReferenceEquals(session, _session))
+            {
+                _sending = false;
+            }
+            try
+            {
+                if (ReferenceEquals(session, _session))
+                {
+                    SetSendingState(false);
+                    RebuildBubbles();
+                    if (run.FailureText != null) AddFailureBubbleIfMissing(pending, run.FailureText, previousAssistant);
+                    RouteStatusText.Text = run.RouteStatus;
+                    UpdateTokenBadge();
+                    ScrollToBottom();
+                }
+                RefreshHistory();
+                RefreshTaskUi();
+            }
+            catch (Exception ex) { ToastService.ShowWarning("刷新会话界面失败：" + ex.Message); }
         }
     }
 
@@ -749,18 +743,21 @@ public partial class AiAssistantPanel : UserControl
     {
         _sending = sending;
         RefreshTaskUi();
-        if (sending) { _sendStartedUtc = DateTime.UtcNow; _waitTimer.Start(); }
+        if (sending) { _sendStartedUtc = CurrentRun?.StartedUtc ?? DateTime.UtcNow; _waitTimer.Start(); }
         else _waitTimer.Stop();
         UpdateWaitHint();
-        SendButton.IsEnabled = !sending;
+        SendButton.IsEnabled = !sending && !_newSessionDecisionPending;
         StopButton.Visibility = sending ? Visibility.Visible : Visibility.Collapsed;
         StopButton.IsEnabled = sending;
         RoutingModeCombo.IsEnabled = !sending;
         ReasoningLevelCombo.IsEnabled = !sending;
-        WorkModeCombo.IsEnabled = !sending;
-        NewChatButton.IsEnabled = !sending;
-        HistoryListBox.IsEnabled = !sending;
+        WorkModeCombo.IsEnabled = !AnalysisOnly && !_newSessionDecisionPending;
+        NewChatButton.IsEnabled = !_newSessionDecisionPending;
+        HistoryListBox.IsEnabled = !_newSessionDecisionPending;
+        TaskSelectionBar.IsEnabled = !_newSessionDecisionPending;
+        RefreshSessionQuestionVisibility();
         UpdateModelSelectionState();
+        RefreshUploadState();
     }
 
     private string BuildReplyRouteStatus(AiChatMessage reply)
@@ -788,9 +785,38 @@ public partial class AiAssistantPanel : UserControl
         return errorMsg;
     }
 
-    private void NewChatButton_Click(object sender, RoutedEventArgs e)
+    private async void NewChatButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_service == null || _sending) return;
+        if (_service == null || _newSessionDecisionPending) return;
+
+        if (CurrentRun is { } run)
+        {
+            _newSessionDecisionPending = true;
+            NewChatButton.IsEnabled = false;
+            HistoryListBox.IsEnabled = false;
+            TaskSelectionBar.IsEnabled = false;
+            try
+            {
+                var choice = MessageBoxDialog.ShowThreeChoice(
+                    "当前会话仍在运行。新建会话时，可以保留当前会话在后台继续，也可以先停止它。\n\n后台会话保留自己的工作模式、提问和停止操作；切换新会话不会停止它。",
+                    "新建会话", "返回当前会话", "停止后新建", "保留后台并新建");
+                if (choice == XclMessageResult.Cancel) return;
+                if (choice == XclMessageResult.No && !run.Completed)
+                {
+                    RouteStatusText.Text = "正在停止当前规划…";
+                    StopButton.IsEnabled = false;
+                    run.Cancellation.Cancel();
+                    await run.Completion.Task;
+                }
+                StartNewSession();
+            }
+            finally
+            {
+                _newSessionDecisionPending = false;
+                SetSendingState(CurrentRun != null);
+            }
+            return;
+        }
 
         // 当前已经是一个还没有任何对话内容的新会话（只有系统提示词那条 System 消息）时，
         // 再点"新对话"没有意义，只会在历史列表里堆出一堆空会话——直接提示并返回。
@@ -801,11 +827,7 @@ public partial class AiAssistantPanel : UserControl
             return;
         }
 
-        _session = _service.CreateNewSession();
-        RememberCurrentSession();
-        RebuildBubbles();
-        RefreshHistory();
-        UpdateRoutingText();
+        StartNewSession();
         InputTextBox.Focus();
     }
 
@@ -815,41 +837,49 @@ public partial class AiAssistantPanel : UserControl
 
     private void HistoryListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressHistorySelection || _service == null || _sending) return;
+        if (_suppressHistorySelection || _service == null || _newSessionDecisionPending) return;
         if (HistoryListBox.SelectedItem is not AiSessionListItemVm item) return;
         if (item.Session.Id == _session.Id) return;
 
-        _session = _service.LoadSession(item.Session.Id) ?? item.Session;
-        RememberCurrentSession();
-        RebuildBubbles();
-        RefreshHistory();
-        UpdateRoutingText();
+        SwitchToSession(_service.LoadSession(item.Session.Id) ?? item.Session);
     }
 
     private void RenameSession_Click(object sender, RoutedEventArgs e)
     {
-        if (_service == null || _sending || sender is not Button { Tag: AiChatSession target }) return;
+        if (_service == null || sender is not Button { Tag: AiChatSession target }) return;
+        if (_runningSessions.ContainsKey(target.Id))
+        {
+            ToastService.ShowInfo("此会话正在运行，请先停止后再重命名。");
+            return;
+        }
         var dialog = new RenameInstanceDialog(target.Title, _ => false, "重命名对话");
         if (OverlayDialogService.ShowModal(dialog) != true) return;
 
         target.Title = dialog.NewName.Trim();
         _service.SaveSession(target);
+        _unsavedSessions.Remove(target.Id);
         if (target.Id == _session.Id) _session.Title = target.Title;
         RefreshHistory();
     }
 
     private void DeleteSession_Click(object sender, RoutedEventArgs e)
     {
-        if (_service == null || _sending || sender is not Button { Tag: AiChatSession target }) return;
+        if (_service == null || sender is not Button { Tag: AiChatSession target }) return;
+        if (_runningSessions.ContainsKey(target.Id))
+        {
+            ToastService.ShowInfo("此会话正在运行，请先停止后再删除。");
+            return;
+        }
         if (!MessageBoxDialog.ShowConfirm($"确定删除对话“{target.Title}”吗？\n\n删除后无法恢复。", "删除对话")) return;
 
         _service.DeleteSession(target.Id);
+        _unsavedSessions.Remove(target.Id);
+        _sessionDrafts.Remove(target.Id);
+        _sessionWorkModes.Remove(target.Id);
+        DiscardAttachmentDraft(target.Id);
         if (target.Id == _session.Id)
-            _session = _service.ListSessions().FirstOrDefault() ?? _service.CreateNewSession();
-        RememberCurrentSession();
-        RebuildBubbles();
-        RefreshHistory();
-        UpdateRoutingText();
+            SwitchToSession(_service.ListSessions().FirstOrDefault() ?? _service.CreateNewSession());
+        else RefreshHistory();
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e) => SettingsRequested?.Invoke(this, EventArgs.Empty);
@@ -876,7 +906,7 @@ public partial class AiAssistantPanel : UserControl
         string recalledText = vm.OriginalMessage.Content;
         string existingInput = InputTextBox.Text;
 
-        if (existingInput.Length > 0)
+        if (existingInput.Length > 0 || PendingAttachments.Count > 0)
         {
             var dialog = new InputConflictChoiceDialog();
             if (OverlayDialogService.ShowModal(dialog) != true || dialog.Choice == InputConflictChoice.Cancel)
@@ -888,7 +918,7 @@ public partial class AiAssistantPanel : UserControl
                     InputTextBox.Text = recalledText;
                     break;
                 case InputConflictChoice.ReplaceAndCopy:
-                    Clipboard.SetText(existingInput);
+                    if (existingInput.Length > 0) Clipboard.SetText(existingInput);
                     InputTextBox.Text = recalledText;
                     ToastService.ShowSuccess("原内容已复制到剪贴板");
                     break;
@@ -904,6 +934,7 @@ public partial class AiAssistantPanel : UserControl
         }
 
         InputTextBox.CaretIndex = InputTextBox.Text.Length;
+        RestorePendingAttachments(vm.OriginalMessage.Attachments);
         InputTextBox.Focus();
 
         int count = 1;
@@ -937,7 +968,8 @@ public partial class AiAssistantPanel : UserControl
     {
         if (_sending || sender is not Button { Tag: BubbleVm vm } || vm.OriginalMessage == null || _service == null) return;
         var newText = (vm.EditingText ?? "").Trim();
-        if (newText.Length == 0) return;
+        if (newText.Length == 0 && vm.OriginalMessage.Attachments?.Count == 0) return;
+        if (newText.Length == 0) newText = "请分析上传的附件。";
 
         int idx = _session.Messages.IndexOf(vm.OriginalMessage);
         if (idx < 0) { vm.IsEditing = false; return; }
@@ -951,19 +983,21 @@ public partial class AiAssistantPanel : UserControl
         _service.SaveSession(branch);
 
         vm.IsEditing = false;
-        _session = branch;
+        SwitchToSession(branch);
         RememberCurrentSession();
         RebuildBubbles();
         RefreshHistory();
         UpdateRoutingText();
 
-        await GenerateAsync(newText, isCrashLogContext: false);
+        await GenerateAsync(newText, isCrashLogContext: false, attachments: vm.OriginalMessage.Attachments);
     }
 
     private static AiChatMessage CloneMessage(AiChatMessage m) => new()
     {
         Role = m.Role,
+        WorkMode = m.WorkMode,
         Content = m.Content,
+        Attachments = (m.Attachments ?? new List<AiAttachment>()).Select(a => a.Clone()).ToList(),
         ModelUsed = m.ModelUsed,
         ModelDisplayName = m.ModelDisplayName,
         RouteUsed = m.RouteUsed,
@@ -990,10 +1024,11 @@ public partial class AiAssistantPanel : UserControl
         {
             if (_session.Messages[i].Role != AiMessageRole.User) continue;
             string userText = _session.Messages[i].Content;
+            var attachments = (_session.Messages[i].Attachments ?? new()).Select(a => a.Clone()).ToList();
             _session.Messages.RemoveRange(i, _session.Messages.Count - i);
             _service.SaveSession(_session);
             RebuildBubbles();
-            await GenerateAsync(userText, isCrashLogContext: false);
+            await GenerateAsync(userText, isCrashLogContext: false, attachments: attachments);
             return;
         }
     }
@@ -1002,9 +1037,10 @@ public partial class AiAssistantPanel : UserControl
 public sealed class AiSessionListItemVm
 {
     public AiChatSession Session { get; }
-    public string Title => string.IsNullOrWhiteSpace(Session.Title) ? "新对话" : Session.Title;
+    public bool IsRunning { get; }
+    public string Title => (string.IsNullOrWhiteSpace(Session.Title) ? "新对话" : Session.Title) + (IsRunning ? " · 运行中" : "");
     public string UpdatedText => Session.UpdatedUtc.ToLocalTime().ToString("MM-dd HH:mm");
-    public AiSessionListItemVm(AiChatSession session) => Session = session;
+    public AiSessionListItemVm(AiChatSession session, bool isRunning = false) { Session = session; IsRunning = isRunning; }
 }
 
 /// <summary>聊天气泡显示模型。实现 INotifyPropertyChanged 是因为“修复”需要在气泡原地
@@ -1026,6 +1062,7 @@ public partial class BubbleVm : System.ComponentModel.INotifyPropertyChanged
     public bool IsUserMessage => BubbleAlignment == HorizontalAlignment.Right;
     public bool IsAssistantMessage => BubbleAlignment == HorizontalAlignment.Left;
     public AiChatMessage? OriginalMessage { get; set; }
+    public IReadOnlyList<AiAttachment> Attachments { get; set; } = Array.Empty<AiAttachment>();
 
     private bool _isEditing;
     /// <summary>是否处于“修复”编辑态。只对用户消息气泡有意义，但不额外限制——
@@ -1072,15 +1109,17 @@ public partial class BubbleVm : System.ComponentModel.INotifyPropertyChanged
                 : new SolidColorBrush(Color.FromArgb(0x16, 0x80, 0x90, 0xA0)),
             SubLabel = isUser ? "" : BuildModelLabel(m),
             SubLabelVisibility = !isUser && !string.IsNullOrWhiteSpace(m.ModelUsed) ? Visibility.Visible : Visibility.Collapsed,
-            OriginalMessage = m
+            OriginalMessage = m,
+            Attachments = m.Attachments ?? new List<AiAttachment>()
         };
         bubble.LoadActivities(m.Activities, config ?? new AiAssistantConfig());
         return bubble;
     }
 
-    public static BubbleVm UserBubble(string text) => new()
+    public static BubbleVm UserBubble(string text, IReadOnlyList<AiAttachment>? attachments = null) => new()
     {
         DisplayContent = text,
+        Attachments = attachments ?? Array.Empty<AiAttachment>(),
         BubbleAlignment = HorizontalAlignment.Right,
         BubbleBrush = new SolidColorBrush(Color.FromArgb(0x2D, 0x18, 0x68, 0xE8))
     };

@@ -47,37 +47,12 @@ public class FolderService
                     continue;
                 }
 
-                // jar 文件名以 json 内部自带的 "id" 字段为准，而不是文件夹名：
-                // 用户把版本文件夹改名后，文件夹里的 json/jar 文件名本身不会跟着变，
-                // 只有外层文件夹名变了，这样改名后依然能正确判断"是否已装好"。
-                var jarBaseName = string.IsNullOrEmpty(detail.Id) ? id : detail.Id;
-
-                // 修复"版本没装完整仍然显示为已安装"：之前 InheritsFrom != null 就直接判定
-                // IsInstalled=true，没有校验它指向的父版本文件夹是否真的有 jar——如果父版本本身
-                // 也没装完整（比如网络中断导致原版 client.jar 没下完就中止），这种残缺的继承链版本
-                // 会被误判为"已安装"，用户点启动才发现根本起不来。这里对 InheritsFrom 的情况额外
-                // 递归检查一次父版本自己的 jar 是否存在（只查一层，官方/主流加载器的继承链本来就
-                // 不会嵌套超过一层：加载器版本 inherits 原版，原版不会再 inherits 别的版本）。
-                var ownJarExists = LauncherService.ResolveVersionFile(dir, jarBaseName, "jar") != null;
-                var inheritedJarExists = false;
-                if (!ownJarExists && !string.IsNullOrEmpty(detail.InheritsFrom))
-                {
-                    var parentDir = Path.Combine(versionsDir, detail.InheritsFrom);
-                    var parentJsonPath = ResolveVersionJson(parentDir, detail.InheritsFrom);
-                    if (parentJsonPath != null)
-                    {
-                        try
-                        {
-                            var parentDetail = JsonSerializer.Deserialize<VersionDetail>(File.ReadAllText(parentJsonPath));
-                            var parentJarBaseName = string.IsNullOrEmpty(parentDetail?.Id) ? detail.InheritsFrom : parentDetail!.Id;
-                            inheritedJarExists = parentDetail != null &&
-                                LauncherService.ResolveVersionFile(parentDir, parentJarBaseName, "jar") != null;
-                        }
-                        catch { /* 父版本 json 本身损坏，视为继承链不完整 */ }
-                    }
-                }
-
-                version.IsInstalled = ownJarExists || inheritedJarExists;
+                // Use exactly the same inherited client owner as argument construction and preflight checks.
+                var inheritance = VersionInheritanceResolver.Load(minecraftDir, id, ResolveVersionJson);
+                var client = inheritance.ClientLayer;
+                var jarBaseName = string.IsNullOrEmpty(client.Detail.Id) ? client.VersionId : client.Detail.Id;
+                var jar = LauncherService.ResolveVersionFile(client.Directory, jarBaseName, "jar");
+                version.IsInstalled = !string.IsNullOrWhiteSpace(inheritance.Effective.MainClass) && jar != null && new FileInfo(jar).Length > 0;
             }
             catch { /* 单个实例正在复制或元数据损坏时仍显示为未完成，不影响其他实例。 */ }
             result.Add(version);
@@ -161,17 +136,22 @@ public class FolderService
     public async Task ImportVersionFolderAsync(string minecraftDir, string sourceFolder, string instanceName, CancellationToken ct = default)
     {
         await Plugins.PluginInterceptionRegistry.ValidateInstanceAsync(minecraftDir, instanceName, "folder-import", ct);
-        await Task.Run(() => { ct.ThrowIfCancellationRequested(); ImportVersionFolderCore(minecraftDir, sourceFolder, instanceName); }, ct);
+        await Task.Run(() => { ct.ThrowIfCancellationRequested(); ImportVersionFolderCore(minecraftDir, sourceFolder, instanceName, ct); }, ct);
     }
-    private void ImportVersionFolderCore(string minecraftDir, string sourceFolder, string instanceName)
+    private void ImportVersionFolderCore(string minecraftDir, string sourceFolder, string instanceName, CancellationToken ct = default)
     {
         var versionsDir = Path.Combine(minecraftDir, "versions");
+        ArchiveImportSafety.CheckLinks(versionsDir);
         Directory.CreateDirectory(versionsDir);
-        var targetDir = Path.Combine(versionsDir, instanceName);
+        if (instanceName.Contains('/') || instanceName.Contains('\\')) throw new InvalidDataException("实例名不能包含目录路径。");
+        var targetDir = ArchiveImportSafety.Resolve(versionsDir, instanceName);
         if (Directory.Exists(targetDir))
             throw new InvalidOperationException($"目标文件夹「{instanceName}」已经存在。");
 
-        CopyDirectoryRecursive(sourceFolder, targetDir);
+        ArchiveImportSafety.CheckLinks(sourceFolder);
+        if (ResolveVersionJson(sourceFolder, Path.GetFileName(sourceFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))) == null)
+            throw new InvalidDataException("源文件夹顶层没有可识别的版本 JSON，未创建实例。");
+        CopyVersionDirectoryAtomically(sourceFolder, targetDir, ct);
         Plugins.PluginHostBridge.Current?.NotifyInstanceCreated(minecraftDir, instanceName);
     }
 
@@ -186,13 +166,15 @@ public class FolderService
     public async Task ImportVersionZipAsync(string minecraftDir, string zipPath, string instanceName, CancellationToken ct = default)
     {
         await Plugins.PluginInterceptionRegistry.ValidateInstanceAsync(minecraftDir, instanceName, "zip-import", ct);
-        await Task.Run(() => { ct.ThrowIfCancellationRequested(); ImportVersionZipCore(minecraftDir, zipPath, instanceName); }, ct);
+        await Task.Run(() => { ct.ThrowIfCancellationRequested(); ImportVersionZipCore(minecraftDir, zipPath, instanceName, ct); }, ct);
     }
-    private void ImportVersionZipCore(string minecraftDir, string zipPath, string instanceName)
+    private void ImportVersionZipCore(string minecraftDir, string zipPath, string instanceName, CancellationToken ct = default)
     {
         var versionsDir = Path.Combine(minecraftDir, "versions");
+        ArchiveImportSafety.CheckLinks(versionsDir);
         Directory.CreateDirectory(versionsDir);
-        var targetDir = Path.Combine(versionsDir, instanceName);
+        if (instanceName.Contains('/') || instanceName.Contains('\\')) throw new InvalidDataException("实例名不能包含目录路径。");
+        var targetDir = ArchiveImportSafety.Resolve(versionsDir, instanceName);
         if (Directory.Exists(targetDir))
             throw new InvalidOperationException($"目标文件夹「{instanceName}」已经存在。");
 
@@ -200,12 +182,19 @@ public class FolderService
         Directory.CreateDirectory(tempDir);
         try
         {
-            System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, tempDir);
+            ArchiveImportSafety.CheckLinks(zipPath);
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(zipPath))
+            {
+                ArchiveImportSafety.ValidateArchive(archive, tempDir);
+                foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
+                    ArchiveImportSafety.Extract(entry, tempDir, entry.FullName.Replace('\\', '/'), ct);
+            }
 
             // 兼容多层包装及 .minecraft/versions/<版本>，避免元数据被拷到实例的子目录里。
             var sourceDir = tempDir;
             while (ResolveVersionJson(sourceDir, Path.GetFileName(sourceDir)) == null)
             {
+                ct.ThrowIfCancellationRequested();
                 var minecraftDirInZip = Path.Combine(sourceDir, ".minecraft");
                 var versionsDirInZip = Path.Combine(sourceDir, "versions");
                 if (Directory.Exists(minecraftDirInZip))
@@ -228,7 +217,7 @@ public class FolderService
             if (ResolveVersionJson(sourceDir, Path.GetFileName(sourceDir)) == null)
                 throw new InvalidOperationException("压缩包里没有找到版本 json 文件，这可能不是一个完整的实例。");
 
-            CopyDirectoryRecursive(sourceDir, targetDir);
+            CopyVersionDirectoryAtomically(sourceDir, targetDir, ct);
             Plugins.PluginHostBridge.Current?.NotifyInstanceCreated(minecraftDir, instanceName);
         }
         finally
@@ -237,12 +226,42 @@ public class FolderService
         }
     }
 
-    private static void CopyDirectoryRecursive(string sourceDir, string targetDir)
+    private static void CopyVersionDirectoryAtomically(string sourceDir, string targetDir, CancellationToken ct)
     {
-        Directory.CreateDirectory(targetDir);
-        foreach (var dir in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
-            Directory.CreateDirectory(Path.Combine(targetDir, Path.GetRelativePath(sourceDir, dir)));
-        foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-            File.Copy(file, Path.Combine(targetDir, Path.GetRelativePath(sourceDir, file)), overwrite: true);
+        var source = Path.GetFullPath(sourceDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var target = Path.GetFullPath(targetDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (string.Equals(source, target, comparison) || target.StartsWith(source + Path.DirectorySeparatorChar, comparison))
+            throw new InvalidDataException("不能把实例导入到源文件夹内部，未创建实例。");
+        var parent = Path.GetDirectoryName(targetDir)!;
+        var staging = Path.Combine(parent, ".xcl2-import-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            CopyDirectoryRecursive(sourceDir, staging, ct);
+            ct.ThrowIfCancellationRequested(); ArchiveImportSafety.CheckLinks(targetDir);
+            // Directory.Move fails if another importer created the target; never merge into or delete it.
+            Directory.Move(staging, targetDir);
+        }
+        finally { try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); } catch { } }
+    }
+
+    private static void CopyDirectoryRecursive(string sourceDir, string targetDir, CancellationToken ct)
+    {
+        var pending = new Stack<(string Source, string Target)>();
+        pending.Push((sourceDir, targetDir));
+        while (pending.TryPop(out var current))
+        {
+            ct.ThrowIfCancellationRequested();
+            ArchiveImportSafety.CheckLinks(current.Source); ArchiveImportSafety.CheckLinks(current.Target);
+            Directory.CreateDirectory(current.Target);
+            foreach (var file in Directory.GetFiles(current.Source))
+            {
+                ct.ThrowIfCancellationRequested(); ArchiveImportSafety.CheckLinks(file);
+                var destination = ArchiveImportSafety.Resolve(current.Target, Path.GetFileName(file));
+                File.Copy(file, destination, overwrite: false);
+            }
+            foreach (var directory in Directory.GetDirectories(current.Source))
+                pending.Push((directory, ArchiveImportSafety.Resolve(current.Target, Path.GetFileName(directory))));
+        }
     }
 }

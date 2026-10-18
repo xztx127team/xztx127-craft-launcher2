@@ -34,7 +34,7 @@ internal sealed class PluginLoaderInstallDialog : OverlayDialogControl
             finally { install.IsEnabled = true; }
         };
         root.Children.Add(install); root.Children.Add(_status); Content = root;
-        RequestClose += (_, _) => _stop.Cancel(); Loaded += async (_, _) => await LoadBuildsAsync();
+        OverlayClosed += (_, _) => _stop.Cancel(); Loaded += async (_, _) => await LoadBuildsAsync();
     }
     private async Task LoadBuildsAsync()
     {

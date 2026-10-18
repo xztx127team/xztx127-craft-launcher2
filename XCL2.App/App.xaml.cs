@@ -243,6 +243,20 @@ public partial class App : Application
         // 账户列表/实例列表/ConfigService 都还没加载好，此时就去匹配账户名/实例名没有意义。
         var cliArgs = CommandLineService.Parse(e.Args);
 
+        // 帮助和拼写/数值错误必须先于等待旧进程、访客重启和任何启动动作。
+        // 查看 --debug --help 只显示快捷键，不创建主窗口或启动游戏。
+        if (cliArgs.ShowHelp || cliArgs.HasErrors)
+        {
+            var text = CommandLineService.HelpFor(cliArgs);
+            if (cliArgs.HasErrors)
+                text = "启动参数有误，本次没有执行启动动作：\n\n" +
+                    string.Join("\n", cliArgs.Diagnostics.Select(message => "• " + message)) +
+                    "\n\n" + text;
+            new Views.CommandLineHelpWindow(text).ShowDialog();
+            Shutdown(cliArgs.HasErrors ? 2 : 0);
+            return;
+        }
+
         // 访客模式必须经过一次真正的进程重启：-l 只是“请求进入访客”，当前进程不直接
         // 切模式，而是拉起带隐藏 --guest-session 标记的新进程。--wait-pid 让接力进程先等
         // 旧进程退出，避免旧实例的单实例管道还没释放就误弹“已经运行”。
@@ -256,7 +270,7 @@ public partial class App : Application
             catch { /* 父进程已经退出/不存在，直接继续 */ }
         }
 
-        if (cliArgs.GuestModeRelaunchRequested)
+        if (cliArgs.GuestModeRelaunchRequested && !cliArgs.EnterGuestMode)
         {
             var exe = Environment.ProcessPath;
             if (!string.IsNullOrWhiteSpace(exe))
@@ -266,6 +280,9 @@ public partial class App : Application
                     UseShellExecute = true,
                     WorkingDirectory = AppContext.BaseDirectory
                 };
+                // 原样传递本次会话参数（包含带空格的值），使 -l --debug 等组合不丢失。
+                // 接力标记放在最后；接力进程不会再次执行 -l 重启。
+                foreach (var argument in e.Args) psi.ArgumentList.Add(argument);
                 psi.ArgumentList.Add("--guest-session");
                 psi.ArgumentList.Add("--wait-pid");
                 psi.ArgumentList.Add(Environment.ProcessId.ToString());
@@ -275,17 +292,6 @@ public partial class App : Application
             return;
         }
 
-        if (cliArgs.ShowHelp)
-        {
-            // 原来是 MessageBox.Show(CommandLineService.HelpText, ...)：变宽字体 + 不可滚动/
-            // 不可调整大小，帮助文本里靠空格手动对齐的参数列表在变宽字体下全部错位、长内容
-            // 还会被截断。换成独立的 CommandLineHelpWindow（等宽字体 + 只读可滚动 TextBox +
-            // 复制按钮），见该类 xaml 头部注释里的完整说明。
-            var helpWindow = new Views.CommandLineHelpWindow(CommandLineService.HelpText);
-            helpWindow.ShowDialog();
-            Shutdown();
-            return;
-        }
         StartupArgs = cliArgs;
 
         // Win7 专属修复：必须在 base.OnStartup / 任何托管代码正式跑起来之前做，
@@ -621,7 +627,7 @@ public partial class App : Application
             mainWindow.ConfigService.Config.AcceptedAgreementVersion < Views.AgreementsText.AgreementsVersion;
         if (!needsAgreementsBeforeUpdateCheck)
         {
-            UpdateCheckService.CheckForUpdateInBackground();
+            UpdateCheckService.CheckForUpdateInBackground(() => mainWindow.ConfigService.Config);
         }
     }
 

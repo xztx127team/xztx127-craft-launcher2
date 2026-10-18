@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -13,7 +13,7 @@ using XCL2.App.Services;
 
 namespace XCL2.App.Views;
 
-public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
+public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOverlayDialogDismissGuard
 {
     public event EventHandler<AiAssistantConfig>? Saved;
     public event EventHandler? Cancelled;
@@ -40,6 +40,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         ExtraDirectoriesList.ItemsSource = _extraDirs;
         PersonaPresetList.ItemsSource = AiPersonas.Presets;
         LoadConfig(currentConfig);
+        _savedDraftFingerprint = CreateDraftFingerprint();
     }
 
     private readonly ObservableCollection<string> _extraDirs = new();
@@ -49,6 +50,12 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         _loading = true;
         try
         {
+            CustomModelIdBox.Clear();
+            CustomModelNameBox.Clear();
+            CustomModelProviderBaseUrlBox.Clear();
+            CustomModelProviderApiKeyBox.Clear();
+            CustomModelUseStandaloneCheck.IsChecked = false;
+            CustomModelTierNormalRadio.IsChecked = true;
             _accountingModel = null;
             _accounting.Clear();
             foreach (var pair in config.ModelAccounting ?? new Dictionary<string, AiModelAccountingConfig>())
@@ -56,6 +63,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             EnabledCheck.IsChecked = config.Enabled;
             FloatingButtonCheck.IsChecked = config.ShowFloatingButton;
             SelectWorkMode(config.WorkMode);
+            LoadCommandPermissionSettings(config);
             UseCustomKeyCheck.IsChecked = config.UseCustomApiKey;
             BaseUrlBox.Text = config.BaseUrl;
             ApiKeyBox.Password = config.ApiKey;
@@ -99,6 +107,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             PersonaCombo.SelectedValue = AiPersonas.Get(config.PersonaId).Id;
             CustomSystemPromptBox.Text = config.CustomSystemPrompt ?? "";
             UpdatePersonaHint();
+            ShowTaskSelectionBarCheck.IsChecked = config.ShowTaskSelectionBar;
             ShowSubAgentsCheck.IsChecked = config.ShowSubAgents;
             ShowCodeChangesCheck.IsChecked = config.ShowCodeChanges;
             ShowEditingFilesCheck.IsChecked = config.ShowEditingFiles;
@@ -115,7 +124,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             MaxOutputTokensBox.Text = config.MaxOutputTokens.ToString();
             MaxToolActionsBox.Text = config.MaxToolActionsPerTurn.ToString();
             MaxSubAgentsBox.Text = config.MaxSubAgentsPerTurn.ToString();
-            AllowShellCommandsCheck.IsChecked = AiShellPolicy.CanRun(config);
+            AllowShellCommandsCheck.IsChecked = config.WorkMode == AiWorkMode.Chat ? config.AllowShellCommands : AiShellPolicy.CanRun(config);
             SelectReasoningLevel(config.ReasoningLevel ?? (config.EnableDeepThinking ? AiReasoningLevel.High : AiReasoningLevel.Off));
             EnableWebSearchCheck.IsChecked = config.EnableWebSearch;
             TokenSaverCheck.IsChecked = config.TokenSaverMode;
@@ -128,6 +137,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         {
             _loading = false;
         }
+        RefreshWorkModeControls();
 
         // 打开设置页时，如果之前保存的默认模型里有已知有问题的，直接弹一次窗提醒，
         // 不用等用户手动点开下拉框才发现——同一次打开只弹一次，把三个位置的提示合并。
@@ -172,6 +182,26 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             && Enum.TryParse<AiWorkMode>(tag, out var mode) && Enum.IsDefined(mode))
             return mode;
         return AiWorkMode.Plan;
+    }
+
+    private void WorkModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || !IsInitialized) return;
+        RefreshWorkModeControls();
+    }
+
+    private void RefreshWorkModeControls()
+    {
+        var chat = GetWorkMode() == AiWorkMode.Chat;
+        foreach (var control in new FrameworkElement[] { WorkingDirectoryBox, BrowseWorkingDirectoryButton,
+            ClearWorkingDirectoryButton, ExtraDirectoriesList, AddExtraDirectoryButton, RemoveExtraDirectoryButton,
+            FullAccessCheck, AllowShellCommandsCheck, CommandPermissionsExpander, MaxToolActionsBox, MaxSubAgentsBox,
+            PersonaCombo, PersonaPresetList, CustomSystemPromptBox, EnableWebSearchCheck }) control.IsEnabled = !chat;
+        AbsoluteAccessCheck.IsEnabled = !chat && FullAccessCheck.IsChecked == true;
+        UnrestrictedAccessCheck.IsEnabled = !chat && FullAccessCheck.IsChecked == true && AbsoluteAccessCheck.IsChecked == true;
+        SystemControlAccessCheck.IsEnabled = !chat && FullAccessCheck.IsChecked == true
+            && AbsoluteAccessCheck.IsChecked == true && UnrestrictedAccessCheck.IsChecked == true;
+        AgentAnimationProfileCombo.IsEnabled = GetWorkMode() == AiWorkMode.Agent;
     }
 
     private AiRoutingMode GetRoutingMode()
@@ -352,38 +382,35 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         SpecialTermsNoticeBox.Visibility = Visibility.Visible;
     }
 
-    private void AddCustomModel_Click(object sender, RoutedEventArgs e)
+    private void AddCustomModel_Click(object sender, RoutedEventArgs e) => TryAddCustomModel();
+
+    private bool TryAddCustomModel()
     {
         if (!TryNormalizeModelId(CustomModelIdBox.Text, out var id, out var modelIdError))
         {
-            MessageBoxDialog.ShowWarning(modelIdError, "AI 模型");
-            return;
+            ShowSettingsWarning(modelIdError, "AI 模型");
+            return false;
         }
 
         var name = CustomModelNameBox.Text.Trim();
         if (name.Length == 0)
         {
-            MessageBoxDialog.ShowWarning("请填写模型显示名称。显示名称只用于界面，真正提交给 API 的是左侧模型 ID。", "AI 模型");
-            return;
+            ShowSettingsWarning("请填写模型显示名称。显示名称只用于界面，真正提交给 API 的是左侧模型 ID。", "AI 模型");
+            return false;
         }
 
-        // 供应商地址/Key 是可选的（多供应商）：都留空表示这个模型沿用上方公共的 Base URL / API Key；
-        // 只要填了其中一个就要求两个都填，避免"填了地址没填 Key"这种半成品配置在请求时被悄悄忽略。
+        // A legacy standalone address is used only after an explicit choice. Empty keys are
+        // valid for local compatible servers; a missing or invalid address is never accepted.
         var providerBaseUrlRaw = CustomModelProviderBaseUrlBox.Text?.Trim() ?? "";
         var providerApiKeyRaw = CustomModelProviderApiKeyBox.Password ?? "";
         string? providerBaseUrl = null;
         string? providerApiKey = null;
-        if (providerBaseUrlRaw.Length > 0 || providerApiKeyRaw.Length > 0)
+        if (CustomModelUseStandaloneCheck.IsChecked == true)
         {
             if (!TryNormalizeBaseUrl(providerBaseUrlRaw, out var normalizedProviderUrl))
             {
-                MessageBoxDialog.ShowWarning("这个模型单独填写的供应商地址无效。请填写 http/https Base URL，或把两个字段都留空以沿用上方公共接口。", "AI 模型");
-                return;
-            }
-            if (providerApiKeyRaw.Length == 0)
-            {
-                MessageBoxDialog.ShowWarning("填写了单独的供应商地址，就必须同时填这个模型自己的 API Key（或者两个都留空）。", "AI 模型");
-                return;
+                ShowSettingsWarning("这个模型单独填写的供应商地址无效。请填写 http/https Base URL，或取消独立接口选项以使用所选接口。", "AI 模型");
+                return false;
             }
             providerBaseUrl = normalizedProviderUrl;
             providerApiKey = providerApiKeyRaw;
@@ -423,11 +450,13 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         CustomModelNameBox.Clear();
         CustomModelProviderBaseUrlBox.Clear();
         CustomModelProviderApiKeyBox.Clear();
+        CustomModelUseStandaloneCheck.IsChecked = false;
         CustomModelTierNormalRadio.IsChecked = true;
         RefreshModelCombos(
             NormalModelCombo.SelectedValue as string,
             ExpertModelCombo.SelectedValue as string,
             ManualModelCombo.SelectedValue as string ?? candidate.ModelKey);
+        return true;
     }
 
     private static bool TryNormalizeModelId(string? raw, out string normalized, out string error)
@@ -474,16 +503,16 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
 
     private static bool TryNormalizeBaseUrl(string? raw, out string normalized)
     {
-        normalized = (raw ?? string.Empty).Trim().TrimEnd('/');
-        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        try
+        {
+            normalized = AiEndpointRouting.NormalizeBaseUrl(raw);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            normalized = string.Empty;
             return false;
-
-        // 用户若直接粘贴了完整 /chat/completions 地址，内部还会再拼一次；这里自动还原成 Base URL。
-        const string suffix = "/chat/completions";
-        if (normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-            normalized = normalized[..^suffix.Length].TrimEnd('/');
-        return true;
+        }
     }
 
     /// <summary>把某个模型在"普通"和"专家"之间切换：自定义模型直接改自己的 Tier；
@@ -559,7 +588,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
     }
 
     private static int ReadTimeout(string text) => int.TryParse(text, out var value)
-        ? value <= 0 ? 0 : Math.Clamp(value, 15, 86400) : 180;
+        ? value <= 0 ? 0 : Math.Clamp(value, 15, 86400) : 86400;
 
     private static decimal? ReadPrice(string text) => decimal.TryParse(text,
         System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var value)
@@ -879,26 +908,30 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         LoadConfig(defaults);
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private void Save_Click(object sender, RoutedEventArgs e) => TrySaveChanges();
+
+    private bool TrySaveChanges()
     {
+        if (_closeApproved) return true;
+        if (!TryCommitPendingCustomModel()) return false;
         int.TryParse(ThresholdBox.Text, out var threshold);
         bool custom = UseCustomKeyCheck.IsChecked == true;
 
         CommitPendingKeys();
         if (custom || MixBuiltInApiCheck.IsChecked == true)
         {
-            if (!ValidateApiConfiguration()) return;
+            if (!ValidateApiConfiguration()) return false;
             if (_customModels.Count == 0 && MixBuiltInApiCheck.IsChecked != true)
             {
-                MessageBoxDialog.ShowWarning("请为已启用接口拉取或添加至少一个模型。", "AI 设置");
-                return;
+                ShowSettingsWarning("请为已启用接口拉取或添加至少一个模型。", "AI 设置");
+                return false;
             }
             foreach (var model in _customModels)
             {
                 if (!TryNormalizeModelId(model.Id, out var normalizedId, out var modelIdError))
                 {
-                    MessageBoxDialog.ShowWarning($"模型“{model.DisplayName}”配置有误：{modelIdError}", "AI 设置");
-                    return;
+                    ShowSettingsWarning($"模型“{model.DisplayName}”配置有误：{modelIdError}", "AI 设置");
+                    return false;
                 }
                 model.Id = normalizedId;
             }
@@ -907,8 +940,8 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         var catalog = CurrentCatalog();
         if (catalog.Count == 0)
         {
-            MessageBoxDialog.ShowWarning("当前没有可用模型。", "AI 设置");
-            return;
+            ShowSettingsWarning("当前没有可用模型。", "AI 设置");
+            return false;
         }
 
         string EnsureSelected(ComboBox combo, string fallback)
@@ -919,18 +952,18 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
         }
 
         var workingDirectory = WorkingDirectoryBox.Text.Trim();
-        if (workingDirectory.Length > 0)
+        if (GetWorkMode() != AiWorkMode.Chat && workingDirectory.Length > 0)
         {
             try { workingDirectory = Path.GetFullPath(workingDirectory); }
             catch
             {
-                MessageBoxDialog.ShowWarning("工作目录路径无效，请重新选择。", "AI 设置");
-                return;
+                ShowSettingsWarning("工作目录路径无效，请重新选择。", "AI 设置");
+                return false;
             }
             if (!Directory.Exists(workingDirectory))
             {
-                MessageBoxDialog.ShowWarning("工作目录不存在。请先创建目录，或点击“选择目录”选择一个现有目录。", "AI 设置");
-                return;
+                ShowSettingsWarning("工作目录不存在。请先创建目录，或点击“选择目录”选择一个现有目录。", "AI 设置");
+                return false;
             }
         }
 
@@ -968,6 +1001,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             PrewarmSystemPromptOnOpen = PrewarmOnOpenCheck.IsChecked == true,
             PersonaId = PersonaCombo.SelectedValue as string ?? AiPersonas.Default,
             CustomSystemPrompt = CustomSystemPromptBox.Text?.Trim() ?? "",
+            ShowTaskSelectionBar = ShowTaskSelectionBarCheck.IsChecked == true,
             ShowSubAgents = ShowSubAgentsCheck.IsChecked == true,
             ShowCodeChanges = ShowCodeChangesCheck.IsChecked == true,
             ShowEditingFiles = ShowEditingFilesCheck.IsChecked == true,
@@ -987,6 +1021,9 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             ToolActionLimitVersion = 1,
             MaxSubAgentsPerTurn = ReadInteger(MaxSubAgentsBox.Text, 2, 0, 4),
             AllowShellCommands = AllowShellCommandsCheck.IsChecked == true,
+            AllowAllShellCommands = AllowAllShellCommandsCheck.IsChecked == true,
+            CommandPermissions = SnapshotCommandPermissions(),
+            AgentAnimationProfile = GetAgentAnimationProfile(),
             EnableDeepThinking = GetReasoningLevel() is not (AiReasoningLevel.Off or AiReasoningLevel.Fast),
             EnableWebSearch = EnableWebSearchCheck.IsChecked == true,
             TokenSaverMode = TokenSaverCheck.IsEnabled && TokenSaverCheck.IsChecked == true,
@@ -996,15 +1033,27 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             LastSessionId = _currentConfig.LastSessionId
         };
 
-        Saved?.Invoke(this, result);
+        var applyAgentProfile = result.WorkMode == AiWorkMode.Agent
+            && (_currentConfig.WorkMode != AiWorkMode.Agent || _currentConfig.AgentAnimationProfile != result.AgentAnimationProfile);
+        try
+        {
+            Saved?.Invoke(this, result);
+            if (applyAgentProfile && ConfigService.Active is { } active && active.Config.AiAssistant.WorkMode == AiWorkMode.Agent
+                && AiAgentAnimationService.ApplyProfile(active.Config, result.AgentAnimationProfile))
+                active.Save();
+        }
+        catch
+        {
+            // Keep the draft open when persistence fails; exception text may contain credentials.
+            ShowSettingsWarning("保存 AI 助手设置失败，请检查配置目录是否可写后重试。当前编辑内容仍保留。", "AI 设置");
+            return false;
+        }
+        _closeApproved = true;
         RequestClose?.Invoke(this, true);
+        return true;
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e)
-    {
-        Cancelled?.Invoke(this, EventArgs.Empty);
-        RequestClose?.Invoke(this, false);
-    }
+    private void Cancel_Click(object sender, RoutedEventArgs e) => RequestDismiss();
 
     // ----- 测试模型：不落盘、不影响正常聊天记录，只是拿当前编辑框里的接口配置发一次最小请求 -----
 
@@ -1080,6 +1129,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             EnableEndpointFailover = EndpointFailoverCheck.IsChecked == true,
             ReasoningLevel = GetReasoningLevel(),
             CustomModels = _customModels.Select(m => m.Clone()).ToList(),
+            ShowTaskSelectionBar = ShowTaskSelectionBarCheck.IsChecked == true,
             ShowSubAgents = ShowSubAgentsCheck.IsChecked == true,
             ShowCodeChanges = ShowCodeChangesCheck.IsChecked == true,
             ShowEditingFiles = ShowEditingFilesCheck.IsChecked == true,
@@ -1099,6 +1149,9 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             ToolActionLimitVersion = 1,
             MaxSubAgentsPerTurn = ReadInteger(MaxSubAgentsBox.Text, 2, 0, 4),
             AllowShellCommands = AllowShellCommandsCheck.IsChecked == true,
+            AllowAllShellCommands = AllowAllShellCommandsCheck.IsChecked == true,
+            CommandPermissions = SnapshotCommandPermissions(),
+            AgentAnimationProfile = GetAgentAnimationProfile(),
             RoutingMode = AiRoutingMode.SpecificModel,
             SelectedModel = ManualModelCombo.SelectedValue as string ?? AiModelIds.NemotronLightning
         };
@@ -1107,9 +1160,9 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
     /// <summary>把当前编辑框里的完整状态（不做校验）整理成一份 AiAssistantConfig，用作导入 JSON 时
     /// 的"基底"——导入的文件里没提到的字段（比如"不保留密钥"那种导出）保持编辑框里原样，不会被
     /// 意外清空成默认值。跟 BuildDraftConfigForTest 的区别是这里字段更全，专给导入用。</summary>
-    private AiAssistantConfig CaptureUiAsConfig()
+    private AiAssistantConfig CaptureUiAsConfig(bool commitPendingKeys = true)
     {
-        CommitPendingKeys();
+        if (commitPendingKeys) CommitPendingKeys();
         int.TryParse(ThresholdBox.Text, out var threshold);
         return new AiAssistantConfig
         {
@@ -1144,6 +1197,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             PrewarmSystemPromptOnOpen = PrewarmOnOpenCheck.IsChecked == true,
             PersonaId = PersonaCombo.SelectedValue as string ?? AiPersonas.Default,
             CustomSystemPrompt = CustomSystemPromptBox.Text?.Trim() ?? "",
+            ShowTaskSelectionBar = ShowTaskSelectionBarCheck.IsChecked == true,
             ShowSubAgents = ShowSubAgentsCheck.IsChecked == true,
             ShowCodeChanges = ShowCodeChangesCheck.IsChecked == true,
             ShowEditingFiles = ShowEditingFilesCheck.IsChecked == true,
@@ -1163,6 +1217,9 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             ToolActionLimitVersion = 1,
             MaxSubAgentsPerTurn = ReadInteger(MaxSubAgentsBox.Text, 2, 0, 4),
             AllowShellCommands = AllowShellCommandsCheck.IsChecked == true,
+            AllowAllShellCommands = AllowAllShellCommandsCheck.IsChecked == true,
+            CommandPermissions = SnapshotCommandPermissions(),
+            AgentAnimationProfile = GetAgentAnimationProfile(),
             EnableDeepThinking = GetReasoningLevel() is not (AiReasoningLevel.Off or AiReasoningLevel.Fast),
             EnableWebSearch = EnableWebSearchCheck.IsChecked == true,
             TokenSaverMode = TokenSaverCheck.IsEnabled && TokenSaverCheck.IsChecked == true,
@@ -1219,6 +1276,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
                 config.AutoModelRouting = mode == AiRoutingMode.Auto;
             }
             if (GetInt("上下文压缩阈值") is int threshold) config.CompressionTokenThreshold = threshold;
+            if (GetBool("显示任务选择栏") is bool taskBar) config.ShowTaskSelectionBar = taskBar;
             if (GetBool("显示AI调用的子智能体") is bool showSubAgents) config.ShowSubAgents = showSubAgents;
             if (GetBool("显示修改的代码") is bool showCodeChanges) config.ShowCodeChanges = showCodeChanges;
             if (GetBool("显示正在修改的文件") is bool showEditingFiles) config.ShowEditingFiles = showEditingFiles;
@@ -1243,6 +1301,11 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             if (GetStr("子任务上限") is string agents) config.MaxSubAgentsPerTurn = ReadInteger(agents, 2, 0, 4);
             // Importing a configuration never silently enables execution authority.
             if (GetBool("Shell") == false) config.AllowShellCommands = false;
+            if (GetBool("默许全部Shell") == false) config.AllowAllShellCommands = false;
+            if (GetStr("Agent动画预设") is string profile && Enum.TryParse<AiAgentAnimationProfile>(profile, true, out var animationProfile) && Enum.IsDefined(animationProfile))
+                config.AgentAnimationProfile = animationProfile;
+            if (root.TryGetProperty("命令权限", out var commandPermissions) && commandPermissions.ValueKind == JsonValueKind.Object)
+                RestrictImportedCommandPermissions(config, JsonSerializer.Deserialize<AiCommandPermissions>(commandPermissions.GetRawText()));
             if (GetBool("默认深度思考") is bool deepThinking) config.EnableDeepThinking = deepThinking;
             if (GetStr("推理等级") is string reasoning && Enum.TryParse<AiReasoningLevel>(reasoning, true, out var level) && Enum.IsDefined(level)) config.ReasoningLevel = level;
             else if (GetBool("默认深度思考") is bool legacyDeep) config.ReasoningLevel = legacyDeep ? AiReasoningLevel.High : AiReasoningLevel.Off;
@@ -1388,6 +1451,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             ["使用自定义API"] = UseCustomKeyCheck.IsChecked == true,
             ["默认路由模式"] = GetRoutingMode().ToString(),
             ["上下文压缩阈值"] = threshold,
+            ["显示任务选择栏"] = ShowTaskSelectionBarCheck.IsChecked == true,
             ["显示AI调用的子智能体"] = ShowSubAgentsCheck.IsChecked == true,
             ["显示修改的代码"] = ShowCodeChangesCheck.IsChecked == true,
             ["显示正在修改的文件"] = ShowEditingFilesCheck.IsChecked == true,
@@ -1406,6 +1470,9 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog
             ["工具上限"] = MaxToolActionsBox.Text,
             ["子任务上限"] = MaxSubAgentsBox.Text,
             ["Shell"] = AllowShellCommandsCheck.IsChecked == true,
+            ["默许全部Shell"] = AllowAllShellCommandsCheck.IsChecked == true,
+            ["命令权限"] = SnapshotCommandPermissions(),
+            ["Agent动画预设"] = GetAgentAnimationProfile().ToString(),
             ["默认深度思考"] = GetReasoningLevel() is not (AiReasoningLevel.Off or AiReasoningLevel.Fast),
             ["推理等级"] = GetReasoningLevel().ToString(),
             ["混合内置接口"] = MixBuiltInApiCheck.IsChecked == true,

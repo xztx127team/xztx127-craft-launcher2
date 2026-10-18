@@ -391,20 +391,8 @@ internal static class OriginalTouchInputInjector
             clip.Bottom == desktopTop + GetSystemMetrics(79);
         var info = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
         if (!GetCursorInfo(ref info)) return null;
-        if ((info.flags & CURSOR_SUPPRESSED) != 0)
-        {
-            // 抑制本身不能判为菜单；游戏约束 + 显式空光标仍是独立的抓取证据。
-            if (confined && info.hCursor == IntPtr.Zero && (!wholeDesktop || allowFullscreenCapture)) return false;
-            // 菜单释放约束后，触屏仍可能让箭头处于抑制状态。此时结合释放约束的证据，
-            // 交由上层持续采样确认，不能等到用户接入物理鼠标才恢复菜单操作。
-            if (info.hCursor != IntPtr.Zero && (!confined || wholeDesktop)) return true;
-            return null;
-        }
-        var visible = info.hCursor != IntPtr.Zero && (info.flags & CURSOR_SHOWING) != 0;
-        // 可见光标是菜单证据，即使游戏遗留了较小的 ClipCursor 矩形也不能拒绝菜单模式。
-        if (visible) return true;
-        if (!visible && confined && (!wholeDesktop || (allowFullscreenCapture && info.hCursor == IntPtr.Zero))) return false;
-        return null;
+        return TouchInputModePolicy.ClassifyModern(confined, wholeDesktop, info.hCursor != IntPtr.Zero,
+            (info.flags & CURSOR_SHOWING) != 0, (info.flags & CURSOR_SUPPRESSED) != 0, allowFullscreenCapture);
     }
 
     /// <summary>

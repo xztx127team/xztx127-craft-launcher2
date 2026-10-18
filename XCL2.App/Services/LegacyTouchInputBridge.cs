@@ -3,18 +3,25 @@ using System.Runtime.InteropServices;
 namespace XCL2.App.Services;
 
 /// <summary>Old LWJGL/GLFW bridge: menu coordinates and relative camera motion are separate transports.</summary>
-internal sealed class LegacyTouchInputBridge(IntPtr game)
+internal sealed class LegacyTouchInputBridge(IntPtr game, LegacyTouchWorldEvidence worldEvidence)
 {
-    private double _x, _y;
+    private readonly LegacyTouchMotion _motion = new();
+    public LegacyTouchCursorEvidence CursorEvidence { get; } = new();
+    private (int X, int Y, bool Down)? _pendingMenu;
     private int _failures;
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
-    public void Reset() { _x = _y = 0; }
+    public void Reset() { _motion.Reset(); _pendingMenu = null; }
     public void MoveLook(double x, double y)
     {
         if (GetForegroundWindow() != game || !double.IsFinite(x) || !double.IsFinite(y)) { Reset(); return; }
-        _x += Math.Clamp(x, -250, 250); _y += Math.Clamp(y, -250, 250);
-        int dx = (int)Math.Truncate(_x), dy = (int)Math.Truncate(_y); _x -= dx; _y -= dy;
-        if (dx == 0 && dy == 0) return;
+        _motion.Add(x, y);
+    }
+    // 由独立输入定时器合并投递，不依赖悬浮层重绘；子像素保留到下次采样。
+    public void FlushLook()
+    {
+        if (!_motion.Pending) return;
+        if (GetForegroundWindow() != game) { Reset(); return; }
+        if (!_motion.Take(out var dx, out var dy)) return;
         if (!TouchInputInjector.TryMouseMoveRelative(dx, dy))
         {
             Reset();
@@ -22,6 +29,29 @@ internal sealed class LegacyTouchInputBridge(IntPtr game)
         }
         else _failures = 0;
     }
-    public bool MoveMenu(int x, int y, bool down) => GetForegroundWindow() == game && TouchInputInjector.MenuPointerMove(game, x, y, down);
-    public bool MenuButton(int x, int y, bool down) => (!down || GetForegroundWindow() == game) && TouchInputInjector.MenuLeftButton(game, x, y, down);
+    public bool MoveMenu(int x, int y, bool down)
+    {
+        _pendingMenu = null;
+        var moved = GetForegroundWindow() == game && TouchInputInjector.MenuPointerMove(game, x, y, down,
+            worldEvidence.Phase == LegacyTouchWorldPhase.Joined, CursorEvidence);
+        if (moved) CursorEvidence.MenuMoved(x, y, Environment.TickCount64);
+        return moved;
+    }
+    public bool QueueMenu(int x, int y, bool down)
+    {
+        if (GetForegroundWindow() != game) return false;
+        _pendingMenu = (x, y, down);
+        return true;
+    }
+    public bool FlushMenu()
+    {
+        if (_pendingMenu is not { } point) return true;
+        return MoveMenu(point.X, point.Y, point.Down);
+    }
+    public bool MenuButton(int x, int y, bool down)
+    {
+        var moved = FlushMenu();
+        // 释放始终发给原窗口；失败的位移不能导致遗留按下。
+        return (!down || (moved && GetForegroundWindow() == game)) && TouchInputInjector.MenuLeftButton(game, x, y, down);
+    }
 }

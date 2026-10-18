@@ -46,6 +46,17 @@ public partial class AiQuestionCard : UserControl
         PreviewKeyDown += OnPreviewKeyDown;
     }
 
+    public event EventHandler? StopRequested;
+
+    /// <summary>由所属会话提供取消操作时显示停止按钮。</summary>
+    public bool AllowStopping
+    {
+        get => StopQuestionButton.Visibility == Visibility.Visible;
+        set => StopQuestionButton.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void StopQuestionButton_Click(object sender, RoutedEventArgs e) => StopRequested?.Invoke(this, EventArgs.Empty);
+
     /// <summary>当前是否正在等用户作答。</summary>
     public bool IsAsking => _tcs != null;
 

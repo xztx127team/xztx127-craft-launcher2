@@ -148,8 +148,9 @@ public class InstanceSettings
     /// 跟随全局；只有实例这里显式选了"开启"或"关闭"才会覆盖全局。</summary>
     public bool? EnableMemoryOptimization { get; set; }
 
-    /// <summary>这个实例的内存优化触发时机；null=未配置，跟随全局 <see cref="AppConfig.MemoryOptimizationTiming"/>。
-    /// 同样遵循"实例单独设置 &gt; 全局设置，实例未配置则跟随全局"的优先级规则。</summary>
+    /// <summary>这个实例是否在启动器打开时额外预览动态内存；null=跟随全局
+    /// <see cref="AppConfig.MemoryOptimizationTiming"/>。启用动态内存后，每次启动游戏仍会重新计算，
+    /// 预览不会把计算结果写回用户的手动内存值。</summary>
     public Models.MemoryOptimizationTiming? MemoryOptimizationTiming { get; set; }
 
     /// <summary>解析“是否使用高性能独立显卡”的最终生效值：实例未配置(null)时跟随总体设置。</summary>

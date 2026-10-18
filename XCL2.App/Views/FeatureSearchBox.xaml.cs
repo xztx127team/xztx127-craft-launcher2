@@ -18,16 +18,31 @@ public partial class FeatureSearchBox : UserControl
     private bool _navigating;
     private CancellationTokenSource? _navigation;
     private int _navigationVersion;
+    private SearchCompositionGate? _composition;
+    private bool _suggestionsDismissed;
 
     public FeatureSearchBox()
     {
         InitializeComponent();
-        Unloaded += (_, _) => { SearchPopup.IsOpen = false; CancelNavigation(); };
+        InitializeLayoutEditing();
+        Unloaded += (_, _) => { SetLayoutEditing(false); SearchPopup.IsOpen = false; CancelNavigation(); };
     }
 
     public void Attach(MainWindow owner)
     {
         _owner = owner;
+        _composition ??= new SearchCompositionGate(QueryBox, () => owner.ConfigService.Config.Ux50SearchWaitForComposition,
+            CancelNavigation, RebuildResults);
+        ExperienceSearchMenu.Attach(QueryBox, () => owner.ConfigService.Config, () => owner.ConfigService.Save(), "features",
+            () => new() { ["query"] = QueryBox.Text, ["all"] = (ScopeCombo.SelectedIndex == 1).ToString() },
+            values =>
+            {
+                _suppress = true;
+                QueryBox.Text = values.GetValueOrDefault("query", "");
+                ScopeCombo.SelectedIndex = values.GetValueOrDefault("all", "False") == "True" ? 1 : 0;
+                _suppress = false;
+                RebuildResults();
+            });
         _suppress = true;
         ScopeCombo.SelectedIndex = owner.ConfigService.Config.FeatureSearchAllPages ? 1 : 0;
         _suppress = false;
@@ -36,12 +51,14 @@ public partial class FeatureSearchBox : UserControl
     internal void SetEntryVisible(bool visible)
     {
         SearchEntry.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        if (!visible) Close();
+        if (!visible) EmptyClickHint.Visibility = Visibility.Collapsed;
+        LayoutEditFrame.Visibility = visible && IsEditingLayout ? Visibility.Visible : Visibility.Collapsed;
+        if (!visible) { CancelEditGesture(); Close(); }
     }
 
     public void Open(string? query = null, string? pageKey = null)
     {
-        if (_owner == null) return;
+        if (_owner == null || IsEditingLayout) return;
         CancelNavigation();
         _originPage = pageKey ?? _owner.CurrentSearchPageKey;
         string? loadError = null;
@@ -89,25 +106,22 @@ public partial class FeatureSearchBox : UserControl
     private int _emptyClicks;
     private DateTime _emptyClickWindowStart = DateTime.MinValue;
 
-    /// <summary>悬浮窗样式下搜索入口半透明（鼠标移上去恢复不透明）；原样式完全不透明。</summary>
-    internal void ApplyStyle(bool floating)
+    internal void ApplyEntryHeight(double height)
+    {
+        SearchEntry.Height = height;
+        EmptyClickHint.Margin = new Thickness(0, height + 6, 0, 0);
+    }
+    internal void ApplyStyle(bool floating, double opacityPercent = 70)
     {
         _floating = floating;
-        SearchEntry.MouseEnter -= SearchEntry_MouseEnterLeave;
-        SearchEntry.MouseLeave -= SearchEntry_MouseEnterLeave;
-        if (floating)
-        {
-            SearchEntry.MouseEnter += SearchEntry_MouseEnterLeave;
-            SearchEntry.MouseLeave += SearchEntry_MouseEnterLeave;
-        }
-        SearchEntry_MouseEnterLeave(null, null!);
+        var opacity = new FeatureSearchLayout(300, 36, 0, 0, opacityPercent).Normalize().OpacityPercent / 100;
+        // 两种样式均以用户设置为准；悬停、点击和弹层开关不覆盖该值。
+        SearchEntry.SetCurrentValue(UIElement.OpacityProperty, opacity);
     }
-
-    private void SearchEntry_MouseEnterLeave(object? sender, MouseEventArgs e)
-        => SearchEntry.Opacity = _floating && !SearchEntry.IsMouseOver && !SearchPopup.IsOpen ? 0.7 : 1.0;
 
     private void SearchEntry_Click(object sender, RoutedEventArgs e)
     {
+        if (IsEditingLayout) { e.Handled = true; return; }
         // 反复点搜索框却一直没输入内容：15 秒内累计 3 次，就弹出内嵌提示。
         if (string.IsNullOrWhiteSpace(QueryBox.Text))
         {
@@ -135,7 +149,7 @@ public partial class FeatureSearchBox : UserControl
     }
     private void QueryBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_suppress || _owner == null) return;
+        if (_suppress || _owner == null || _composition?.IsComposing == true) return;
         string normalized = NormalizeQuery(QueryBox.Text);
         if (normalized != QueryBox.Text)
         {
@@ -163,7 +177,11 @@ public partial class FeatureSearchBox : UserControl
     private void RebuildResults()
     {
         var oldId = (ResultList.SelectedItem as FeatureSearchEntry)?.Id;
-        _results = FeatureSearchMatcher.Match(_catalog, QueryBox.Text, ScopeCombo.SelectedIndex == 1 ? null : _originPage);
+        if (_owner == null || _composition?.IsComposing == true) return;
+        _suggestionsDismissed = false;
+        QueryBox.Tag = _owner.ConfigService.Config.Ux50SearchHighlight;
+        _results = FeatureSearchMatcher.Match(_catalog, QueryBox.Text, ScopeCombo.SelectedIndex == 1 ? null : _originPage,
+            _owner.ConfigService.Config.Ux50SearchMultipleKeywords);
         ResultList.ItemsSource = _results;
         int existing = _results.ToList().FindIndex(item => item.Id == oldId);
         ResultList.SelectedIndex = _results.Count == 0 ? -1 : Math.Max(0, existing);
@@ -195,7 +213,25 @@ public partial class FeatureSearchBox : UserControl
     }
     private async void FloatingSearch_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape) { e.Handled = true; Close(); RestoreFocus(); return; }
+        if (_composition?.IsComposing == true) return; // Esc/Enter belongs to the IME candidate window.
+        if (e.Key == Key.Escape)
+        {
+            if (_owner?.ConfigService.Config.Ux50SearchLayeredEscape == true)
+            {
+                if (ScopeCombo.IsDropDownOpen) { ScopeCombo.IsDropDownOpen = false; e.Handled = true; return; }
+                if (!_suggestionsDismissed && ResultList.Visibility == Visibility.Visible)
+                {
+                    _suggestionsDismissed = true;
+                    ResultList.Visibility = Visibility.Collapsed;
+                    NoResultsText.Visibility = Visibility.Collapsed;
+                    SearchStatus.Text = "搜索建议已收起；再按 Esc 清空搜索。";
+                    SearchStatus.Visibility = Visibility.Visible;
+                    e.Handled = true; return;
+                }
+                if (!string.IsNullOrEmpty(QueryBox.Text)) { QueryBox.Clear(); e.Handled = true; return; }
+            }
+            e.Handled = true; Close(); RestoreFocus(); return;
+        }
         if (ScopeCombo.IsKeyboardFocusWithin) return; // 保留范围选择器的原生方向键操作。
         if (e.Key is Key.Up or Key.Down) { e.Handled = true; MoveSelection(e.Key == Key.Up ? -1 : 1); }
         else if (e.Key == Key.Enter && ResultList.SelectedItem is FeatureSearchEntry)
@@ -212,7 +248,8 @@ public partial class FeatureSearchBox : UserControl
     }
     private async Task LocateSelectedAsync()
     {
-        if (_owner == null || ResultList.SelectedItem is not FeatureSearchEntry entry) return;
+        if (_owner == null || _suggestionsDismissed || ResultList.SelectedItem is not FeatureSearchEntry entry) return;
+        ExperienceSearchMenu.Commit(_owner.ConfigService.Config, "features", QueryBox.Text, () => _owner.ConfigService.Save());
         CancelNavigation();
         var navigation = new CancellationTokenSource();
         _navigation = navigation;

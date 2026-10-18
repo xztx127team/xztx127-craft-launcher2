@@ -117,7 +117,7 @@ public partial class SkinModelViewerDialog : OverlayDialogControl
         _animationReady = true;
         Loaded += Viewer_Loaded;
         IsVisibleChanged += (_, _) => ApplyAnimationSettings();
-        RequestClose += (_, _) =>
+        OverlayClosed += (_, _) =>
         {
             _closing = true;
             StopAnimation();

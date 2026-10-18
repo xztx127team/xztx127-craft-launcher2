@@ -67,11 +67,11 @@
                 <TextBlock Text="内存优化（覆盖全局）" FontSize="12" FontWeight="Bold" Margin="0,4,0,4"/>
                 <ComboBox x:Name="InstanceMemOptComboDlg" Width="260" HorizontalAlignment="Left" Padding="6">
                     <ComboBoxItem Content="跟随全局设置" Tag="Follow"/>
-                    <ComboBoxItem Content="启用 — 游戏启动前进行内存优化" Tag="BeforeGameLaunch"/>
-                    <ComboBoxItem Content="启用 — 启动器打开时进行内存优化" Tag="OnLauncherOpen"/>
+                    <ComboBoxItem Content="启用 — 每次启动游戏时动态计算" Tag="BeforeGameLaunch"/>
+                    <ComboBoxItem Content="启用 — 打开启动器时预览，启动前重新计算" Tag="OnLauncherOpen"/>
                     <ComboBoxItem Content="不进行内存优化（关闭）" Tag="Disabled"/>
                 </ComboBox>
-                <TextBlock Text="「跟随全局设置」表示这个实例不单独配置，用「百宝箱」-「内存优化」里的全局开关与时机；其它三项都会覆盖全局设置，只对这个实例生效。"
+                <TextBlock Text="跟随全局时使用设置里的内存模式；本实例填写的固定内存优先。显式启用动态计算时按全局模式重新计算，不覆盖保存的手动值；启动器打开时仅额外预览。"
                            FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,8" TextWrapping="Wrap"/>
 
                 <StackPanel x:Name="GraphicsApiPanelDlg" Margin="0,6,0,8" Visibility="Collapsed">

@@ -26,6 +26,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
         _folderPath = folderPath;
         _version = version;
         InitializeComponent();
+        InputExperienceService.SetRole(InstanceMinMemoryBoxDlg, ExperienceInputRole.Memory);
+        InputExperienceService.SetRole(InstanceMaxMemoryBoxDlg, ExperienceInputRole.Memory);
 
         TitleText.Text = $"「{version.Id}」的单独设置";
         LoadSettings();
@@ -78,8 +80,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
         InstanceCustomJvmArgsBoxDlg.Text = instance.CustomJvmArgs ?? _config.CustomJvmArgs ?? "";
 
         // 内存优化：EnableMemoryOptimization 为 null 时代表"跟随全局"，非 null 时代表
-        // 这个实例显式选了开启(true)/关闭(false)。开启时再看 MemoryOptimizationTiming
-        // （同样 null=跟随全局的时机）决定具体是"启动前"还是"打开时"这两项里的哪一项。
+        // 这个实例显式选了开启(true)/关闭(false)。OnLauncherOpen 只额外预览，
+        // 开启动态模式后每次实际启动仍重新计算，不把预览结果写回手动值。
         string memOptTag;
         if (instance.EnableMemoryOptimization == false)
         {
@@ -155,6 +157,16 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
     /// <summary>把弹窗控件上的值写回配置并保存。</summary>
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        int? instanceMin, instanceMax;
+        try
+        {
+            instanceMin = ParseNullableMemory(InstanceMinMemoryBoxDlg.Text);
+            instanceMax = ParseNullableMemory(InstanceMaxMemoryBoxDlg.Text);
+            if (instanceMin.HasValue && instanceMax.HasValue && instanceMin.Value > instanceMax.Value)
+                throw new InvalidOperationException("实例最小内存不能大于最大内存。");
+        }
+        catch (InvalidOperationException ex)
+        { MessageBoxDialog.ShowWarning(ex.Message, "内存配置有误"); return; }
         var versionId = _version.Id;
 
         var selectedJava = (VersionJavaListComboDlg.SelectedItem as JavaListItem)?.Entry;
@@ -207,8 +219,6 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             _config.VersionAutoJoinServer.Remove(versionId);
         }
 
-        int? instanceMin = ParseNullableMemory(InstanceMinMemoryBoxDlg.Text);
-        int? instanceMax = ParseNullableMemory(InstanceMaxMemoryBoxDlg.Text);
         _config.SelectedVersionId = versionId;
 
         var gpuTag = (InstanceHighPerformanceGpuComboDlg.SelectedItem as ComboBoxItem)?.Tag as string ?? "Follow";
@@ -271,8 +281,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
     private static int? ParseNullableMemory(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
-        if (int.TryParse(text, out var value) && value > 0) return value;
-        throw new InvalidOperationException("实例内存必须是正整数或留空");
+        if (InputExperiencePolicy.TryParseMemoryMb(text, ConfigService.Active?.Config.Ux50InputMemoryUnits != false, out var value)) return value;
+        throw new InvalidOperationException("实例内存请输入正整数 MB、完整 MB 的容量（如 2GB），或留空跟随全局设置。");
     }
 
     private async void BackupInstanceDlg_Click(object sender, RoutedEventArgs e)
@@ -341,6 +351,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             ? joinAddr.Trim()
             : null;
         var instanceSettings = InstanceConfigService.TryLoad(Path.Combine(_folderPath, "versions", versionId));
+        var launchMemory = MemoryOptimizerService.ConstrainForJava(cfg,
+            MemoryOptimizerService.ResolveLaunchMemory(cfg, instanceSettings), JavaService.TryGetJavaBitness(javaPath));
 
         var options = new LauncherService.LaunchOptions
         {
@@ -348,8 +360,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             VersionId = versionId,
             JavaPath = javaPath,
             Account = account,
-            MinMemoryMb = instanceSettings?.MinMemoryMb ?? cfg.MinMemoryMb,
-            MaxMemoryMb = instanceSettings?.MaxMemoryMb ?? cfg.MaxMemoryMb,
+            MinMemoryMb = launchMemory.MinMemoryMb,
+            MaxMemoryMb = launchMemory.MaxMemoryMb,
             WindowWidth = cfg.WindowWidth,
             WindowHeight = cfg.WindowHeight,
             ShowConsoleWindow = cfg.EnableGameConsoleWindow,
@@ -358,7 +370,7 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             VersionTypeLabel = cfg.GameVersionTypeLabel,
             GraphicsApiPreference = instanceSettings?.GraphicsApiPreference,
             UseHighPerformanceGpu = instanceSettings?.ResolveUseHighPerformanceGpuForGame(cfg) ?? cfg.UseHighPerformanceGpuForGame,
-            CustomJvmArgs = instanceSettings?.CustomJvmArgs ?? (cfg.AdvancedMode ? cfg.CustomJvmArgs : null),
+            CustomJvmArgs = cfg.AdvancedMode ? instanceSettings?.CustomJvmArgs ?? cfg.CustomJvmArgs : null,
             PreLaunchCommand = cfg.PreLaunchCommand,
             AutoJoinServerAddress = autoJoinServer
         };

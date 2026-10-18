@@ -1,0 +1,20 @@
+{
+  "kind": "static source validation; no compilation or Windows runtime verification",
+  "baseline": {
+    "kind": "static validation; no build or runtime verification",
+    "projects": 47,
+    "xaml_files": 131,
+    "target_event_handlers": 320,
+    "target_x_names": 577,
+    "new_service_contracts": 24
+  },
+  "checks": 31889,
+  "resource_scopes": 63,
+  "resource_keys": 31282,
+  "table_styles_checked": 8,
+  "standalone_test_projects": 45,
+  "changed_xaml_handlers": 320,
+  "mapped_plugin_api_members": 191,
+  "errors": [],
+  "warnings": []
+}

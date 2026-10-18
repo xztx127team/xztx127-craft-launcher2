@@ -55,7 +55,7 @@ public partial class LoaderChoiceDialog : OverlayDialogControl
 
         // 只是用来探测"支持不支持"，不需要跟着用户的下载源/多线程设置走，用最简单的默认构造即可。
         _probeService = new ClientLoaderInstallService(DownloadSource.Official);
-        RequestClose += (_, _) => _probeService.Dispose();
+        OverlayClosed += (_, _) => _probeService.Dispose();
 
         _ = LoadAvailabilityAsync();
     }

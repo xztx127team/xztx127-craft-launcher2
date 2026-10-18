@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate the offline feature index from real XAML without constructing WPF pages.
+"""Regenerate the offline feature index from real XAML and explicit runtime settings metadata.
 
 Run from any directory: python Tests/FeatureSearchRegression/generate_catalog.py
 Use --check in static validation. Templates, popup menus and runtime item rows are
@@ -70,6 +70,12 @@ LABEL_OVERRIDES = {
     "settings.AccentBSlider": "主题颜色 RGB 蓝色分量",
     "settings.DownloadNotifyModeCombo": "下载完成通知方式",
     "settings.AccountTokenGraceDaysBox": "微软账户令牌离线宽限天数",
+    "settings.FeatureSearchWidthSlider": "搜索框宽度",
+    "settings.FeatureSearchHeightSlider": "搜索框高度",
+    "settings.FeatureSearchOffsetXBox": "搜索框水平位置偏移",
+    "settings.FeatureSearchOffsetYBox": "搜索框垂直位置偏移",
+    "settings.FeatureSearchOpacitySlider": "搜索框不透明度",
+    "ai.TaskTrackingButton": "任务 / 普通对话切换",
     "downloads.ResourceGameVersionBox": "游戏版本",
 }
 
@@ -145,6 +151,63 @@ def make_entry(identifier, page, title, keywords="", name=None, target=None, tab
     return result
 
 
+# SettingsPage.Experience builds these controls directly from explicit metadata.
+# Parse only public, supported auto-properties; reject any annotation shape we do
+# not understand instead of silently inventing a destination or missing one.
+CS_STRING = r'"(?:\\.|[^"\\])*"'
+EXPERIENCE_PROPERTY = re.compile(
+    r'\[ExperiencePreference\(\s*(?P<group>' + CS_STRING + r')\s*,\s*(?P<label>' + CS_STRING
+    + r')(?P<options>(?:[^"\]]|' + CS_STRING + r')*)\)\]\s*'
+      r'public\s+(?P<type>[A-Za-z_]\w*)\s+(?P<name>[A-Za-z_]\w*)\s*\{\s*get;\s*set;\s*\}', re.S)
+
+
+def experience_preferences():
+    runtime = (APP / "Views/SettingsPage.Experience.cs").read_text(encoding="utf-8-sig")
+    for contract in ('GetCustomAttribute<ExperiencePreferenceAttribute>()',
+                     'control.Name = "Experience_" + property.Name;',
+                     'Name = "ExperienceDetailsGroup", Header = "体验细节"',
+                     'SettingsRootPanel.Children.Insert(index, groupRoot);',
+                     'type == typeof(bool)', 'type == typeof(int)', 'type == typeof(double)',
+                     'type == typeof(string)', 'type.IsEnum'):
+        if contract not in runtime:
+            raise ValueError("Runtime experience-setting destination contract changed: " + contract)
+    settings_page = (APP / "Views/SettingsPage.xaml.cs").read_text(encoding="utf-8-sig")
+    if 'InitializeExperienceSettings(cfg);' not in settings_page:
+        raise ValueError("Experience settings are not initialized by SettingsPage")
+    model_paths = sorted((APP / "Models").glob("*.cs"))
+    enums = set()
+    for path in model_paths:
+        enums.update(re.findall(r'\b(?:public|internal)\s+enum\s+([A-Za-z_]\w*)', path.read_text(encoding="utf-8-sig")))
+    supported = {"bool", "int", "double", "string"} | enums
+    preferences = []
+    for path in sorted((APP / "Models").glob("AppConfig*.cs")):
+        content = path.read_text(encoding="utf-8-sig")
+        matches = list(EXPERIENCE_PROPERTY.finditer(content))
+        markers = len(re.findall(r'\[ExperiencePreference\s*\(', content))
+        if len(matches) != markers:
+            raise ValueError(f"{path.name}: {markers} explicit settings annotations, but {len(matches)} supported property declarations parsed")
+        for match in matches:
+            kind, name = match["type"], match["name"]
+            # IsExperienceType excludes unsupported types, even when annotated.
+            if kind not in supported:
+                continue
+            try:
+                group, label = json.loads(match["group"]), json.loads(match["label"])
+                options = {key: json.loads(value) for key, value in re.findall(
+                    r'\b(Description|Unit)\s*=\s*(' + CS_STRING + r')', match["options"])}
+            except json.JSONDecodeError as ex:
+                raise ValueError(f"{path.name}: setting labels must use supported explicit C# string literals: {name}") from ex
+            if not readable(group) or not readable(label):
+                raise ValueError(f"{path.name}: setting group and label must be readable: {name}")
+            preferences.append({"Property": name, "Control": "Experience_" + name,
+                "Group": group, "Label": label, "Description": options.get("Description", ""),
+                "Unit": options.get("Unit", ""), "Type": kind})
+    names = [item["Control"] for item in preferences]
+    if len(names) != len(set(names)):
+        raise ValueError("Duplicate dynamically named experience settings")
+    return sorted(preferences, key=lambda item: (item["Group"], item["Property"]))
+
+
 def build():
     result = []
     for file, page in PAGES.items():
@@ -172,8 +235,9 @@ def build():
                     heading, heading_resource = candidate, candidate_key
             if kind not in CONTROLS or any(tag(p) in SKIP_PARENTS or tag(p).endswith(".Resources") for p in chain):
                 continue
-            # Search UI is not itself a useful search destination.
-            if name and name != "ShowFeatureSearchCheck" and any(word in name for word in ("FeatureSearch", "ToolboxSearch", "HomeSearch", "SettingsSearch")):
+            # Search widgets are not destinations; their appearance controls in Settings are.
+            search_setting = page[0] == "settings" and name and name.startswith("FeatureSearch")
+            if name and name != "ShowFeatureSearchCheck" and not search_setting and any(word in name for word in ("FeatureSearch", "ToolboxSearch", "HomeSearch", "SettingsSearch")):
                 continue
             if page[0] == "main" and name != "LaunchGameBtn":
                 continue  # page navigation is already indexed; ignore window chrome and overlays.
@@ -201,6 +265,8 @@ def build():
                 words += " 启动游戏 开始游戏 运行游戏 launch game play minecraft"
             if name == "CatVersion":
                 words += " 下载游戏 下载 Minecraft 安装游戏"
+            if name == "TaskTrackingButton":
+                words += " 非任务 普通对话 设为任务 设为非任务 关闭任务"
             if not name:
                 identity = (label, tab, section_key)
                 unnamed[identity] += 1
@@ -213,13 +279,45 @@ def build():
             result.append(make_entry(page[0] + "." + suffix, page, label, words,
                 name, label, tab, key, section, section_resource, section_key))
 
+    preferences = experience_preferences()
+    if preferences:
+        settings = PAGES["SettingsPage"]
+        result.append(make_entry("settings.ExperienceDetailsGroup", settings, "体验细节",
+            "体验 设置 细节 自定义 偏好", name="ExperienceDetailsGroup", target="体验细节", section="体验细节"))
+        for preference in preferences:
+            words = " ".join((preference["Description"], preference["Unit"], preference["Group"], preference["Property"], "体验细节"))
+            result.append(make_entry("settings." + preference["Control"], settings, preference["Label"], words,
+                name=preference["Control"], target=preference["Label"], section="体验细节 › " + preference["Group"],
+                section_key="ExperienceDetailsGroup"))
+        # This action is a real, named control in the code-built experience group.
+        runtime = (APP / "Views/SettingsPage.AprilFools.cs").read_text(encoding="utf-8-sig")
+        for contract in ('Name = "AprilFoolsCodeButton"', 'Content = "输入彩蛋码"'):
+            if contract not in runtime:
+                raise ValueError("April Fools code destination changed: " + contract)
+        result.append(make_entry("settings.AprilFoolsCodeButton", settings, "输入彩蛋码",
+            "输入彩蛋码 跳过 xztx127 关闭愚人节菜单 确认挑战 文字游戏 闯关 趣味与彩蛋 AprilFoolsCodeButton 体验细节",
+            name="AprilFoolsCodeButton", target="输入彩蛋码", section="体验细节 › 趣味与彩蛋",
+            section_key="ExperienceDetailsGroup"))
+
     # Code-built pages have no XAML; keep an explicit, auditable list of real destinations.
-    world = ("worlds", "存档", "世界 编辑 存档 NBT 投影 结构 world save")
+    world = ("worlds", "存档", "世界 编辑 存档 地图 二维 地表 NBT 投影 结构 map world save")
     result.append(make_entry("worlds.page", world, "存档"))
     for i, title in enumerate(("打开存档目录", "查看投影 / 结构文件", "允许作弊", "极限模式", "保存设置", "修改并生成副本")):
         result.append(make_entry("worlds.action." + str(i), world, title, target=title, tab=0 if i >= 2 else None))
-    for i, title in enumerate(("世界设置", "投影 / 材料", "NBT 结构")):
+    for i, title in enumerate(("世界设置", "投影 / 材料", "NBT 结构", "二维地图")):
         result.append(make_entry("worlds.tab." + str(i), world, title, target=title, tab=i))
+    for key, title, target in (
+        ("overview", "二维地表地图预览", "预览"),
+        ("dimension", "地图维度选择（主世界 / 下界 / 末地）", "维度"),
+        ("center", "地图中心坐标与预览半径", "中心 X"),
+        ("spawn", "地图定位出生点", "出生点"),
+        ("player", "地图定位玩家位置", "玩家位置"),
+        ("height", "地图高度图", "高度图"),
+        ("grid", "地图区块网格", "区块网格"),
+        ("export", "地图导出 PNG", "导出 PNG"),
+        ("fit", "地图适应窗口与缩放平移", "适应窗口"),
+    ):
+        result.append(make_entry("worlds.map." + key, world, title, target=target, tab=3))
     world_code = (APP / "Services/Worlds/WorldArchiveService.cs").read_text(encoding="utf-8-sig")
     for key, title in re.findall(r'new\("([\w.]+)", "([^"]+)", "(?:string|int|long|float|double|bool)"', world_code):
         if title in {"允许作弊", "极限模式"}:

@@ -1,34 +1,18 @@
 using System.IO;
-using System.Text.Json;
-using System.Text.RegularExpressions;
-using XCL2.App.Models;
 
 namespace XCL2.App.Services;
 
 /// <summary>
-/// 判断某个实例的游戏版本是否支持触屏模式。
-/// Mojang 在 Java 版 26.3-snapshot-4 里更换了渲染器，从该快照起（含）触屏可用；
-/// 在此之前的版本（26.3 正式版以下，含 26.3-snapshot-1~3、26.2 及更早、所有 1.x 与周快照）触屏行为异常。
+/// 判断实例是否使用旧版触屏兼容路径。
+/// 26.3-snapshot-4 起窗口和输入库由 GLFW 切换到 SDL3；此前使用 GLFW/LWJGL 兼容层。
 /// </summary>
 public static class TouchModeVersionPolicy
 {
-    private const int SupportedMajor = 26;
-    private const int SupportedMinor = 3;
-    private const int SupportedSnapshot = 4;
-
     public const string WarningMessage =
-        "mojang在Java版26.3-snapshot-4里面换了下原来屎山渲染器，这个版本以后的版本支持触屏，" +
-        "而在这个版本以前的版本，触屏就跟喝错药了似的，当前 26.3 正式版触屏属于正式版，" +
-        "26.3 26.3-snapshot-4 以下的版本就属于预览版的触屏模式，所以建议使用 26.3 及以上的正式版来游玩。\n\n是否要继续？";
+        "此版本将使用 GLFW/LWJGL 触屏兼容模式。26.3 第 3 快照及更早版本使用旧路径，" +
+        "第 4 快照及以后使用 SDL3 路径。\n\n是否继续开启触屏模式？";
 
-    private static readonly Regex NewSnapshot =
-        new(@"(?<![\d.])(\d{1,2})\.(\d{1,2})(?:\.\d+)?-snapshot-(\d+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex WeeklySnapshot =
-        new(@"(?<!\d)\d{2}w\d{1,2}[a-z]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private static readonly Regex Numeric =
-        new(@"(?<![\d.])(\d{1,2})\.(\d{1,2})", RegexOptions.Compiled);
-
-    /// <summary>读取实例 json 与目录名，判断该实例是否属于"不支持触屏"的版本；无法判断时返回 false（不打扰）。</summary>
+    /// <summary>读取实例 json 与目录名，判断是否属于旧版兼容路径；无法判断时返回 false（不打扰）。</summary>
     public static bool IsBelowSupported(string versionDir, string versionId)
     {
         var root = Directory.GetParent(versionDir)?.Parent?.FullName;

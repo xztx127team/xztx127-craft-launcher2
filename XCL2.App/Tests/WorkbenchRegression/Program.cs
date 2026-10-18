@@ -7,6 +7,8 @@ using XCL2.App.Services.Workbench;
 int checks = 0;
 void Check(bool ok, string name) { if (!ok) throw new Exception(name); checks++; }
 void Throws(Action action, string name) { bool threw = false; try { action(); } catch { threw = true; } Check(threw, name); }
+void Rejects<T>(Action action, string name) where T : Exception
+{ bool rejected = false; try { action(); } catch (T) { rejected = true; } Check(rejected, name); }
 var root = Path.Combine(Path.GetTempPath(), "xcl-workbench-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
 try
 {
@@ -17,6 +19,32 @@ try
     using (var jar = ZipFile.Open(Path.Combine(versionDir, "26.3.jar"), ZipArchiveMode.Create))
     using (var writer = new StreamWriter(jar.CreateEntry("version.json").Open())) writer.Write("{\"id\":\"26.3-snapshot-3\",\"release_target\":\"26.3\"}");
     Check(TouchVersionPolicy.Resolve(root, "26.3") == false, "real jar identity overrides folder name");
+    foreach (var (id, expected) in new (string, bool)[]
+    {
+        ("26.3 Snapshot 3", false), ("26.3 Snapshot 4", true),
+        ("26.3 第三个快照", false), ("26.3 第四快照", true),
+        ("fabric-loader-0.16.14-26.3-snapshot-3", false),
+        ("fabric-loader-0.16.14-26.3-snapshot-4", true),
+        ("26.3-pre-1", true), ("26.3.0", true), ("26.3.1", true), ("26.3.3", true)
+    }) Check(TouchVersionPolicy.FromVersion(id) == expected, "snapshot boundary / patch: " + id);
+    foreach (var id in new[] { "26.3-snapshot-", "26.3-snapshot-invalid", "26.3 T", "26.3-snapshot-99999999999999999999" })
+        Check(TouchVersionPolicy.FromVersion(id) == null, "malformed snapshot cannot become a release: " + id);
+    var child = Path.Combine(root, "versions", "renamed-child"); Directory.CreateDirectory(child);
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"),
+        "{\"id\":\"26.3\",\"inheritsFrom\":\"26.3-snapshot-3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == false, "missing T3 parent still overrides renamed child id");
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"),
+        "{\"id\":\"1.20.3\",\"inheritsFrom\":\"26.3-snapshot-4\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == true, "missing T4 parent still overrides renamed child id");
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"),
+        "{\"id\":\"26.3\",\"clientVersion\":\"26.3-snapshot-3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == false, "clientVersion retains snapshot number");
+    using (var jar = ZipFile.Open(Path.Combine(child, "renamed-child.jar"), ZipArchiveMode.Create))
+    using (var writer = new StreamWriter(jar.CreateEntry("version.json").Open()))
+        writer.Write("{\"id\":\"26.3-snapshot-4\",\"release_target\":\"26.3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == true, "actual T4 jar overrides stale T3 metadata");
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"), "{\"id\":\"26.3\",\"inheritsFrom\":\"26.3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == false, "actual inherited base T3 jar has priority over child jar");
     Check(TouchInputModePolicy.Classify(true, false, true, true, false, true) == false, "capture wins over overlay cursor");
     Check(TouchInputModePolicy.Classify(false, true, true, false, true, true) == null, "suppressed is ambiguous");
     Check(TouchInputModePolicy.Classify(false, true, true, true, false, true) == true, "menu cursor");
@@ -50,6 +78,29 @@ try
     store.Update(task.Id, t => t.Mode = "Build"); Check(store.Get(task.Id).Steps[0].Status == "completed", "Plan/Build transition retains progress");
     Throws(() => store.Update(task.Id, t => t.Steps.Add(new WorkStep { Title = "bad", Status = "in_progress" })), "one active step");
     Check(store.Get(task.Id).Steps.Count == 2, "failed update leaves disk unchanged");
+
+    // Only completed tasks can be removed. A deleted record cannot be recreated by
+    // a stale snapshot retained by another conversation or an old UI selection.
+    Check(store.TryGet(Guid.NewGuid().ToString("N")) == null, "missing task lookup is optional");
+    foreach (var status in new[] { "paused", "running", "interrupted", "archived" })
+    {
+        var protectedTask = store.Create("keep " + status, "retain unfinished work");
+        store.Update(protectedTask.Id, t => t.Status = status);
+        Rejects<InvalidOperationException>(() => store.DeleteCompleted(protectedTask.Id), "cannot delete task in state " + status);
+        Check(store.Get(protectedTask.Id).Status == status, "rejected deletion preserves task in state " + status);
+    }
+    var finished = store.Create("finished", "remove only the completed record");
+    store.Update(finished.Id, t =>
+    {
+        t.Status = "completed";
+        t.Steps.Add(new WorkStep { Title = "verified", Status = "completed", Evidence = "passed" });
+    });
+    var staleFinished = store.Get(finished.Id);
+    var countBeforeDelete = store.List().Count;
+    store.DeleteCompleted(finished.Id);
+    Check(store.TryGet(finished.Id) == null && store.List().Count == countBeforeDelete - 1, "completed task removed from persisted list");
+    Rejects<IOException>(() => store.Save(staleFinished), "deleted task cannot be resurrected by old revision");
+    Check(new TaskStore(Path.Combine(root, "tasks")).TryGet(finished.Id) == null, "stale save leaves completed task deleted after reload");
     Console.WriteLine($"PASS {checks} workbench checks");
 }
 finally { Directory.Delete(root, true); }

@@ -23,14 +23,30 @@ public partial class InputModeSelectDialog : OverlayDialogControl
     /// <summary>true = 触屏模式；false = 键鼠模式；null = 用户直接关掉了弹窗（按键鼠处理）。</summary>
     public bool? UseTouchMode { get; private set; }
 
-    /// <summary>用户是否勾选了"记住这次选择，以后不再询问"。</summary>
-    public bool RememberChoice => RememberCheck.IsChecked == true;
+    /// <summary>弹窗内的明确长期选择；通知按钮仅作用于本次启动。</summary>
+    public bool RememberChoice => !_selectedFromNotification && RememberCheck.IsChecked == true;
 
     /// <summary>本次是否是倒计时超时自动选的键鼠模式（调用方据此不做"记住选择"之类的持久化）。</summary>
     public bool TimedOut { get; private set; }
 
     private readonly DispatcherTimer _countdown = new() { Interval = TimeSpan.FromSeconds(1) };
     private int _remainingSeconds;
+    private bool _selectedFromNotification;
+
+    /// <summary>通知与弹窗共用这一个倒计时；null 表示已暂停或设置为不自动选择。</summary>
+    internal int? RemainingCountdownSeconds => _countdown.IsEnabled ? _remainingSeconds : null;
+
+    /// <summary>通知正文被点击后给用户充分时间在原弹窗内选择。</summary>
+    internal void PauseAutoSelection() => CancelCountdown();
+
+    /// <summary>通知按钮只对仍在等待选择的当前弹窗有效。</summary>
+    internal bool TrySelectFromNotification(bool useTouch)
+    {
+        if (!OverlayDialogService.IsOpen(this)) return false;
+        _selectedFromNotification = true;
+        SelectMode(useTouch);
+        return true;
+    }
 
     public InputModeSelectDialog(bool defaultTouch, int countdownSeconds = 10)
     {
@@ -93,16 +109,15 @@ public partial class InputModeSelectDialog : OverlayDialogControl
         => CountdownText.Text = $"{_remainingSeconds} 秒后自动以「键鼠模式」启动（点一下弹窗即可取消自动选择）";
 
     private void Keyboard_Click(object sender, RoutedEventArgs e)
-    {
-        _countdown.Stop();
-        UseTouchMode = false;
-        CloseWith(true);
-    }
+        => SelectMode(false);
 
     private void Touch_Click(object sender, RoutedEventArgs e)
+        => SelectMode(true);
+
+    private void SelectMode(bool useTouch)
     {
         _countdown.Stop();
-        UseTouchMode = true;
+        UseTouchMode = useTouch;
         CloseWith(true);
     }
 }

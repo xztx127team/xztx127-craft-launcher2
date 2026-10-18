@@ -84,7 +84,7 @@ internal static class Program
             {
                 ((TextBox)seed.FindName("SeedBox")).Text = "12345";
                 AssertMissingComponents(seed, "OpenMapButton", "SeedQueryStatusText");
-                AssertMissingComponents(web, "OpenEmbeddedButton", "Web2StatusText");
+                AssertWeb2MissingComponents(web);
             }
 
             AssertCleanup(seed);
@@ -103,6 +103,26 @@ internal static class Program
         Check(ToastService.Warnings.Count == warnings + 1, "首次缺组件应该有气泡提醒。");
         button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Check(ToastService.Warnings.Count == warnings + 1, "重复请求不应反复显示气泡。");
+    }
+
+    private static void AssertWeb2MissingComponents(Web2BrowserTool control)
+    {
+        var button = (Button)control.FindName("OpenEmbeddedButton");
+        var external = (Button)control.FindName("OpenExternalButton");
+        var address = (TextBox)control.FindName("UrlBox");
+        var warnings = ToastService.Warnings.Count;
+        Check(external.Visibility == Visibility.Collapsed, "尚未尝试内嵌打开就显示了外部入口。");
+        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(button.IsEnabled, "Web2 失败后应允许重新尝试当前地址。");
+        Check(external.Visibility == Visibility.Visible, "缺少组件时没有提供当前地址的浏览器入口。");
+        Check(((TextBlock)control.FindName("Web2StatusText")).Text.Contains("完整发布包"), "缺少组件时没有修复说明。");
+        Check(ToastService.Warnings.Count == warnings, "Web2 已有就地失败说明，不应重复弹气泡。");
+        address.Text = "https://example.com/new-address";
+        Check(external.Visibility == Visibility.Collapsed, "修改网址后保留了旧失败入口。");
+        button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Check(external.Visibility == Visibility.Visible && external.ToolTip as string == address.Text,
+            "重新尝试后外部入口没有指向新地址。");
+        Check(ToastService.Warnings.Count == warnings, "重复尝试不应增加气泡。");
     }
 
     private static void AssertCleanup(UserControl control)

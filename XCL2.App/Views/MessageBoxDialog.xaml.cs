@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using XCL2.App.Services;
@@ -126,8 +126,24 @@ public partial class MessageBoxDialog : OverlayDialogControl
     {
         InitializeComponent();
 
-        TitleText.Text = title;
-        MessageText.Text = message;
+        TitleText.Text = kind == XclMessageKind.Error ? DiagnosticRedactionService.Sanitize(title, 256) : title;
+        MessageText.Text = kind == XclMessageKind.Error ? DiagnosticRedactionService.Sanitize(message, 16000) : message;
+        if (kind == XclMessageKind.Error)
+        {
+            ErrorCodeText.Text = "错误编号：" + FriendlyErrorDialog.GetCode(message);
+            ErrorCodeText.Visibility = Visibility.Visible;
+            var copy = new Button
+            {
+                Content = "复制说明", Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0, 0, 8, 0),
+                Style = (Style)FindResource("SecondaryButton")
+            };
+            copy.Click += (_, _) =>
+            {
+                try { Clipboard.SetText(ErrorCodeText.Text + "\n" + TitleText.Text + "\n" + MessageText.Text); copy.Content = "已复制"; }
+                catch { copy.ToolTip = "剪贴板暂时不可用，请重试。"; }
+            };
+            ButtonPanel.Children.Add(copy);
+        }
         IconText.Text = kind switch
         {
             XclMessageKind.Success => "✔",

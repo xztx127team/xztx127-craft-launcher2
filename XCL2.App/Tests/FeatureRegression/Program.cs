@@ -7,8 +7,18 @@ using XCL2.App.Services.Plugins;
 
 int checks = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); checks++; }
-void Reject(Action action, string name) { try { action(); } catch (Exception) { checks++; return; } throw new Exception("FAIL: " + name); }
-async Task RejectAsync(Func<Task> action, string name) { try { await action(); } catch (Exception) { checks++; return; } throw new Exception("FAIL: " + name); }
+void Reject<TException>(Action action, string name) where TException : Exception
+{
+    try { action(); }
+    catch (TException) { checks++; return; }
+    throw new Exception($"FAIL: {name}; expected {typeof(TException).Name}");
+}
+async Task RejectAsync<TException>(Func<Task> action, string name) where TException : Exception
+{
+    try { await action().WaitAsync(TimeSpan.FromSeconds(10)); }
+    catch (TException) { checks++; return; }
+    throw new Exception($"FAIL: {name}; expected {typeof(TException).Name}");
+}
 NbtTag Compound(params (string, NbtTag)[] fields) => new(10, fields.ToDictionary(p => p.Item1, p => p.Item2));
 NbtTag List(byte type, params NbtTag[] values) => new(9, new NbtList(type, values.ToList()));
 NbtTag I(int value) => new(3, value);
@@ -31,7 +41,7 @@ int outputStarts = 0;
 using (var streamError = new MemoryStream(Encoding.UTF8.GetBytes(Frame(new { content = "<<XCL2_" })
     + "data: {\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"later error\"}}\n\n")))
 {
-    await RejectAsync(() => AiStreamingCompletion.ReadAsync(streamError, null, null, default,
+    await RejectAsync<IOException>(() => AiStreamingCompletion.ReadAsync(streamError, null, null, default,
         providerError: data => sawProviderError = data.GetProperty("error").GetProperty("code").GetString() == "rate_limit_exceeded",
         responseStarted: () => outputStarts++), "provider error ends a partially received stream");
 }
@@ -41,25 +51,31 @@ string interruptedThought = "";
 using (var partialReasoning = new MemoryStream(Encoding.UTF8.GetBytes(Frame(new { reasoning_content = "思考" })
     + Frame(new { reasoning_content = longReasoning }))))
 {
-    await RejectAsync(() => AiStreamingCompletion.ReadAsync(partialReasoning, null, (thought, _) => interruptedThought = thought,
+    await RejectAsync<IOException>(() => AiStreamingCompletion.ReadAsync(partialReasoning, null, (thought, _) => interruptedThought = thought,
         default, responseStarted: () => outputStarts++), "reasoning-only premature EOF is a failed stream");
 }
 Check(outputStarts == 1 && interruptedThought == "思考" + longReasoning,
     "reasoning-only output is never replayed and final throttled text remains complete on error");
 Check(AiStreamingCompletion.VisibleText("回答<<XCL") == "回答", "partial marker prefix does not flash");
 Check(AiStreamingCompletion.VisibleText("回答<<XCL2_ACCESS:{\"action\":") == "回答", "unfinished command hidden from answer");
-await RejectAsync(() => Stream(Frame(new { content = "已收到" })), "EOF without finish is a failed stream");
-await RejectAsync(() => Stream(Frame(new { content = "<<XCL2_ACCESS:" }, "length")), "truncated controls never become completed replies");
-await RejectAsync(() => Stream("data: {bad-json}\n\n"), "malformed SSE is rejected");
+await RejectAsync<IOException>(() => Stream(Frame(new { content = "已收到" })), "EOF without finish is a failed stream");
+await RejectAsync<IOException>(() => Stream(Frame(new { content = "<<XCL2_ACCESS:" }, "length")), "truncated controls never become completed replies");
+await RejectAsync<InvalidOperationException>(() => Stream("data: {bad-json}\n\n"), "malformed SSE is rejected");
 var cancellation = new CancellationTokenSource(); cancellation.Cancel();
 using (var input = new MemoryStream(Encoding.UTF8.GetBytes(Frame(new { content = "a" }, "stop"))))
-    await RejectAsync(() => AiStreamingCompletion.ReadAsync(input, null, null, cancellation.Token), "stream cancellation");
+    await RejectAsync<OperationCanceledException>(() => AiStreamingCompletion.ReadAsync(input, null, null, cancellation.Token), "stream cancellation");
 var firstDelivered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 using (var gated = new GatedStream(Encoding.UTF8.GetBytes(Frame(new { content = "即时" })), Encoding.UTF8.GetBytes("data: [DONE]\n\n"), release.Task))
 {
     var pending = AiStreamingCompletion.ReadAsync(gated, _ => firstDelivered.TrySetResult(), null, default);
-    await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(3)); Check(!pending.IsCompleted, "content visible before stream completion"); release.SetResult(); await pending;
+    try
+    {
+        await firstDelivered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Check(!pending.IsCompleted, "content visible before stream completion");
+    }
+    finally { release.TrySetResult(); }
+    await pending.WaitAsync(TimeSpan.FromSeconds(10));
 }
 var root = Path.Combine(Path.GetTempPath(), "XCL2-feature-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
 try
@@ -98,22 +114,22 @@ try
     WorldArchiveService.Update(world, new("新世界", 1, 3, true, false));
     Check(WorldArchiveService.Read(world).Settings is { Seed: long.MinValue, DayTime: 6000, Raining: true, Player.XpLevel: 42 }, "old five-argument edit preserves all optional fields");
     var beforeInvalid = File.ReadAllBytes(level); var backupsBeforeInvalid = Directory.GetFiles(Path.Combine(world, "xcl2-backups")).Length;
-    Reject(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { BorderSize = double.NaN }), "non-finite border rejected");
-    Reject(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { Player = new() { FoodLevel = 21 } }), "out-of-range player state rejected");
-    Reject(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { DayTime = -1 }), "negative time rejected");
-    Reject(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { GameRules = new Dictionary<string, string> { ["keepInventory"] = "7" } }), "boolean rule rejects integer replacement");
+    Reject<ArgumentException>(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { BorderSize = double.NaN }), "non-finite border rejected");
+    Reject<ArgumentException>(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { Player = new() { FoodLevel = 21 } }), "out-of-range player state rejected");
+    Reject<ArgumentException>(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { DayTime = -1 }), "negative time rejected");
+    Reject<ArgumentException>(() => WorldArchiveService.Update(world, new("invalid", 0, 2, false, false) { GameRules = new Dictionary<string, string> { ["keepInventory"] = "7" } }), "boolean rule rejects integer replacement");
     Check(File.ReadAllBytes(level).SequenceEqual(beforeInvalid) && Directory.GetFiles(Path.Combine(world, "xcl2-backups")).Length == backupsBeforeInvalid, "invalid changes leave original and backups untouched");
     var noPlayer = Path.Combine(root, "server-world"); Directory.CreateDirectory(noPlayer);
     new NbtDocument("", Compound(("Data", Compound(("LevelName", new(8, "server")), ("GameType", I(0)))))).Save(Path.Combine(noPlayer, "level.dat"));
     var noPlayerBefore = File.ReadAllBytes(Path.Combine(noPlayer, "level.dat"));
-    Reject(() => WorldArchiveService.Update(noPlayer, new("server", 0, 2, false, false) { Player = new() { Health = 20 } }), "player edits cannot create single-player data in multiplayer saves");
+    Reject<InvalidDataException>(() => WorldArchiveService.Update(noPlayer, new("server", 0, 2, false, false) { Player = new() { Health = 20 } }), "player edits cannot create single-player data in multiplayer saves");
     Check(File.ReadAllBytes(Path.Combine(noPlayer, "level.dat")).SequenceEqual(noPlayerBefore), "missing player rejection is non-destructive");
     var copy = Path.Combine(root, "copy"); WorldArchiveService.GenerateCopy(world, copy, new("副本", 0, 1, false, false));
     Check(WorldArchiveService.Read(copy).Settings.Name == "副本" && WorldArchiveService.Read(world).Settings.Name == "新世界", "copy leaves original unchanged");
-    Reject(() => WorldArchiveService.GenerateCopy(world, world + Path.DirectorySeparatorChar + "nested", new("x", 0, 0, false, false)), "nested destination rejected");
-    Reject(() => WorldArchiveService.GenerateCopy(world, copy, new("x", 0, 0, false, false)), "existing destination rejected");
+    Reject<IOException>(() => WorldArchiveService.GenerateCopy(world, world + Path.DirectorySeparatorChar + "nested", new("x", 0, 0, false, false)), "nested destination rejected");
+    Reject<IOException>(() => WorldArchiveService.GenerateCopy(world, copy, new("x", 0, 0, false, false)), "existing destination rejected");
     using (var held = new FileStream(Path.Combine(world, "session.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-        Reject(() => WorldArchiveService.Update(world, new("x", 0, 0, false, false)), "busy world rejected");
+        Reject<IOException>(() => WorldArchiveService.Update(world, new("x", 0, 0, false, false)), "busy world rejected");
     var structure = Path.Combine(root, "structure.nbt");
     new NbtDocument("", Compound(("size", List(3, I(2), I(2), I(2))), ("palette", List(10, Compound(("Name", new(8, "minecraft:stone"))))), ("blocks", List(10, Compound(("pos", List(3, I(1), I(1), I(0))), ("state", I(0))))))).Save(structure);
     var projection = StructureInspector.Read(structure);
@@ -122,11 +138,19 @@ try
     new NbtDocument("", Compound(("Regions", Compound(("negative", Compound(("Size", Compound(("x", I(-2)), ("y", I(1)), ("z", I(1)))), ("Position", Compound(("x", I(0)), ("y", I(0)), ("z", I(0)))), ("BlockStatePalette", List(10, Compound(("Name", new(8, "minecraft:air"))), Compound(("Name", new(8, "minecraft:stone"))))), ("BlockStates", new(12, new long[] { 4 })))))))).Save(litematic);
     Check(StructureInspector.Read(litematic) is { Width: 2, Blocks: 1 }, "negative litematic dimensions and palette decoding");
     var bad = Path.Combine(root, "bad.nbt"); File.WriteAllBytes(bad, new byte[] { 10, 0, 0, 7, 0, 1, 120, 127, 255, 255, 255 });
-    Reject(() => NbtDocument.Load(bad), "oversized NBT array rejected before allocation");
+    Reject<InvalidDataException>(() => NbtDocument.Load(bad), "oversized NBT array rejected before allocation");
     var payload = Path.Combine(root, "package"); Directory.CreateDirectory(payload); File.WriteAllText(Path.Combine(payload, "plugin.json"), "{}"); File.WriteAllText(Path.Combine(payload, "test.dll"), "test fixture");
     var fingerprint = PluginPackageSignature.SignLocal(payload); Check(PluginPackageSignature.Verify(payload) == fingerprint, "signature verified");
-    File.AppendAllText(Path.Combine(payload, "test.dll"), "tamper"); Reject(() => PluginPackageSignature.Verify(payload), "changed signed file rejected");
-    PluginPackageSignature.SignLocal(payload); File.WriteAllText(Path.Combine(payload, "extra.dll"), "extra"); Reject(() => PluginPackageSignature.Verify(payload), "unsigned extra file rejected");
+    var exportedPlugin = Path.Combine(root, "exported-plugin");
+    PluginUpgradeExport.ExportDirectory(payload, exportedPlugin, CancellationToken.None,
+        validate: path => { _ = PluginPackageSignature.Verify(path); });
+    Check(PluginPackageSignature.Verify(exportedPlugin) == fingerprint, "DLL folder export retains the complete signature and manifest");
+    var xcl = Path.Combine(root, "exported-plugin.xcl");
+    PluginUpgradeExport.ExportZip(payload, xcl, CancellationToken.None);
+    var unpacked = Path.Combine(root, "unpacked-plugin"); ZipFile.ExtractToDirectory(xcl, unpacked);
+    Check(PluginPackageSignature.Verify(unpacked) == fingerprint, "XCL round trip retains signed content");
+    File.AppendAllText(Path.Combine(payload, "test.dll"), "tamper"); Reject<InvalidDataException>(() => PluginPackageSignature.Verify(payload), "changed signed file rejected");
+    PluginPackageSignature.SignLocal(payload); File.WriteAllText(Path.Combine(payload, "extra.dll"), "extra"); Reject<InvalidDataException>(() => PluginPackageSignature.Verify(payload), "unsigned extra file rejected");
     var plugins = Path.Combine(root, "Plugins"); Directory.CreateDirectory(Path.Combine(plugins, "installed")); Directory.CreateDirectory(Path.Combine(plugins, "config"));
     File.WriteAllText(Path.Combine(plugins, "installed", "old.dll"), "old"); File.WriteAllText(Path.Combine(plugins, "config", "config.json"), "before");
     var snapshot = PluginUpgradeBackup.Create(plugins); File.WriteAllText(Path.Combine(plugins, "installed", "old.dll"), "changed"); File.WriteAllText(Path.Combine(plugins, "config", "config.json"), "after");
@@ -134,7 +158,7 @@ try
     Check(File.ReadAllText(Path.Combine(plugins, "installed", "old.dll")) == "old" && File.ReadAllText(Path.Combine(plugins, "config", "config.json")) == "before", "backup restores plugin and config");
     var corrupt = Path.Combine(root, "bad-backup.zip"); File.Copy(snapshot, corrupt);
     using (var zip = ZipFile.Open(corrupt, ZipArchiveMode.Update)) { var entry = zip.GetEntry("installed/old.dll")!; entry.Delete(); using var writer = new StreamWriter(zip.CreateEntry("installed/old.dll").Open()); writer.Write("corrupt"); }
-    Reject(() => PluginUpgradeBackup.Restore(corrupt, plugins), "corrupt backup rejected");
+    Reject<InvalidDataException>(() => PluginUpgradeBackup.Restore(corrupt, plugins), "corrupt backup rejected");
     Check(File.ReadAllText(Path.Combine(plugins, "installed", "old.dll")) == "old", "failed restore leaves installation untouched");
 }
 finally { Directory.Delete(root, true); }

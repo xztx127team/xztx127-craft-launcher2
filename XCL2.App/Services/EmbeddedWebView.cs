@@ -50,21 +50,26 @@ internal static class EmbeddedWebView
 
     // 不能内联：否则 JIT 可能在调用方进入 try/catch 之前加载 SDK 类型。
     [MethodImpl(MethodImplOptions.NoInlining)]
-    public static IEmbeddedWebView Create(Action<bool, string> navigationCompleted, bool enableDevTools = false) =>
-        new WebViewImplementation(navigationCompleted, enableDevTools);
+    public static IEmbeddedWebView Create(Action<bool, string> navigationCompleted, bool enableDevTools = false,
+        Action<string>? navigationStarting = null) =>
+        new WebViewImplementation(navigationCompleted, enableDevTools, navigationStarting);
 
     private sealed class WebViewImplementation : IEmbeddedWebView
     {
         private readonly WebView2 _view;
         private readonly Action<bool, string> _navigationCompleted;
         private readonly bool _enableDevTools;
+        private readonly Action<string>? _navigationStarting;
+        private ulong? _latestNavigationId;
         private bool _disposed;
         private bool _subscribed;
 
-        public WebViewImplementation(Action<bool, string> navigationCompleted, bool enableDevTools)
+        public WebViewImplementation(Action<bool, string> navigationCompleted, bool enableDevTools,
+            Action<string>? navigationStarting)
         {
             _navigationCompleted = navigationCompleted;
             _enableDevTools = enableDevTools;
+            _navigationStarting = navigationStarting;
             _view = new WebView2
             {
                 HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -84,18 +89,29 @@ internal static class EmbeddedWebView
             _view.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
             _view.CoreWebView2.Settings.AreDevToolsEnabled = _enableDevTools;
             _view.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
+            _view.CoreWebView2.NavigationStarting += OnNavigationStarting;
             _subscribed = true;
         }
 
         public void Navigate(string url)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            _latestNavigationId = null;
             _view.CoreWebView2.Navigate(url);
+        }
+
+        private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            if (_disposed) return;
+            _latestNavigationId = e.NavigationId;
+            _navigationStarting?.Invoke(e.Uri);
         }
 
         private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
         {
-            if (!_disposed) _navigationCompleted(e.IsSuccess, e.WebErrorStatus.ToString());
+            // 被后一次导航替换的完成事件不能覆盖当前页的成功/失败状态。
+            if (!_disposed && _latestNavigationId == e.NavigationId)
+                _navigationCompleted(e.IsSuccess, e.WebErrorStatus.ToString());
         }
 
         public void Dispose()
@@ -105,7 +121,10 @@ internal static class EmbeddedWebView
             try
             {
                 if (_subscribed && _view.CoreWebView2 != null)
+                {
                     _view.CoreWebView2.NavigationCompleted -= OnNavigationCompleted;
+                    _view.CoreWebView2.NavigationStarting -= OnNavigationStarting;
+                }
             }
             finally
             {

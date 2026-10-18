@@ -9,6 +9,7 @@
     <Compile Include="../../Models/FeatureSearchEntry.cs" Link="FeatureSearchEntry.cs" />
     <Compile Include="../../Services/FeatureSearchMatcher.cs" Link="FeatureSearchMatcher.cs" />
     <Compile Include="../../Services/FeatureSearchCatalog.cs" Link="FeatureSearchCatalog.cs" />
+    <Compile Include="../../Services/FeatureSearchLayoutPolicy.cs" Link="FeatureSearchLayoutPolicy.cs" />
     <EmbeddedResource Include="../../Resources/Data/FeatureSearchCatalog.json"
                       LogicalName="XCL2.App.Resources.Data.FeatureSearchCatalog.json" />
   </ItemGroup>

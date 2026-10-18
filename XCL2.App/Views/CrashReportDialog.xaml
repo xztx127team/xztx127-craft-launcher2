@@ -49,47 +49,26 @@
             </StackPanel>
         </Border>
 
-        <!-- WrapPanel 而不是原来的 Orientation="Horizontal" StackPanel：新增"在记事本中查看日志"
-             后一排要放 4 个按钮，窄屏/小分辨率下容易挤得放不下（弹窗 MinWidth 只有 420），
-             用 WrapPanel 让放不下的按钮自动换到第二行，不会被裁切或挤出弹窗右边界。
-             FlowDirection="RightToLeft" 配合每个子按钮内部再手动 FlowDirection="LeftToRight"，
-             是为了让"关闭"这个主按钮始终排在最右（视觉上跟原来 HorizontalAlignment="Right"
-             的效果一致），换行时次要按钮从右往左依次排列，不会因为换行改变了原有的
-             视觉主次顺序。 -->
-        <Grid Margin="0,20,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <Button x:Name="AnalyzeCrashWithAiButton" Grid.Column="0" Padding="14,8" Margin="0,0,12,0"
-                    MaxWidth="180" VerticalAlignment="Top" ToolTip="在当前页面上方打开 AI 助手，并提交本次崩溃日志进行分析"
-                    Style="{DynamicResource SecondaryButton}" Click="AnalyzeCrashWithAi_Click">
-                <TextBlock Text="让AI分析当前崩溃日志" TextWrapping="Wrap" TextAlignment="Center"/>
-            </Button>
-        <WrapPanel Grid.Column="1" HorizontalAlignment="Right" FlowDirection="RightToLeft">
-            <!-- 顺序（从右到左）：关闭 / 导出完整日志 / 在记事本中查看日志 / 补全 DirectX，
-                 即"补全 DirectX"位于"在记事本中查看日志"的左边。 -->
-            <Button Content="关闭" Padding="20,8" IsDefault="True" FlowDirection="LeftToRight"
-                    Style="{DynamicResource PrimaryButton}" Click="Close_Click"/>
-            <Button x:Name="ExportLogButton" Content="导出完整日志" Padding="14,8" Margin="8,0,0,0"
-                    FlowDirection="LeftToRight"
-                    Style="{DynamicResource SecondaryButton}" Click="ExportLog_Click"/>
-            <!-- 需求：原来的"查看日志"其实是跳转到启动器内部的日志页，并不是真的用"记事本"
-                 打开，按钮名字容易让人以为点了会拉起系统记事本，产生误导。这里新增一个
-                 真正会拉起系统记事本的按钮，跟原来跳转启动器日志页的"查看完整日志"分开，
-                 各自名副其实，不用改原按钮的行为（日志页里三个 Tab 分类展示的体验仍然保留，
-                 只是多给一个"直接甩给记事本，可以自己搜索/复制/发给别人"的选项）。 -->
-            <Button x:Name="OpenInNotepadButton" Content="在记事本中查看日志" Padding="14,8" Margin="8,0,0,0"
-                    FlowDirection="LeftToRight"
-                    Style="{DynamicResource SecondaryButton}" Click="OpenInNotepad_Click"/>
-            <!-- 补全 DirectX 运行库：游戏/原生库提示缺 d3dx9 / d3dcompiler / xinput 等 DLL 时用，
-                 从微软官方下载 DirectX 最终用户运行库安装。不是显卡驱动。 -->
-            <Button x:Name="InstallDirectXButton" Content="补全 DirectX" Padding="14,8" Margin="8,0,0,0"
-                    FlowDirection="LeftToRight" ToolTip="从微软官方安装 DirectX 运行库（缺 d3dx9 / d3dcompiler / xinput 等 DLL 时使用）"
-                    Style="{DynamicResource SecondaryButton}" Click="InstallDirectX_Click"/>
-        </WrapPanel>
+        <Grid Margin="0,12,0,0">
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="ErrorCodeText" Text="错误编号：XCL-GAME-EXIT" FontSize="12" VerticalAlignment="Center"/>
+            <Button Grid.Column="1" Content="复制说明" Padding="10,5" Click="CopyExplanation_Click"/>
+            <Button x:Name="AnalyzeCrashWithAiButton" Grid.Row="1" Content="AI 分析" Padding="14,8" Margin="0,14,0,0"
+                    HorizontalAlignment="Left" ToolTip="提交本次崩溃日志给已配置的 AI 服务分析"
+                    Style="{DynamicResource SecondaryButton}" Click="AnalyzeCrashWithAi_Click"/>
+            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="8,14,0,0" HorizontalAlignment="Right">
+                <Button Content="日志与修复 ▾" Padding="12,8" Margin="0,0,8,0" Click="OpenTools_Click">
+                    <Button.ContextMenu><ContextMenu>
+                        <MenuItem x:Name="ExportLogButton" Header="预览并导出诊断包…" Click="ExportLog_Click"/>
+                        <MenuItem x:Name="OpenInNotepadButton" Header="在记事本查看脱敏日志" Click="OpenInNotepad_Click"/>
+                        <Separator/>
+                        <MenuItem x:Name="InstallDirectXButton" Header="补全 DirectX 运行库…" Click="InstallDirectX_Click"/>
+                    </ContextMenu></Button.ContextMenu>
+                </Button>
+                <Button Content="关闭" Padding="20,8" IsDefault="True" Style="{DynamicResource PrimaryButton}" Click="Close_Click"/>
+            </StackPanel>
         </Grid>
-        <Button Content="一键打开 DirectX 官方下载链接 ↗" Click="OpenDirectXPage_Click" HorizontalAlignment="Right" Margin="0,6,0,0" Padding="12,6"/>
     </StackPanel>
     </ScrollViewer>
 </local:OverlayDialogControl>

@@ -12,22 +12,35 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+            <Grid Grid.Row="0" Margin="0,0,0,12">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                 <TextBlock Text="{DynamicResource Str_Ui_Toolbox}" FontSize="20" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}" VerticalAlignment="Center"/>
-                <TextBlock Text="{DynamicResource Str_Ui_A_Set_Of_Small_Everyday_Tools_These_Are_}" FontSize="12" Margin="16,0,0,0"
-                           Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
-            </StackPanel>
+                <TextBlock Grid.Column="1" Text="{DynamicResource Str_Ui_A_Set_Of_Small_Everyday_Tools_These_Are_}" FontSize="12" Margin="16,0,0,0"
+                           TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" VerticalAlignment="Center"/>
+            </Grid>
 
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-                <StackPanel x:Name="PinnedToolboxButtons" Orientation="Horizontal"/>
-                <Button x:Name="ToolboxMoreButton" Content="⌕ 全部工具" Padding="12,5" Click="ToolboxMore_Click"
+            <Grid Grid.Row="1" Margin="0,0,0,10">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" CanContentScroll="False" Margin="0,0,8,0">
+                    <StackPanel x:Name="PinnedToolboxButtons" Orientation="Horizontal"/>
+                </ScrollViewer>
+                <Button x:Name="ToolboxMoreButton" Grid.Column="1" Content="⌕ 全部工具" Padding="12,5" Click="ToolboxMore_Click"
                         ToolTip="搜索百宝箱全部功能，包括未固定的工具" AutomationProperties.Name="搜索百宝箱全部功能"/>
                 <Popup x:Name="ToolboxMorePopup" PlacementTarget="{Binding ElementName=ToolboxMoreButton}"
                        Placement="Bottom" StaysOpen="False" AllowsTransparency="True" Opened="ToolboxMorePopup_Opened">
                     <Border CornerRadius="8" Padding="12" Width="360" BorderThickness="1" BorderBrush="{DynamicResource DividerBrush}"
                             Background="{DynamicResource PanelBrush}" PreviewKeyDown="ToolboxSearch_PreviewKeyDown">
                         <StackPanel>
-                            <TextBlock Text="搜索百宝箱功能" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBlock Text="百宝箱功能" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="ToolboxSearchFilter" Grid.Column="1" Width="120" SelectedIndex="0"
+                                          SelectionChanged="ToolboxSearchFilter_SelectionChanged" ToolTip="筛选全部工具、收藏或最近使用">
+                                    <ComboBoxItem Content="全部工具"/>
+                                    <ComboBoxItem Content="我的收藏"/>
+                                    <ComboBoxItem Content="最近使用"/>
+                                </ComboBox>
+                            </Grid>
                             <Grid Margin="0,0,0,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -46,12 +59,12 @@
                                      SelectionChanged="AllToolboxItems_SelectionChanged" AutomationProperties.Name="百宝箱搜索结果"/>
                             <TextBlock x:Name="ToolboxSearchEmptyText" Text="没有找到匹配的工具，请尝试其他关键词。" Visibility="Collapsed"
                                        TextWrapping="Wrap" Margin="6,12" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                            <TextBlock Text="按钮直接跳转 · 方向键选择 · Enter 打开 · Esc 关闭" FontSize="11" Margin="0,8,0,0"
+                            <TextBlock Text="Enter 打开 · 右键收藏 · Esc 关闭" FontSize="11" Margin="0,8,0,0"
                                        Foreground="{DynamicResource TextSecondaryBrush}"/>
                         </StackPanel>
                     </Border>
                 </Popup>
-            </StackPanel>
+            </Grid>
             <TabControl x:Name="ToolboxTabControl" services:PageTransitionBehavior.AnimateSelection="True" Grid.Row="2" SelectionChanged="ToolboxTabControl_SelectionChanged">
                 <TabControl.Template>
                     <ControlTemplate TargetType="TabControl">
@@ -276,18 +289,18 @@
                             <Border BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,16"/>
 
                             <TextBlock Text="{DynamicResource Str_Ui_Memory_Optimization}" FontWeight="Bold" Margin="0,0,0,8"/>
-                            <TextBlock Text="{DynamicResource Str_Ui_When_On_Xms_And_Xmx_Are_Recalculated_Fro}"
+                            <TextBlock Text="开启后，每次启动都会按设置页选择的动态范围或总内存百分比计算 -Xms/-Xmx。可在设置页修改上下限、固定值和内存信息的显示方式。"
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10"/>
-                            <CheckBox x:Name="MemOptCheck" Content="{DynamicResource Str_Ui_Optimise_Memory_Allocation_Before_}" Checked="MemOptCheck_Changed" Unchecked="MemOptCheck_Changed" Margin="0,0,0,10"/>
+                            <CheckBox x:Name="MemOptCheck" Content="启用动态内存分配" Checked="MemOptCheck_Changed" Unchecked="MemOptCheck_Changed" Margin="0,0,0,10"/>
 
                             <!-- 内存优化触发时机：全局默认值，某个版本可以在「版本的单独设置」里单独覆盖。 -->
-                            <TextBlock Text="优化时机" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"/>
+                            <TextBlock Text="额外预览时机（实际启动始终重新计算）" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"/>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <RadioButton x:Name="MemOptTimingBeforeLaunchRadio" GroupName="MemOptTiming"
-                                             Content="游戏启动前进行内存优化" Margin="0,0,20,0"
+                                             Content="仅游戏启动前计算" Margin="0,0,20,0"
                                              Checked="MemOptTiming_Changed"/>
                                 <RadioButton x:Name="MemOptTimingOnOpenRadio" GroupName="MemOptTiming"
-                                             Content="启动器打开时进行内存优化"
+                                             Content="启动器打开时也预览"
                                              Checked="MemOptTiming_Changed"/>
                             </StackPanel>
 

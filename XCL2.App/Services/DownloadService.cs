@@ -8,7 +8,11 @@ using XCL2.App.Models;
 
 namespace XCL2.App.Services;
 
-public record ProgressInfo(string Stage, int Done, int Total, string CurrentFile);
+public record ProgressInfo(string Stage, int Done, int Total, string CurrentFile)
+{
+    /// <summary>进度计数单位；保留原四参数构造和解构兼容性。</summary>
+    public string Unit { get; init; } = "项";
+}
 
 /// <summary>
 /// 游戏核心文件下载：支持官方源(Mojang/launchermeta)与 BMCLAPI 镜像源切换。
@@ -19,7 +23,8 @@ public class DownloadService : IDisposable
     private const string OfficialManifestUrl = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
     private const string BmclManifestUrl = "https://bmclapi2.bangbang93.com/mc/game/version_manifest_v2.json";
 
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _http;
+    private readonly bool _ownsHttp;
     private readonly DownloadSource _source;
 
     /// <summary>并发下载信号量：控制"同时进行的单文件下载数"，供 libraries/assets 这类批量小文件
@@ -67,7 +72,15 @@ public class DownloadService : IDisposable
     /// AppConfig.MaxDownloadThreads、AppConfig.DownloadSpeedLimitKBps、AppConfig.SmartBandwidthThrottle。
     /// </summary>
     public DownloadService(DownloadSource source, int maxConcurrency, int speedLimitKBps, bool smartThrottle)
+        : this(source, maxConcurrency, speedLimitKBps, smartThrottle, useSharedUserLimit: false) { }
+
+    internal DownloadService(DownloadSource source, HttpClient http)
+        : this(source, 1, 0, false, false, http) { }
+
+    private DownloadService(DownloadSource source, int maxConcurrency, int speedLimitKBps, bool smartThrottle, bool useSharedUserLimit, HttpClient? http = null)
     {
+        _http = http ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        _ownsHttp = http == null;
         _source = source;
         _concurrencyGate = new SemaphoreSlim(Math.Max(1, maxConcurrency));
 
@@ -78,12 +91,14 @@ public class DownloadService : IDisposable
         var chunkGateSize = Math.Max(4, Math.Min(16, Math.Max(1, maxConcurrency) * 3));
         _chunkConnectionGate = new SemaphoreSlim(chunkGateSize);
 
-        if (speedLimitKBps > 0 || smartThrottle)
+        if ((!useSharedUserLimit && speedLimitKBps > 0) || smartThrottle)
         {
-            _rateLimiter = new DownloadRateLimiter(speedLimitKBps > 0 ? speedLimitKBps * 1024L : 0);
+            // 用户固定限速由共享层实时读取，避免队列中每个实例各自获得完整额度。
+            var localCap = !useSharedUserLimit && speedLimitKBps > 0 ? speedLimitKBps : 0;
+            _rateLimiter = new DownloadRateLimiter(localCap * 1024L);
             if (smartThrottle)
             {
-                _bandwidthMonitor = new SmartBandwidthMonitor(_rateLimiter, speedLimitKBps);
+                _bandwidthMonitor = new SmartBandwidthMonitor(_rateLimiter, localCap);
             }
         }
     }
@@ -95,6 +110,8 @@ public class DownloadService : IDisposable
     {
         _bandwidthMonitor?.Dispose();
         _chunkConnectionGate.Dispose();
+        _concurrencyGate.Dispose();
+        if (_ownsHttp) _http.Dispose();
     }
 
     /// <summary>
@@ -108,7 +125,7 @@ public class DownloadService : IDisposable
     public static DownloadService CreateFromConfig(Models.AppConfig cfg)
     {
         var threads = cfg.EnableMultiThreadDownload ? Math.Max(1, cfg.MaxDownloadThreads) : 1;
-        return new DownloadService(cfg.Source, threads, cfg.DownloadSpeedLimitKBps, cfg.SmartBandwidthThrottle);
+        return new DownloadService(cfg.Source, threads, cfg.DownloadSpeedLimitKBps, cfg.SmartBandwidthThrottle, useSharedUserLimit: true);
     }
 
     /// <summary>
@@ -132,7 +149,7 @@ public class DownloadService : IDisposable
         // 取用户设置和 8 之间的较大值：用户自己调到 16 就尊重 16，调到 1/关掉多线程也拉到 8。
         // 上限交给构造函数里的 chunkGateSize 硬顶（16）去兜，不在这里再叠一层限制。
         var threads = Math.Max(8, configured);
-        return new DownloadService(DownloadSource.BMCLAPI, threads, cfg.DownloadSpeedLimitKBps, cfg.SmartBandwidthThrottle);
+        return new DownloadService(DownloadSource.BMCLAPI, threads, cfg.DownloadSpeedLimitKBps, cfg.SmartBandwidthThrottle, useSharedUserLimit: true);
     }
 
     public async Task<VersionManifestRoot> GetVersionManifestAsync(CancellationToken ct = default)
@@ -172,7 +189,7 @@ public class DownloadService : IDisposable
             _http, entry.Url, _source != DownloadSource.Official,
             $"无法获取版本 {entry.Id} 的版本信息，请检查网络连接或稍后重试。", ct);
         var versionJsonPath = Path.Combine(versionDir, $"{entry.Id}.json");
-        await File.WriteAllTextAsync(versionJsonPath, versionJsonText, ct);
+        await DownloadTargetLock.WriteTextAsync(versionJsonPath, versionJsonText, ct);
 
         var detail = JsonSerializer.Deserialize<VersionDetail>(versionJsonText) ?? new VersionDetail();
         // DownloadLibrariesOnlyAsync 用 detail.Id 推算 natives 输出目录（见该方法注释）；
@@ -227,13 +244,17 @@ public class DownloadService : IDisposable
     /// </summary>
     public async Task DownloadLibrariesOnlyAsync(string minecraftDir, VersionDetail detail,
         IProgress<ProgressInfo>? progress, CancellationToken ct = default)
+        => await DownloadLibrariesOnlyAsync(minecraftDir, detail, progress, ct, null);
+
+    public async Task DownloadLibrariesOnlyAsync(string minecraftDir, VersionDetail detail,
+        IProgress<ProgressInfo>? progress, CancellationToken ct, string? architecture)
     {
         var librariesDir = Path.Combine(minecraftDir, "libraries");
         var versionDir = Path.Combine(minecraftDir, "versions", detail.Id);
-        var nativesDir = Path.Combine(versionDir, "natives");
+        var nativesDir = NativeDirectoryPolicy.Resolve(versionDir, architecture);
         Directory.CreateDirectory(nativesDir);
 
-        var applicable = detail.Libraries.Where(LibraryApplies).ToList();
+        var applicable = detail.Libraries.Where(lib => lib.IsApplicableToCurrentOs(architecture)).ToList();
 
         // 并发下载：libDone 用 Interlocked 递增，因为多个任务会同时写这个计数器；
         // progress?.Report 本身只是把一个不可变 record 扔进 IProgress（WPF 场景下底层通常是
@@ -277,7 +298,8 @@ public class DownloadService : IDisposable
                 // natives (Windows classifier)
                 if (lib.Natives != null && lib.Natives.TryGetValue("windows", out var classifierKey))
                 {
-                    var key = classifierKey.Replace("${arch}", Environment.Is64BitOperatingSystem ? "64" : "32");
+                    var actualArchitecture = architecture ?? MinecraftPlatformRulePolicy.CurrentArchitecture;
+                    var key = classifierKey.Replace("${arch}", actualArchitecture is "x86" or "arm" ? "32" : "64");
                     if (lib.Downloads?.Classifiers != null && lib.Downloads.Classifiers.TryGetValue(key, out var nativeArt))
                     {
                         var tmp = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".jar");
@@ -318,14 +340,27 @@ public class DownloadService : IDisposable
     /// </summary>
     public async Task DownloadClientJarOnlyAsync(string minecraftDir, VersionDetail detail,
         IProgress<ProgressInfo>? progress, CancellationToken ct = default)
+        => await DownloadClientJarOnlyAsync(minecraftDir, detail, progress, ct, null, null);
+
+    public async Task DownloadClientJarOnlyAsync(string minecraftDir, VersionDetail detail,
+        IProgress<ProgressInfo>? progress, CancellationToken ct,
+        string? targetVersionId, string? targetJarBaseName)
     {
         if (detail.Downloads == null || !detail.Downloads.TryGetValue("client", out var clientArtifact)) return;
-        var versionDir = Path.Combine(minecraftDir, "versions", detail.Id);
+        var directoryId = targetVersionId ?? detail.Id;
+        var jarName = targetJarBaseName ?? detail.Id;
+        static void Validate(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value is "." or ".." || value.IndexOfAny(new[] { '/', '\\', ':', '<', '>', '|', '"', '?', '*' }) >= 0)
+                throw new InvalidDataException("客户端修复目标名称无效。");
+        }
+        Validate(directoryId); Validate(jarName);
+        var versionDir = Path.Combine(minecraftDir, "versions", directoryId);
         Directory.CreateDirectory(versionDir);
-        var jarPath = Path.Combine(versionDir, $"{detail.Id}.jar");
-        progress?.Report(new ProgressInfo("下载客户端主程序", 0, 1, $"{detail.Id}.jar"));
+        var jarPath = Path.Combine(versionDir, $"{jarName}.jar");
+        progress?.Report(new ProgressInfo("下载客户端主程序", 0, 1, $"{jarName}.jar"));
         await DownloadFileAsync(clientArtifact.Url, jarPath, clientArtifact.Sha1, ct);
-        progress?.Report(new ProgressInfo("下载客户端主程序", 1, 1, $"{detail.Id}.jar"));
+        progress?.Report(new ProgressInfo("下载客户端主程序", 1, 1, $"{jarName}.jar"));
     }
 
     private async Task DownloadAssetsAsync(string minecraftDir, AssetIndexRef assetIndexRef,
@@ -339,7 +374,7 @@ public class DownloadService : IDisposable
         var indexJson = await DownloadEndpoints.GetStringWithFallbackAsync(
             _http, assetIndexRef.Url, _source != DownloadSource.Official,
             "无法获取资源索引文件，请检查网络连接或稍后重试。", ct);
-        await File.WriteAllTextAsync(indexPath, indexJson, ct);
+        await DownloadTargetLock.WriteTextAsync(indexPath, indexJson, ct);
         var index = JsonSerializer.Deserialize<AssetIndexFile>(indexJson) ?? new AssetIndexFile();
 
         var objectsDir = Path.Combine(minecraftDir, "assets", "objects");
@@ -452,7 +487,11 @@ public class DownloadService : IDisposable
     private async Task DownloadFileAsync(string url, string destPath, string expectedSha1,
         CancellationToken ct, bool isSha1 = true)
     {
-        if (File.Exists(destPath) && VerifySha1(destPath, expectedSha1)) return;
+        using var targetLease = await DownloadTargetLock.AcquireAsync(destPath, ct);
+        ct.ThrowIfCancellationRequested();
+        DownloadTransferPolicy.TrackTarget(destPath);
+        using (DownloadTransferPolicy.BeginPhase("校验"))
+            if (File.Exists(destPath) && await Task.Run(() => VerifySha1(destPath, expectedSha1, ct), ct).ConfigureAwait(false)) return;
 
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
 
@@ -477,7 +516,7 @@ public class DownloadService : IDisposable
                     // 立刻原地重试大概率还是同样结果；换源(下一个 candidate)不需要退避，
                     // 不同域名之间没有共享的限流状态。
                     if (attempt > 1)
-                        await Task.Delay(TimeSpan.FromMilliseconds(400 + Random.Shared.Next(300)), ct);
+                        await DownloadTransferPolicy.WaitRetryAsync(TimeSpan.FromMilliseconds(400 + Random.Shared.Next(300)), ct);
                     await DownloadFromSingleUrlAsync(candidate, destPath, expectedSha1,
                         allowResume: attempt == 1, ct);
 
@@ -488,7 +527,7 @@ public class DownloadService : IDisposable
                 {
                     throw;   // 用户真的取消了整个安装，直接往上抛
                 }
-                catch (Exception ex) when (ex is not Plugins.PluginFlowCanceledException)
+                catch (Exception ex) when (ex is not (Plugins.PluginFlowCanceledException or DownloadDiskSpaceException))
                 {
                     lastError = ex;
                     DownloadEndpoints.ReportFailure(candidate);
@@ -517,13 +556,14 @@ public class DownloadService : IDisposable
     /// 超过 8MB 且服务端支持 Range 的文件，切成若干片并行下。单连接受 TCP 慢启动和
     /// 单流限速影响，实际带宽往往远低于线路上限；分片能把大文件的下载时间压下来一大截，
     /// 这也是 PCL"下得快"的直接来源之一。
-    /// 分片只在**没有限速**时启用——开了限速还并行分片，等于绕过用户设定的速率上限。
+    /// 本地智能/固定限速器启用时使用单流；共享用户总限速仍由每个分片共同遵守。
     /// </summary>
     private async Task DownloadFromSingleUrlAsync(string url, string destPath, string expectedSha1,
         bool allowResume, CancellationToken ct)
     {
         url = await Plugins.PluginInterceptionRegistry.PrepareDownloadAsync(url, Path.GetFileName(destPath), expectedSha1, ct);
         var part = destPath + ".part";
+        DownloadTransferPolicy.TrackTemporary(part, resumable: true);
 
         long existing = 0;
         if (allowResume && File.Exists(part))
@@ -548,6 +588,7 @@ public class DownloadService : IDisposable
             using var headCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             headCts.CancelAfter(TimeSpan.FromSeconds(15));
             using var headReq = new HttpRequestMessage(HttpMethod.Head, url);
+            using var headConnecting = DownloadTransferPolicy.BeginPhase("连接");
             using var headResp = await _http.SendAsync(headReq, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
             if (headResp.IsSuccessStatusCode)
             {
@@ -555,16 +596,19 @@ public class DownloadService : IDisposable
                 acceptsRange = headResp.Headers.AcceptRanges.Contains("bytes");
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is not Plugins.PluginFlowCanceledException)
         {
             // HEAD 失败不是致命问题（有些 CDN 不支持 HEAD），退回普通 GET 流程。
             ErrorPresenter.LogFallback($"下载前 HEAD 探测失败，已退回普通 GET：{url}", ex);
         }
 
+        DownloadTransferPolicy.EnsureDiskSpace(destPath, Math.Max(0, totalLength - existing));
+
         // 已经下完了：直接改名验证
         if (totalLength > 0 && existing == totalLength)
         {
-            await FinalizePartAsync(part, destPath, expectedSha1);
+            await FinalizePartAsync(part, destPath, expectedSha1, ct);
             return;
         }
         if (existing > 0 && totalLength > 0 && existing > totalLength)
@@ -574,12 +618,25 @@ public class DownloadService : IDisposable
             existing = 0;
         }
 
-        // ---- 大文件 + 支持 Range + 没开限速 → 分片并行 ----
+        // ---- 大文件 + 支持 Range + 无本地限速器 → 分片并行（仍遵守共享总限速）----
         if (totalLength >= MultiPartThreshold && acceptsRange && _rateLimiter == null && existing == 0)
         {
-            await DownloadInChunksAsync(url, part, totalLength, ct);
-            await FinalizePartAsync(part, destPath, expectedSha1);
-            return;
+            var chunksPart = destPath + ".chunks-" + Guid.NewGuid().ToString("N");
+            DownloadTransferPolicy.TrackTemporary(chunksPart, resumable: false);
+            try
+            {
+                await DownloadInChunksAsync(url, chunksPart, totalLength, ct);
+                await FinalizePartAsync(chunksPart, destPath, expectedSha1, ct);
+                return;
+            }
+            catch (RangeDownloadUnsupportedException)
+            {
+                // HEAD can advertise bytes while GET ignores it. All chunk writers have
+                // finished and their sparse file was removed before this single GET.
+                ct.ThrowIfCancellationRequested();
+                existing = 0;
+            }
+            finally { TryDelete(chunksPart); }
         }
 
         // ---- 单流下载（可能带续传）----
@@ -590,56 +647,75 @@ public class DownloadService : IDisposable
         if (existing > 0 && acceptsRange)
             req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(existing, null);
 
+        using var connecting = DownloadTransferPolicy.BeginPhase("连接");
         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, attemptCts.Token);
+        connecting.Dispose();
         resp.EnsureSuccessStatusCode();
 
         // 请求了 Range 但服务端返回 200（不支持）：必须从头写，否则会把整份内容追加到
         // 已有数据后面，产出一个长度翻倍的坏文件——这是续传实现里最容易踩的坑。
-        var append = existing > 0 && resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
+        var append = req.Headers.Range != null && existing > 0 && resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
+        if (append && (resp.Content.Headers.ContentRange?.From != existing ||
+            resp.Content.Headers.ContentRange?.Length is not { } rangeLength ||
+            resp.Content.Headers.ContentRange?.To != rangeLength - 1))
+            throw new InvalidDataException("续传响应的起始位置与已有文件不一致。");
+        if (!append && resp.StatusCode == System.Net.HttpStatusCode.PartialContent)
+            throw new InvalidDataException("服务端返回了未请求的部分文件。");
         if (existing > 0 && !append)
         {
             TryDelete(part);
             existing = 0;
         }
 
+        DownloadTransferPolicy.EnsureDiskSpace(destPath, resp.Content.Headers.ContentLength ?? 0);
+        long received = 0;
+        using (DownloadTransferPolicy.BeginPhase("传输"))
         await using (var fs = new FileStream(part, append ? FileMode.Append : FileMode.Create,
                          FileAccess.Write, FileShare.None))
         {
-            if (_rateLimiter == null)
+            var buffer = new byte[81920];
+            await using var respStream = await resp.Content.ReadAsStreamAsync(attemptCts.Token);
+            int read;
+            while (true)
             {
-                await resp.Content.CopyToAsync(fs, attemptCts.Token);
-            }
-            else
-            {
-                var buffer = new byte[81920];
-                await using var respStream = await resp.Content.ReadAsStreamAsync(attemptCts.Token);
-                int read;
-                while ((read = await respStream.ReadAsync(buffer, attemptCts.Token)) > 0)
-                {
-                    await _rateLimiter.ConsumeAsync(read, attemptCts.Token);
-                    await fs.WriteAsync(buffer.AsMemory(0, read), attemptCts.Token);
-                    _bandwidthMonitor?.ReportSelfBytes(read);
-                }
+                attemptCts.CancelAfter(SingleAttemptTimeout);
+                read = await respStream.ReadAsync(buffer, attemptCts.Token);
+                if (read <= 0) break;
+                attemptCts.CancelAfter(Timeout.InfiniteTimeSpan);
+                await DownloadTransferPolicy.ConsumeAsync(read, ct);
+                if (_rateLimiter != null) await _rateLimiter.ConsumeAsync(read, ct);
+                await fs.WriteAsync(buffer.AsMemory(0, read), ct);
+                received += read;
+                _bandwidthMonitor?.ReportSelfBytes(read);
             }
         }
 
-        await FinalizePartAsync(part, destPath, expectedSha1);
+        if (resp.Content.Headers.ContentLength is { } responseLength && received != responseLength)
+            throw new InvalidDataException("下载连接提前结束，文件不完整。");
+        if (append && resp.Content.Headers.ContentRange is { From: { } from, To: { } to } && received != to - from + 1)
+            throw new InvalidDataException("续传文件长度与响应范围不一致。");
+        if (totalLength > 0 && existing + received != totalLength)
+            throw new InvalidDataException("下载文件长度与服务器资源长度不一致。");
+
+        await FinalizePartAsync(part, destPath, expectedSha1, ct);
     }
 
     /// <summary>把 .part 校验并改名成正式文件。校验不过就删掉 .part 并抛异常，
     /// 让上层换下一个源重试——绝不让损坏文件蒙混过关（这是之前"语言文件下坏了却当成功"的教训）。</summary>
-    private static async Task FinalizePartAsync(string part, string destPath, string expectedSha1)
+    private static async Task FinalizePartAsync(string part, string destPath, string expectedSha1, CancellationToken ct)
     {
-        await Task.Yield();   // 让出一次，避免在高并发下长时间占住调用线程做同步哈希
+        ct.ThrowIfCancellationRequested();
 
-        if (!VerifySha1(part, expectedSha1))
+        using var verifying = DownloadTransferPolicy.BeginPhase("校验");
+        if (!await Task.Run(() => VerifySha1(part, expectedSha1, ct), ct).ConfigureAwait(false))
         {
             TryDelete(part);
             throw new IOException($"文件校验失败(SHA1 不匹配)：{Path.GetFileName(destPath)}");
         }
 
-        if (File.Exists(destPath)) File.Delete(destPath);
-        File.Move(part, destPath);
+        ct.ThrowIfCancellationRequested();
+        File.Move(part, destPath, overwrite: true);
+        DownloadTransferPolicy.TrackCompleted(destPath);
     }
 
     /// <summary>
@@ -666,13 +742,18 @@ public class DownloadService : IDisposable
             var to = (i == chunkCount - 1) ? total - 1 : (from + chunkSize - 1);
             ranges.Add((from, to));
         }
+        using var batch = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var batchToken = batch.Token;
+        var unsupportedRange = 0;
 
         var tasks = ranges.Select(async r =>
         {
             // 关键修复：分片请求先排队拿一个"全局连接槽位"，而不是 chunkCount 个分片直接
             // 一次性全部同时发出去。多个文件同时处于分片阶段时，实际并发连接数由这个共享
             // 信号量统一控制上限，不会因为"同时有几个文件在分片"而叠乘放大。
-            await _chunkConnectionGate.WaitAsync(ct);
+            using var waitingConnection = DownloadTransferPolicy.BeginPhase("等待连接");
+            await _chunkConnectionGate.WaitAsync(batchToken);
+            waitingConnection.Dispose();
             try
             {
                 // 429/连接被拒这类瞬时性错误，立刻原地重试大概率还是失败（镜像站的限流窗口
@@ -682,38 +763,55 @@ public class DownloadService : IDisposable
                 for (var attempt = 1; attempt <= 2; attempt++)
                 {
                     if (attempt > 1)
-                        await Task.Delay(TimeSpan.FromMilliseconds(300 + Random.Shared.Next(200)), ct);
+                        await DownloadTransferPolicy.WaitRetryAsync(TimeSpan.FromMilliseconds(300 + Random.Shared.Next(200)), batchToken);
 
                     try
                     {
-                        using var chunkCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        using var chunkCts = CancellationTokenSource.CreateLinkedTokenSource(batchToken);
                         chunkCts.CancelAfter(SingleAttemptTimeout);
 
                         using var req = new HttpRequestMessage(HttpMethod.Get, url);
                         req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(r.From, r.To);
 
+                        using var chunkConnecting = DownloadTransferPolicy.BeginPhase("连接");
                         using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, chunkCts.Token);
+                        chunkConnecting.Dispose();
                         resp.EnsureSuccessStatusCode();
 
                         // 服务端如果无视 Range 返回整个文件（200），分片写入就会互相覆盖成一坨垃圾。
                         // 明确要求 206，不是就直接失败，让上层退回单流路径。
                         if (resp.StatusCode != System.Net.HttpStatusCode.PartialContent)
-                            throw new IOException("服务端不支持分片下载（未返回 206），改用单线程下载。");
+                            throw new RangeDownloadUnsupportedException();
+                        var range = resp.Content.Headers.ContentRange;
+                        if (range?.From != r.From || range.To != r.To || range.Length != total)
+                            throw new RangeDownloadUnsupportedException();
 
+                        using var transmitting = DownloadTransferPolicy.BeginPhase("传输");
                         await using var fs = new FileStream(part, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
                         fs.Seek(r.From, SeekOrigin.Begin);
 
                         var buffer = new byte[81920];
                         await using var stream = await resp.Content.ReadAsStreamAsync(chunkCts.Token);
                         int read;
+                        long received = 0;
                         while ((read = await stream.ReadAsync(buffer, chunkCts.Token)) > 0)
                         {
-                            await fs.WriteAsync(buffer.AsMemory(0, read), chunkCts.Token);
+                            if (read > r.To - r.From + 1 - received)
+                                throw new RangeDownloadUnsupportedException();
+                            chunkCts.CancelAfter(Timeout.InfiniteTimeSpan);
+                            await DownloadTransferPolicy.ConsumeAsync(read, batchToken);
+                            await fs.WriteAsync(buffer.AsMemory(0, read), batchToken);
+                            received += read;
+                            chunkCts.CancelAfter(SingleAttemptTimeout);
                             _bandwidthMonitor?.ReportSelfBytes(read);
                         }
+                        if (received != r.To - r.From + 1)
+                            throw new InvalidDataException("下载分片提前结束，文件不完整。");
                         return;
                     }
-                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    catch (RangeDownloadUnsupportedException)
+                    { Interlocked.Exchange(ref unsupportedRange, 1); batch.Cancel(); throw; }
+                    catch (OperationCanceledException) when (batchToken.IsCancellationRequested)
                     {
                         throw;   // 用户取消：不重试，直接往上抛
                     }
@@ -728,7 +826,7 @@ public class DownloadService : IDisposable
             {
                 _chunkConnectionGate.Release();
             }
-        });
+        }).ToArray();
 
         try
         {
@@ -737,9 +835,14 @@ public class DownloadService : IDisposable
         catch
         {
             TryDelete(part);   // 分片中间态无法续传，失败即丢弃
+            ct.ThrowIfCancellationRequested();
+            if (Volatile.Read(ref unsupportedRange) != 0)
+                throw new RangeDownloadUnsupportedException();
             throw;
         }
     }
+
+    private sealed class RangeDownloadUnsupportedException : IOException { }
 
     private static void TryDelete(string path)
     {
@@ -747,8 +850,9 @@ public class DownloadService : IDisposable
         catch { /* 忽略清理失败，不影响主流程报错 */ }
     }
 
-    private static bool VerifySha1(string path, string expectedSha1)
+    private static bool VerifySha1(string path, string expectedSha1, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         // 需求："尽量不要崩溃"——修一个会导致"两个启动器都崩"的根因：Fabric/Quilt 等
         // "name+url"风格的库条目本身没有官方 sha1（expectedSha1 传空字符串），之前这里对
         // 空 sha1 直接 return true，等于只要文件在磁盘上"存在"就永远当成"已验证"，哪怕
@@ -767,11 +871,18 @@ public class DownloadService : IDisposable
         }
         try
         {
-            using var sha1 = SHA1.Create();
+            using var sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
             using var fs = File.OpenRead(path);
-            var hash = Convert.ToHexString(sha1.ComputeHash(fs)).ToLowerInvariant();
-            return hash == expectedSha1.ToLowerInvariant();
+            var buffer = new byte[81920]; int read;
+            while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                sha1.AppendData(buffer, 0, read);
+            }
+            ct.ThrowIfCancellationRequested();
+            return Convert.ToHexString(sha1.GetHashAndReset()).Equals(expectedSha1.Trim(), StringComparison.OrdinalIgnoreCase);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { return false; }
     }
 

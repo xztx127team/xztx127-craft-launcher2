@@ -1,5 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
+using System.Diagnostics;
+using XCL2.App.Services;
 
 namespace XCL2.App.Views;
 
@@ -13,6 +17,12 @@ public partial class DangerousConfirmDialog : OverlayDialogControl
     public const string RequiredCode = "xztx127";
 
     private readonly string _requiredCode;
+    private readonly DispatcherTimer _holdTimer = new() { Interval = TimeSpan.FromMilliseconds(50) };
+    private readonly Stopwatch _heldFor = new();
+    private bool _holdAccepted;
+    private bool _holdingWithMouse;
+    private bool NeedsHold => ConfigService.Active?.Config is { Ux50HoldDangerousConfirm: true } cfg
+        && (_requiredCode == RequiredCode ? cfg.Ux50HoldSystemOperations : cfg.Ux50HoldForceLaunch);
 
     /// <summary>确认通过时为 true，取消/校验未通过关闭时为 false。</summary>
     public bool Confirmed { get; private set; }
@@ -34,6 +44,25 @@ public partial class DangerousConfirmDialog : OverlayDialogControl
         MessageText.Text = message;
         ConfirmCodeHintText.Text = $"请输入确认码 {_requiredCode} 以继续：";
         Loaded += (_, _) => ConfirmCodeBox.Focus();
+        if (NeedsHold) { OkBtn.Content = "按住确认"; HoldHint.Visibility = Visibility.Visible; }
+        _holdTimer.Tick += (_, _) =>
+        {
+            if (_holdingWithMouse ? !OkBtn.IsMouseOver || Mouse.LeftButton != MouseButtonState.Pressed : !OkBtn.IsKeyboardFocused || !Keyboard.IsKeyDown(Key.Space))
+            { ResetHold(); return; }
+            var progress = Math.Clamp(_heldFor.Elapsed.TotalMilliseconds / 1200, 0, 1);
+            OkBtn.Content = $"按住 {progress:P0}";
+            if (progress < 1) return;
+            _holdAccepted = true; _holdTimer.Stop();
+            Ok_Click(OkBtn, new RoutedEventArgs());
+        };
+        OkBtn.PreviewMouseLeftButtonDown += (_, _) => BeginHold(true);
+        OkBtn.PreviewMouseLeftButtonUp += (_, _) => ResetHold();
+        OkBtn.MouseLeave += (_, _) => { if (_holdingWithMouse) ResetHold(); };
+        OkBtn.PreviewKeyDown += (_, e) => { if (e.Key == Key.Space && !e.IsRepeat) BeginHold(false); };
+        OkBtn.PreviewKeyUp += (_, e) => { if (e.Key == Key.Space) ResetHold(); };
+        OkBtn.LostKeyboardFocus += (_, _) => ResetHold();
+        ConfirmCodeBox.TextChanged += (_, _) => ResetHold();
+        Unloaded += (_, _) => ResetHold();
     }
 
     private void Ok_Click(object sender, RoutedEventArgs e)
@@ -45,8 +74,28 @@ public partial class DangerousConfirmDialog : OverlayDialogControl
             return;
         }
 
+        if (NeedsHold && !_holdAccepted)
+        {
+            ErrorText.Text = "确认码已通过。请按住按钮 1.2 秒，或聚焦按钮后按住空格键。";
+            ErrorText.Visibility = Visibility.Visible;
+            return;
+        }
+        _holdTimer.Stop();
+        if (OkBtn.IsMouseCaptured) OkBtn.ReleaseMouseCapture();
         Confirmed = true;
         CloseWith(true);
+    }
+
+    private void BeginHold(bool mouse)
+    {
+        if (!NeedsHold || ConfirmCodeBox.Text.Trim() != _requiredCode) return;
+        _holdAccepted = false; _holdingWithMouse = mouse; _heldFor.Restart(); _holdTimer.Start();
+    }
+
+    private void ResetHold()
+    {
+        _holdTimer.Stop(); _heldFor.Reset(); _holdAccepted = false;
+        if (NeedsHold) OkBtn.Content = "按住确认";
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)

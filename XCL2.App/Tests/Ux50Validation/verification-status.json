@@ -1,0 +1,473 @@
+{
+  "kind": "Source delivery and executed checks; not a compiled or runtime-certified release",
+  "date": "2026-10-18",
+  "checks": {
+    "full_static": {
+      "status": "passed",
+      "checks": 31889,
+      "errors": [],
+      "warnings": []
+    },
+    "settings_static": {
+      "status": "passed",
+      "checks": 305
+    },
+    "april_static": {
+      "status": "passed",
+      "checks": 20
+    },
+    "catalog": {
+      "status": "passed",
+      "destinations": 693,
+      "runtime_settings": 52,
+      "generation_consistency": "passed",
+      "python_regressions": 4
+    },
+    "preview_layout": {
+      "status": "passed",
+      "checks": 20
+    },
+    "debug_wiring": {
+      "status": "passed",
+      "checks": 18
+    },
+    "plugin_wiring": {
+      "status": "passed",
+      "dll_exe_route_pairs": 20,
+      "explicit_permissions": 7
+    },
+    "preview_ast": {
+      "status": "not_run",
+      "reason": "tree_sitter and tree_sitter_c_sharp are not installed"
+    },
+    "wpf_build": {
+      "status": "not_run",
+      "reason": "No .NET SDK or Windows environment"
+    },
+    "csharp_regression": {
+      "status": "not_run",
+      "projects": 45,
+      "reason": "No .NET SDK"
+    },
+    "windows_visual_and_functional": {
+      "status": "pending",
+      "reason": "No Windows or WPF graphical runtime"
+    }
+  },
+  "april_exit": {
+    "reading_stages": 7,
+    "mini_games": 8,
+    "local_human_stage": 1,
+    "hint_failure_threshold": 2,
+    "hint_elapsed_seconds": 20,
+    "direct_recovery": [
+      "F1",
+      "restore button",
+      "settings master switch"
+    ],
+    "config_key": "EnableAprilFoolsEasterEggs",
+    "windows_runtime": "pending"
+  },
+  "features": [
+    {
+      "number": 1,
+      "feature": "中文输入完成后再搜索",
+      "default": "开启，可关闭",
+      "entry": "下载搜索框；输入法组合期间不发出半成品搜索",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 2,
+      "feature": "多关键词本地匹配",
+      "default": "开启，可关闭",
+      "entry": "支持的本地列表；统一大小写与全半角，各词均需命中",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 3,
+      "feature": "命中文字轻量标记",
+      "default": "开启，可关闭",
+      "entry": "结果文字单层强调，不添加重复阴影",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 4,
+      "feature": "单独移除筛选条件",
+      "default": "开启，可关闭",
+      "entry": "下载筛选标签；移除一项不清空其余筛选",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 5,
+      "feature": "搜索框分层 Esc",
+      "default": "开启，可关闭",
+      "entry": "先收起建议，再清空搜索，避免直接退出页面",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 6,
+      "feature": "保存筛选组合",
+      "default": "关闭，用户开启",
+      "entry": "下载搜索框菜单；主动保存、应用、删除",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 7,
+      "feature": "本地搜索历史",
+      "default": "关闭，用户开启",
+      "entry": "仅记录主动提交的搜索；菜单支持单条删除、清空",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 8,
+      "feature": "表格列显隐",
+      "default": "手动入口",
+      "entry": "适用表格表头菜单；保留数据与原行菜单",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 9,
+      "feature": "稳定排序与方向标记",
+      "default": "开启，可关闭",
+      "entry": "原版游戏清单右键排序；适用只读表格；同值保留原顺序",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 10,
+      "feature": "实际加载数量",
+      "default": "开启，可关闭",
+      "entry": "下载结果按真实加载项计数，分页通过明确入口继续加载",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 11,
+      "feature": "首尾空格提示",
+      "default": "开启，可关闭",
+      "entry": "已识别的路径、地址框；仅提示，不自动裁剪",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 12,
+      "feature": "非法文件名字符定位",
+      "default": "开启，可关闭",
+      "entry": "文件名输入场景；指明字符与位置",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 13,
+      "feature": "内存 MB / GB 输入",
+      "default": "开启，可关闭",
+      "entry": "全局及实例内存配置；纯数字仍按 MB，显示换算并校验范围",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 14,
+      "feature": "滑块精确输入",
+      "default": "开启，可关闭",
+      "entry": "已接入的 10 个设置滑块；有效提交后才算设置修改",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 15,
+      "feature": "拖入文件或文件夹路径",
+      "default": "开启，可关闭",
+      "entry": "路径输入框；只填写路径，不执行或触发导入",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 16,
+      "feature": "记住文件选择目录",
+      "default": "关闭，用户开启",
+      "entry": "已接入的 5 类设置文件对话框；按用途记录，可清空",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 17,
+      "feature": "就地复制反馈",
+      "default": "开启，可关闭",
+      "entry": "接入的复制按钮、日志复制、UUID、环境摘要；复制成功后短暂显示",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 18,
+      "feature": "Esc 撤销当前文本编辑",
+      "default": "开启，可关闭",
+      "entry": "已识别的安全输入框；恢复当前焦点框本次编辑前内容",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 19,
+      "feature": "单行框多行粘贴预览",
+      "default": "开启，可关闭",
+      "entry": "已识别的安全单行输入框；命令、源码、AI、密钥等不参与",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 20,
+      "feature": "按住查看密码",
+      "default": "关闭，用户开启",
+      "entry": "PasswordBox 的临时显示；松开、失焦、窗口失活立即隐藏",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 21,
+      "feature": "暂停全部可暂停下载",
+      "default": "手动入口",
+      "entry": "下载管理菜单；先暂停等待项，再暂停支持的活动项",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 22,
+      "feature": "批量取消等待任务",
+      "default": "手动入口",
+      "entry": "下载管理；显式勾选后取消，不影响未选任务",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 23,
+      "feature": "真实重试倒计时",
+      "default": "开启，可关闭",
+      "entry": "原有下载退避等待期间；不改变重试次数或等待时长",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 24,
+      "feature": "连接、等待、传输、校验阶段",
+      "default": "开启，可关闭",
+      "entry": "有真实阶段事件的任务；不虚构安装进度",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 25,
+      "feature": "下载提醒安静时段",
+      "default": "关闭，用户开启",
+      "entry": "下载细节；默认预设 22:00–08:00，原有“不提醒”优先",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 26,
+      "feature": "下载来源页面",
+      "default": "开启，可关闭",
+      "entry": "任务详情；显示创建该任务的来源信息",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 27,
+      "feature": "定位已完成文件",
+      "default": "手动入口",
+      "entry": "下载任务及本次会话最近完成任务；仅定位实际记录且存在的文件",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 28,
+      "feature": "下载任务备注",
+      "default": "手动入口",
+      "entry": "任务菜单；本次会话内最多 200 字，不重命名文件",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 29,
+      "feature": "下载速度曲线",
+      "default": "关闭，用户开启",
+      "entry": "仅下载面板打开时按真实传输字节采样；关闭后停止并清空",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 30,
+      "feature": "刷新目标磁盘空间",
+      "default": "手动入口",
+      "entry": "下载管理；主动刷新，不持续轮询磁盘",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 31,
+      "feature": "复制环境摘要",
+      "default": "手动入口",
+      "entry": "实例菜单；保留诊断所需环境信息，去除账号和私人路径",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 32,
+      "feature": "共享游戏目录标记",
+      "default": "开启，可关闭",
+      "entry": "只有多个实例实际共用游戏目录时显示",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 33,
+      "feature": "后台任务所属实例",
+      "default": "开启，可关闭",
+      "entry": "切换实例后显示其他实例的活动、等待、暂停任务归属",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 34,
+      "feature": "导入前只读预览",
+      "default": "开启，可关闭",
+      "entry": "文件夹、ZIP、整合包与快速向导；展示目标、数量、同名冲突后再导入",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 35,
+      "feature": "同名目录区分",
+      "default": "开启，可关闭",
+      "entry": "模组页、快速向导的同名文件夹附所属路径；实例依所选目录区分",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 36,
+      "feature": "重命名前后预览",
+      "default": "开启，可关闭",
+      "entry": "实例重命名；展示旧名、新名及目标位置后确认",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 37,
+      "feature": "批量启停模组数量摘要",
+      "default": "开启，可关闭",
+      "entry": "点击批量应用时展示影响数量；不由列表虚拟化事件触发",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 38,
+      "feature": "隐藏的已选模组数量",
+      "default": "开启，可关闭",
+      "entry": "模组筛选后仍保留选择，并提示隐藏数量",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 39,
+      "feature": "模组资料缓存时间",
+      "default": "开启，可关闭",
+      "entry": "手动检查更新后本次会话缓存；查看时间与资料不额外联网",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 40,
+      "feature": "忽略某个模组更新版本",
+      "default": "手动入口",
+      "entry": "更新选择框及模组菜单；仅忽略精确版本，可恢复，后续新版本仍可提醒",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 41,
+      "feature": "日志智能跟随",
+      "default": "开启，可关闭",
+      "entry": "上翻暂停、滚到底部恢复；不丢弃原始日志",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 42,
+      "feature": "日志本地字号",
+      "default": "手动入口",
+      "entry": "日志页面；仅改变本次会话视图",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 43,
+      "feature": "复制日志附原始行号",
+      "default": "关闭，用户开启",
+      "entry": "选中日志复制仍先脱敏，再按原始位置附行号",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 44,
+      "feature": "日志关键词与级别筛选",
+      "default": "手动入口",
+      "entry": "日志视图；显示隐藏数量，不修改原始导出或 AI 日志输入",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 45,
+      "feature": "完整日期与时区提示",
+      "default": "开启，可关闭",
+      "entry": "接入的时间提示；保留简洁正文，悬停查看完整时间",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 46,
+      "feature": "导出最终文件名与位置预览",
+      "default": "开启，可关闭",
+      "entry": "诊断导出；用户确认目标后才生成文件",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 47,
+      "feature": "当前页面离线帮助",
+      "default": "手动入口",
+      "entry": "设置分组、下载管理、实例菜单、日志菜单、更新菜单",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 48,
+      "feature": "数值与单位统一间距",
+      "default": "开启，可关闭",
+      "entry": "接入的时间、容量和数据展示；单位与数字尽量不拆行",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 49,
+      "feature": "危险操作按住确认",
+      "default": "关闭，用户开启",
+      "entry": "原有确认码仍需先输入；可区分系统设置/清理及强制启动",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    },
+    {
+      "number": 50,
+      "feature": "暂缓某个启动器更新提醒",
+      "default": "手动入口",
+      "entry": "更新提醒菜单；按版本记录、支持撤销，不影响主动检查更新",
+      "source_implementation": "reviewed",
+      "windows_runtime": "pending"
+    }
+  ]
+}

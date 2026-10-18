@@ -111,6 +111,7 @@ public class VersionDetail
     [JsonPropertyName("id")] public string Id { get; set; } = "";
     [JsonPropertyName("mainClass")] public string MainClass { get; set; } = "";
     [JsonPropertyName("inheritsFrom")] public string? InheritsFrom { get; set; }
+    [JsonPropertyName("jar")] public string? Jar { get; set; }
     [JsonPropertyName("arguments")] public ArgumentsSpec? Arguments { get; set; }
     [JsonPropertyName("minecraftArguments")] public string? MinecraftArgumentsLegacy { get; set; }
     [JsonPropertyName("libraries")] public List<LibraryEntry> Libraries { get; set; } = new();
@@ -201,14 +202,16 @@ public class LibraryEntry
     /// 导致版本 json 里 Linux/macOS 专用的 native 库条目(本来就不会被下载)在启动时被误判成"缺失"，
     /// 纯净原版也会报"依赖库不存在"。现在两边统一调用这一个方法，不会再出现口径不一致。
     /// </summary>
-    public bool IsApplicableToCurrentOs()
+    public bool IsApplicableToCurrentOs() => IsApplicableToCurrentOs(null, null);
+
+    public bool IsApplicableToCurrentOs(string? architecture, string? osVersion = null)
     {
         if (Rules == null || Rules.Count == 0) return true;
         var allow = false;
         foreach (var rule in Rules)
         {
-            var matchesOs = rule.Os == null || !rule.Os.ContainsKey("name") ||
-                (rule.Os.TryGetValue("name", out var osName) && osName == "windows");
+            var matchesOs = rule.Os == null || MinecraftPlatformRulePolicy.Matches(
+                rule.Os.GetValueOrDefault("name"), rule.Os.GetValueOrDefault("arch"), rule.Os.GetValueOrDefault("version"), architecture, osVersion);
             if (matchesOs) allow = rule.Action == "allow";
         }
         return allow;
@@ -225,6 +228,37 @@ public class LibraryRule
 {
     [JsonPropertyName("action")] public string Action { get; set; } = "allow";
     [JsonPropertyName("os")] public Dictionary<string, string>? Os { get; set; }
+}
+
+/// <summary>Shared Windows rule matching for libraries and JVM/game argument entries.</summary>
+internal static class MinecraftPlatformRulePolicy
+{
+    internal static string CurrentArchitecture => System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch
+    {
+        System.Runtime.InteropServices.Architecture.X86 => "x86",
+        System.Runtime.InteropServices.Architecture.X64 => "amd64",
+        System.Runtime.InteropServices.Architecture.Arm64 => "aarch64",
+        System.Runtime.InteropServices.Architecture.Arm => "arm",
+        _ => "unknown"
+    };
+
+    internal static bool Matches(string? name, string? architecturePattern, string? versionPattern,
+        string? architecture = null, string? version = null)
+        => (name == null || name == "windows")
+            && RegexMatches(architecturePattern, architecture ?? CurrentArchitecture)
+            && RegexMatches(versionPattern, version ?? Environment.OSVersion.Version.ToString());
+
+    private static bool RegexMatches(string? pattern, string value)
+    {
+        if (pattern == null) return true;
+        try
+        {
+            return System.Text.RegularExpressions.Regex.IsMatch(value, pattern,
+                System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        }
+        catch (Exception error) when (error is ArgumentException or System.Text.RegularExpressions.RegexMatchTimeoutException)
+        { return false; }
+    }
 }
 
 /// <summary>asset index 内容：虚拟资源文件到 hash 的映射</summary>

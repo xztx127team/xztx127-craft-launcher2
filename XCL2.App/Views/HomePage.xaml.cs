@@ -59,6 +59,7 @@ public partial class HomePage : UserControl
         Loaded += (_, _) =>
         {
             RefreshForSizeChange();
+            RefreshContextHint();
             LocalizationService.LanguageChanged -= _onLanguageChanged;
             LocalizationService.LanguageChanged += _onLanguageChanged;
             _owner.NativePreviewStateChanged -= SyncNativePreview;
@@ -78,6 +79,19 @@ public partial class HomePage : UserControl
         AprilFoolsUi.AttachHomeTileEffects(TileGrid, LaunchTile, QuickStartTile);
 
     }
+
+    private void RefreshContextHint()
+    {
+        var cfg = _owner.ConfigService.Config;
+        var needsSelection = string.IsNullOrWhiteSpace(cfg.SelectedVersionId);
+        HomeContextHint.Visibility = needsSelection ? Visibility.Visible : Visibility.Collapsed;
+        if (needsSelection)
+            HomeContextHintText.Text = cfg.Folders.Count == 0
+                ? "还没有配置游戏目录。可以先选择现有目录，或到下载中心安装游戏。"
+                : "还没有选择要玩的实例。选择后，首页的启动入口会使用该实例。";
+    }
+
+    private void HomeContextHint_Click(object sender, RoutedEventArgs e) => _owner.NavigateToVersions();
 
     /// <summary>窗口最大化/还原/缩放后刷新首页布局：磁贴区高度按当前可用高度匹配（全屏时不再是
     /// 一小块漂在大片空白中间），胶囊条重新排列，并按当前搜索框样式重新让位。</summary>

@@ -48,7 +48,7 @@ public partial class MultiLoaderInstallWindow : OverlayDialogControl
         InitializeComponent();
 
         // 同上：Window.Closed → IOverlayDialog.RequestClose
-        RequestClose += (_, _) => _loaderService.Dispose();
+        OverlayClosed += (_, _) => _loaderService.Dispose();
 
         RiskText.Text = BuildRiskWarningText();
 

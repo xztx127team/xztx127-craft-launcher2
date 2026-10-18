@@ -221,6 +221,8 @@ public partial class BedrockPage : UserControl
             return false;
         }
 
+        if (AprilFoolsUi.NotifyLaunchRequested(_owner)) return false;
+
         _bedrockLaunchCooldownUntilUtc = DateTime.UtcNow.AddSeconds(10);
         BedrockStatusText.Text = startingMessage;
         BedrockClientStatusText.Text = startingMessage;

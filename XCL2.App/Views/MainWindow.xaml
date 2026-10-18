@@ -183,14 +183,16 @@
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate>
                                                         <Border Background="{DynamicResource SideBrush}" CornerRadius="4"
-                                                                Padding="6" Margin="0,0,0,4">
+                                                                Padding="6" Margin="0,0,0,4" ToolTip="{Binding TaskExplanation}">
                                                             <StackPanel>
-                                                                <TextBlock Text="{Binding Name}" FontSize="12"
+                                                                <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" FontSize="12"
                                                                            Foreground="{DynamicResource TextPrimaryBrush}"
                                                                            TextTrimming="CharacterEllipsis"/>
                                                                 <ProgressBar Height="4" Margin="0,4,0,4"
                                                                              Value="{Binding ProgressPercent, Mode=OneWay}"
                                                                              IsIndeterminate="{Binding IsIndeterminate}" Minimum="0" Maximum="100"/>
+                                                                <TextBlock Text="{Binding ActivityText}" FontSize="10" TextTrimming="CharacterEllipsis"
+                                                                           ToolTip="{Binding ActivityText}" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                                                                 <!-- 详情行：剩余时间/当前速度/大小，见 AppConfig.DownloadPopupShowDetailStats
                                                                      与 DownloadQueueItem.DetailText。默认隐藏，跟随
                                                                      DownloadQueueDetailVisibility 资源统一显隐。 -->
@@ -204,7 +206,7 @@
                                                                         <ColumnDefinition Width="Auto"/>
                                                                         <ColumnDefinition Width="Auto"/>
                                                                     </Grid.ColumnDefinitions>
-                                                                    <TextBlock Grid.Column="0" Text="{Binding StatusText}" FontSize="11"
+                                                                    <TextBlock Grid.Column="0" Text="{Binding StatusText}" ToolTip="{Binding StatusText}" TextTrimming="CharacterEllipsis" FontSize="11"
                                                                                Foreground="{DynamicResource TextSecondaryBrush}"
                                                                                VerticalAlignment="Center"/>
                                                                     <Button Grid.Column="1" Content="暂停/继续" FontSize="11" Padding="6,2"
@@ -280,6 +282,10 @@
         <Grid.LayoutTransform>
             <ScaleTransform x:Name="UiZoomTransform" ScaleX="1" ScaleY="1"/>
         </Grid.LayoutTransform>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <!-- 侧边栏宽度改成可变列（原来固定 180），配合 SidebarCollapseToggle_Click
                  在展开/收起(56，仅剩图标)两个宽度之间切换。 x:Name 供代码里读取/修改宽度。
@@ -290,6 +296,23 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
+        <!-- 预览模式：上方切换大类，左侧只显示此类的原有业务入口。 -->
+        <Border x:Name="PreviewCategoryBar" Grid.Row="0" Grid.ColumnSpan="2" Visibility="Collapsed"
+                Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1"
+                Padding="20,8">
+            <DockPanel LastChildFill="True">
+                <TextBlock Text="XCL2" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource AccentBrush}"
+                           DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,28,0"/>
+                <WrapPanel x:Name="PreviewCategoryTabs" VerticalAlignment="Center">
+                    <Button x:Name="PreviewLaunchCategory" Content="启动" CommandParameter="launch" Click="PreviewCategory_Click" Style="{DynamicResource SideNavButton}" MinWidth="72" Padding="18,8" Margin="0,0,6,0" HorizontalContentAlignment="Center"/>
+                    <Button x:Name="PreviewDownloadsCategory" Content="下载" CommandParameter="downloads" Click="PreviewCategory_Click" Style="{DynamicResource SideNavButton}" MinWidth="72" Padding="18,8" Margin="0,0,6,0" HorizontalContentAlignment="Center"/>
+                    <Button x:Name="PreviewMultiplayerCategory" Content="联机" CommandParameter="multiplayer" Click="PreviewCategory_Click" Style="{DynamicResource SideNavButton}" MinWidth="72" Padding="18,8" Margin="0,0,6,0" HorizontalContentAlignment="Center"/>
+                    <Button x:Name="PreviewToolsCategory" Content="工具" CommandParameter="tools" Click="PreviewCategory_Click" Style="{DynamicResource SideNavButton}" MinWidth="72" Padding="18,8" Margin="0,0,6,0" HorizontalContentAlignment="Center"/>
+                    <Button x:Name="PreviewSettingsCategory" Content="设置" CommandParameter="settings" Click="PreviewCategory_Click" Style="{DynamicResource SideNavButton}" MinWidth="72" Padding="18,8" HorizontalContentAlignment="Center"/>
+                </WrapPanel>
+            </DockPanel>
+        </Border>
+
         <!-- 左侧导航栏
              x:Name="SidebarAreaBorder"：字体分层设置的挂载点之一——FontService.ApplyScopedFonts
              会在这个 Border 的 Resources 里按需覆盖 "AppFontFamily" 这个资源键（跟全局用的
@@ -297,7 +320,7 @@
              这里的覆盖值），从而只影响侧边栏内部所有 Control/TextBlock 的字体，不影响
              标题栏和右侧内容区。不设置覆盖时这里没有该资源键，正常向上找到全局的
              Application.Resources["AppFontFamily"]，行为跟以前完全一样。 -->
-        <Border x:Name="SidebarAreaBorder" Grid.Column="0" Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,1,0">
+        <Border x:Name="SidebarAreaBorder" Grid.Row="1" Grid.Column="0" Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,1,0">
             <DockPanel x:Name="SidebarPanel" Margin="12">
 
                 <!-- 顶部：Logo + 收起/展开切换按钮。收起后 Logo 隐藏，只留三横杠/圆点按钮，
@@ -399,174 +422,208 @@
                              Visibility=Collapsed，图标 TextBlock 保持不动即可，文字 TextBlock 上的
                              {DynamicResource Str_Nav_Xxx} 绑定全程不受影响，展开时自动恢复显示，
                              不需要在代码里手动缓存/还原文案字符串（避免和多语言切换出现绑定冲突）。 -->
-                        <Button x:Name="NavHomeButton" Style="{StaticResource SideNavButton}" Click="NavHome_Click" ToolTip="{DynamicResource Str_Nav_Home}">
-                            <StackPanel x:Name="NavHomeIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavHomeIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconHome}"/>
-                                </Border>
-                                <TextBlock x:Name="NavHomeLabel" Text="{DynamicResource Str_Nav_Home}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavVersionsButton" Style="{StaticResource SideNavButton}" Click="NavVersions_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Versions}">
-                            <StackPanel x:Name="NavVersionsIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavVersionsIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconFolder}"/>
-                                </Border>
-                                <TextBlock x:Name="NavVersionsLabel" Text="{DynamicResource Str_Nav_Versions}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="home">
+                            <Button x:Name="NavHomeButton" Style="{StaticResource SideNavButton}" Click="NavHome_Click" ToolTip="{DynamicResource Str_Nav_Home}">
+                                <StackPanel x:Name="NavHomeIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavHomeIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconHome}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavHomeLabel" Text="{DynamicResource Str_Nav_Home}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="instances">
+                            <Button x:Name="NavVersionsButton" Style="{StaticResource SideNavButton}" Click="NavVersions_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Versions}">
+                                <StackPanel x:Name="NavVersionsIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavVersionsIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconFolder}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavVersionsLabel" Text="{DynamicResource Str_Nav_Versions}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                         <!-- 下载图标：原来是 "⬇️"（箭头 + U+FE0F 变体选择符，强制彩色渲染），
                              在不完整支持该字体特性的环境下会被渲染得比其它图标明显小一圈甚至
                              缩成一条线——跟 ServerManagerPage 里同一个图标遇到的问题一样，
                              改成不带变体选择符的纯符号写法，大小才能跟其它导航图标保持一致。 -->
-                        <Button x:Name="NavDownloadButton" Style="{StaticResource SideNavButton}" Click="NavDownload_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Download}">
-                            <StackPanel x:Name="NavDownloadIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavDownloadIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconDownload}"/>
-                                </Border>
-                                <TextBlock x:Name="NavDownloadLabel" Text="{DynamicResource Str_Nav_Download}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavMultiplayerButton" Style="{StaticResource SideNavButton}" Click="NavMultiplayer_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Multiplayer}">
-                            <StackPanel x:Name="NavMultiplayerIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavMultiplayerIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconGlobe}"/>
-                                </Border>
-                                <TextBlock x:Name="NavMultiplayerLabel" Text="{DynamicResource Str_Nav_Multiplayer}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavWorldsButton" Style="{StaticResource SideNavButton}" Click="NavWorlds_Click" Margin="0,4,0,0" ToolTip="存档">
-                            <StackPanel Orientation="Horizontal">
-                                <Border x:Name="NavWorldsIcon" Style="{StaticResource NavIconBox}"><TextBlock Text="▣" FontSize="20" HorizontalAlignment="Center"/></Border>
-                                <TextBlock x:Name="NavWorldsLabel" Text="存档" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavModManagerButton" Style="{StaticResource SideNavButton}" Click="NavModManager_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_ModManager}">
-                            <StackPanel x:Name="NavModManagerIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavModManagerIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconPuzzle}"/>
-                                </Border>
-                                <TextBlock x:Name="NavModManagerLabel" Text="{DynamicResource Str_Nav_ModManager}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavServerManagerButton" Style="{StaticResource SideNavButton}" Click="NavServerManager_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_ServerManager}">
-                            <StackPanel x:Name="NavServerManagerIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavServerManagerIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconServer}"/>
-                                </Border>
-                                <TextBlock x:Name="NavServerManagerLabel" Text="{DynamicResource Str_Nav_ServerManager}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="downloads">
+                            <Button x:Name="NavDownloadButton" Style="{StaticResource SideNavButton}" Click="NavDownload_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Download}">
+                                <StackPanel x:Name="NavDownloadIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavDownloadIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconDownload}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavDownloadLabel" Text="{DynamicResource Str_Nav_Download}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="multiplayer">
+                            <Button x:Name="NavMultiplayerButton" Style="{StaticResource SideNavButton}" Click="NavMultiplayer_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Multiplayer}">
+                                <StackPanel x:Name="NavMultiplayerIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavMultiplayerIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconGlobe}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavMultiplayerLabel" Text="{DynamicResource Str_Nav_Multiplayer}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="worlds">
+                            <Button x:Name="NavWorldsButton" Style="{StaticResource SideNavButton}" Click="NavWorlds_Click" Margin="0,4,0,0" ToolTip="存档">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border x:Name="NavWorldsIcon" Style="{StaticResource NavIconBox}"><TextBlock Text="▣" FontSize="20" HorizontalAlignment="Center"/></Border>
+                                    <TextBlock x:Name="NavWorldsLabel" Text="存档" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="mods">
+                            <Button x:Name="NavModManagerButton" Style="{StaticResource SideNavButton}" Click="NavModManager_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_ModManager}">
+                                <StackPanel x:Name="NavModManagerIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavModManagerIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconPuzzle}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavModManagerLabel" Text="{DynamicResource Str_Nav_ModManager}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="servers">
+                            <Button x:Name="NavServerManagerButton" Style="{StaticResource SideNavButton}" Click="NavServerManager_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_ServerManager}">
+                                <StackPanel x:Name="NavServerManagerIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavServerManagerIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconServer}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavServerManagerLabel" Text="{DynamicResource Str_Nav_ServerManager}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                         <!-- 新增「百宝箱」导航入口，跳到 ToolboxPage。 -->
-                        <Button x:Name="NavToolboxButton" Style="{StaticResource SideNavButton}" Click="NavToolbox_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Toolbox}">
-                            <StackPanel x:Name="NavToolboxIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavToolboxIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconToolbox}"/>
-                                </Border>
-                                <TextBlock x:Name="NavToolboxLabel" Text="{DynamicResource Str_Nav_Toolbox}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="toolbox">
+                            <Button x:Name="NavToolboxButton" Style="{StaticResource SideNavButton}" Click="NavToolbox_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Toolbox}">
+                                <StackPanel x:Name="NavToolboxIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavToolboxIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconToolbox}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavToolboxLabel" Text="{DynamicResource Str_Nav_Toolbox}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                         <!-- 新增「基岩版启动」导航入口，跳到 BedrockPage。原来分散在「百宝箱」的
                              一个 Tab（内容管理/服务端下载）和「实验性功能」弹窗（唤起本机基岩版
                              客户端）两处的基岩版相关功能，现在整合进这一个独立侧边栏页面，
                              不用再去两个不相关的地方分别找。 -->
-                        <Button x:Name="NavBedrockButton" Style="{StaticResource SideNavButton}" Click="NavBedrock_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Bedrock}">
-                            <StackPanel x:Name="NavBedrockIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavBedrockIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconBedrock}"/>
-                                </Border>
-                                <TextBlock x:Name="NavBedrockLabel" Text="{DynamicResource Str_Nav_Bedrock}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="bedrock">
+                            <Button x:Name="NavBedrockButton" Style="{StaticResource SideNavButton}" Click="NavBedrock_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Bedrock}">
+                                <StackPanel x:Name="NavBedrockIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavBedrockIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconBedrock}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavBedrockLabel" Text="{DynamicResource Str_Nav_Bedrock}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                         <!-- 新增「鸣谢与帮助」导航入口，跳到 AboutHelpPage（登录/购买/新手/报错帮助
                              + 作者赞助信息/开源仓库/感谢名单/赞助榜/哔哩哔哩粉丝墙）。 -->
-                        <Button x:Name="NavAboutHelpButton" Style="{StaticResource SideNavButton}" Click="NavAboutHelp_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_AboutHelp}">
-                            <StackPanel x:Name="NavAboutHelpIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavAboutHelpIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconHeart}"/>
-                                </Border>
-                                <TextBlock x:Name="NavAboutHelpLabel" Text="{DynamicResource Str_Nav_AboutHelp}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavAccountsButton" Style="{StaticResource SideNavButton}" Click="NavAccounts_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Accounts}">
-                            <StackPanel x:Name="NavAccountsIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavAccountsIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconAccount}"/>
-                                </Border>
-                                <TextBlock x:Name="NavAccountsLabel" Text="{DynamicResource Str_Nav_Accounts}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavSettingsButton" Style="{StaticResource SideNavButton}" Click="NavSettings_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Settings}">
-                            <StackPanel x:Name="NavSettingsIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavSettingsIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconSettings}"/>
-                                </Border>
-                                <TextBlock x:Name="NavSettingsLabel" Text="{DynamicResource Str_Nav_Settings}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="about">
+                            <Button x:Name="NavAboutHelpButton" Style="{StaticResource SideNavButton}" Click="NavAboutHelp_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_AboutHelp}">
+                                <StackPanel x:Name="NavAboutHelpIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavAboutHelpIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconHeart}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavAboutHelpLabel" Text="{DynamicResource Str_Nav_AboutHelp}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="accounts">
+                            <Button x:Name="NavAccountsButton" Style="{StaticResource SideNavButton}" Click="NavAccounts_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Accounts}">
+                                <StackPanel x:Name="NavAccountsIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavAccountsIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconAccount}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavAccountsLabel" Text="{DynamicResource Str_Nav_Accounts}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="settings">
+                            <Button x:Name="NavSettingsButton" Style="{StaticResource SideNavButton}" Click="NavSettings_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Settings}">
+                                <StackPanel x:Name="NavSettingsIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavSettingsIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconSettings}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavSettingsLabel" Text="{DynamicResource Str_Nav_Settings}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                         <!-- 「更多」：只在简洁模式下显示（见 MainWindow.RefreshSimplifiedModeNavVisibility），
                              跳到 MorePage，磁贴形式重新摆出联机大厅/Mod管理/服务器管理/百宝箱/基岩版/
                              鸣谢与帮助/日志/AI助手/实验性功能这九个被简洁模式从侧边栏收起来的入口。
                              默认（非简洁模式）Collapsed，构造函数里 RefreshSimplifiedModeNavVisibility()
                              会按当前配置立即同步一次。 -->
-                        <Button x:Name="NavMoreButton" Style="{StaticResource SideNavButton}" Click="NavMore_Click" Margin="0,4,0,0" Visibility="Collapsed" ToolTip="更多">
-                            <StackPanel x:Name="NavMoreIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavMoreIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconMore}"/>
-                                </Border>
-                                <TextBlock x:Name="NavMoreLabel" Text="更多" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavLogsButton" Style="{StaticResource SideNavButton}" Click="NavLogs_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Logs}">
-                            <StackPanel x:Name="NavLogsIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavLogsIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconLogs}"/>
-                                </Border>
-                                <TextBlock x:Name="NavLogsLabel" Text="{DynamicResource Str_Nav_Logs}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="more">
+                            <Button x:Name="NavMoreButton" Style="{StaticResource SideNavButton}" Click="NavMore_Click" Margin="0,4,0,0" Visibility="Collapsed" ToolTip="更多">
+                                <StackPanel x:Name="NavMoreIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavMoreIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconMore}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavMoreLabel" Text="更多" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="logs">
+                            <Button x:Name="NavLogsButton" Style="{StaticResource SideNavButton}" Click="NavLogs_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Logs}">
+                                <StackPanel x:Name="NavLogsIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavLogsIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconLogs}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavLogsLabel" Text="{DynamicResource Str_Nav_Logs}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                         <!-- AI 助手导航按钮 -->
-                        <Button x:Name="NavAiAssistantButton" Style="{StaticResource SideNavButton}" Click="NavAiAssistant_Click" Margin="0,4,0,0" ToolTip="AI 助手">
-                            <StackPanel x:Name="NavAiAssistantIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavAiAssistantIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconAI}"/>
-                                </Border>
-                                <TextBlock x:Name="NavAiAssistantLabel" Text="AI 助手" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="ai">
+                            <Button x:Name="NavAiAssistantButton" Style="{StaticResource SideNavButton}" Click="NavAiAssistant_Click" Margin="0,4,0,0" ToolTip="AI 助手">
+                                <StackPanel x:Name="NavAiAssistantIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavAiAssistantIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconAI}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavAiAssistantLabel" Text="AI 助手" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                         <!-- 实验性功能导航按钮：仅当启动器界面语言是简体中文时显示（见
                              LocalizationService.ExperimentalFeaturesLanguageGate 的注释——这批功能
                              还没有多语言界面，贸然对其它语言用户展示未翻译的中文体验更差）。
                              x:Name 供 MainWindow.xaml.cs 在语言切换时动态控制 Visibility。 -->
-                        <Button x:Name="NavExperimentalButton" Style="{StaticResource SideNavButton}" Click="NavExperimental_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Experimental}">
-                            <StackPanel x:Name="NavExperimentalIconRow" Orientation="Horizontal">
-                                <Border x:Name="NavExperimentalIcon" Style="{StaticResource NavIconBox}">
-                                    <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconFlask}"/>
-                                </Border>
-                                <TextBlock x:Name="NavExperimentalLabel" Text="{DynamicResource Str_Nav_Experimental}" Margin="8,0,0,0"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
-                        <Button x:Name="NavPluginsButton" Style="{StaticResource SideNavButton}" Click="NavPlugins_Click" Margin="0,4,0,0" ToolTip="插件管理">
-                            <StackPanel Orientation="Horizontal">
-                                <Border x:Name="NavPluginsIcon" Style="{StaticResource NavIconBox}"><Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconToolbox}"/></Border>
-                                <TextBlock x:Name="NavPluginsLabel" Text="插件管理" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                        </Button>
+                        <Border Tag="experimental">
+                            <Button x:Name="NavExperimentalButton" Style="{StaticResource SideNavButton}" Click="NavExperimental_Click" Margin="0,4,0,0" ToolTip="{DynamicResource Str_Nav_Experimental}">
+                                <StackPanel x:Name="NavExperimentalIconRow" Orientation="Horizontal">
+                                    <Border x:Name="NavExperimentalIcon" Style="{StaticResource NavIconBox}">
+                                        <Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconFlask}"/>
+                                    </Border>
+                                    <TextBlock x:Name="NavExperimentalLabel" Text="{DynamicResource Str_Nav_Experimental}" Margin="8,0,0,0"
+                                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
+                        <Border Tag="plugins">
+                            <Button x:Name="NavPluginsButton" Style="{StaticResource SideNavButton}" Click="NavPlugins_Click" Margin="0,4,0,0" ToolTip="插件管理">
+                                <StackPanel Orientation="Horizontal">
+                                    <Border x:Name="NavPluginsIcon" Style="{StaticResource NavIconBox}"><Path Style="{StaticResource NavIconPath}" Data="{StaticResource IconToolbox}"/></Border>
+                                    <TextBlock x:Name="NavPluginsLabel" Text="插件管理" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                            </Button>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
             </DockPanel>
@@ -574,7 +631,7 @@
 
         <!-- 右侧内容区。x:Name="ContentAreaBorder"：字体分层设置的第二个挂载点，
              见上面 SidebarAreaBorder 的注释，原理相同，只影响右侧内容区（各个 Page）。 -->
-        <Border x:Name="ContentAreaBorder" Grid.Column="1" Margin="16">
+        <Border x:Name="ContentAreaBorder" Grid.Row="1" Grid.Column="1" Margin="16">
             <Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <local:FeatureSearchBox x:Name="LauncherFeatureSearch" Grid.Row="0" Width="300" Panel.ZIndex="50" VerticalAlignment="Top"
@@ -613,7 +670,23 @@
              Grid.ColumnSpan="2" 让遮罩盖住整个主窗口（包括左侧导航栏），不是只盖内容区，
              跟独立 Window 弹窗"挡住整个程序窗口"的观感一致。默认 Collapsed，没有弹窗时
              完全不占用视觉/命中测试（Visibility=Collapsed 的元素不会拦截鼠标事件）。 -->
-        <Grid x:Name="OverlayRoot" Grid.Column="0" Grid.ColumnSpan="2" Visibility="Collapsed" Focusable="False">
+        <Button x:Name="ReminderBadgeButton" Grid.Row="1" Grid.Column="1" Visibility="Collapsed"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,20"
+                Style="{StaticResource SecondaryButton}" Padding="12,7" Content="提醒" Click="ReminderBadge_Click"/>
+        <Border x:Name="ReminderPanel" Grid.Row="1" Grid.Column="1" Visibility="Collapsed"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="12,12,20,66"
+                Width="360" MaxHeight="360" Padding="14" CornerRadius="8" BorderThickness="1"
+                Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource AccentBrush}">
+            <DockPanel>
+                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <TextBlock Text="提醒与建议" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                    <Button Content="清空已读" Click="ClearReadReminders_Click" Style="{StaticResource SecondaryButton}" Padding="8,4" Margin="0,0,8,0"/>
+                    <Button Content="关闭" Click="CloseReminderPanel_Click" Style="{StaticResource SecondaryButton}" Padding="8,4"/>
+                </WrapPanel>
+                <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="ReminderCards"/></ScrollViewer>
+            </DockPanel>
+        </Border>
+        <Grid x:Name="OverlayRoot" Grid.Column="0" Grid.ColumnSpan="2" Visibility="Collapsed" Focusable="False" Grid.RowSpan="2">
             <!-- 遮罩层：半透明黑，点击可选是否允许"点遮罩关闭"（由 OverlayDialogService 按每次
                  弹窗调用时的参数决定，见 OverlayOptions.DismissOnBackgroundClick）。 -->
             <Border x:Name="OverlayScrim" Background="#99000000" MouseLeftButtonUp="OverlayScrim_MouseLeftButtonUp"/>
@@ -654,7 +727,7 @@
              不拦截鼠标事件，拖放本身仍由 Window 级的 Drop 事件处理。 -->
         <Border x:Name="DragHintLayer" Grid.Column="0" Grid.ColumnSpan="2"
                 Visibility="Collapsed" IsHitTestVisible="False"
-                Background="#CC0B1220">
+                Background="#CC0B1220" Grid.RowSpan="2">
             <Border HorizontalAlignment="Center" VerticalAlignment="Center"
                     Background="{DynamicResource PanelBrush}" CornerRadius="12" Padding="40,32"
                     BorderBrush="{DynamicResource AccentBrush}" BorderThickness="2">
@@ -679,7 +752,7 @@
              同样 IsHitTestVisible=False（Toast 自己不需要交互），不影响下层点击。 -->
         <ItemsControl x:Name="ToastHost" Grid.Column="0" Grid.ColumnSpan="2"
                       HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                      Margin="0,0,20,20" IsHitTestVisible="False">
+                      Margin="0,0,20,20" IsHitTestVisible="False" Grid.RowSpan="2">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <StackPanel/>
@@ -696,7 +769,7 @@
              放左下角是刻意跟右下角的普通 Toast 错开，避免两类提示同时出现时互相遮挡/混淆。 -->
         <ItemsControl x:Name="ActionToastHost" Grid.Column="0" Grid.ColumnSpan="2"
                       HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                      Margin="20,0,0,20">
+                      Margin="20,0,0,20" Grid.RowSpan="2">
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <StackPanel/>
@@ -717,7 +790,7 @@
              颜色（黑/白）和 Opacity 都由 ThemeService.ApplyBrightness 在设置页保存/启动时
              一次性算好赋值，这里 XAML 只声明容器，不写死任何具体数值。 -->
         <Border x:Name="BrightnessOverlay" Grid.Column="0" Grid.ColumnSpan="2"
-                Background="Black" Opacity="0" IsHitTestVisible="False"/>
+                Background="Black" Opacity="0" IsHitTestVisible="False" Grid.RowSpan="2"/>
 
         <!-- ===== AI 助手右下角悬浮球 =====
              常驻在窗口右下角，点击打开 AI 助手面板。受设置页 "显示右下角常驻悬浮球入口" 控制。
@@ -730,7 +803,7 @@
              点中；HorizontalAlignment=Right + VerticalAlignment=Bottom 意味着按钮是以右下角
              为锚点向左上方向扩张变大的，不会因为变大而反过来跟右侧的 AI 悬浮球重叠，
              右侧 Margin 保持 66 不用跟着放大调整。 -->
-        <Button x:Name="AprilFoolsFlagButton" Grid.Column="0" Grid.ColumnSpan="2"
+        <Button x:Name="AprilFoolsFlagButton" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="2"
                 HorizontalAlignment="Right" VerticalAlignment="Bottom"
                 Width="72" Height="72" Margin="0,0,66,22"
                 Background="Transparent" BorderThickness="0" Cursor="Hand"
@@ -751,7 +824,7 @@
             </Viewbox>
         </Button>
 
-        <Button x:Name="AiFloatingButton" Grid.Column="0" Grid.ColumnSpan="2"
+        <Button x:Name="AiFloatingButton" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="2"
                 HorizontalAlignment="Right" VerticalAlignment="Bottom"
                 Width="40" Height="40" Margin="0,0,20,20"
                 Style="{StaticResource FloatingButton}" Click="AiFloatingButton_Click"

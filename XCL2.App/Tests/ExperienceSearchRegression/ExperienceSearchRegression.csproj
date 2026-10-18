@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AppConfig.ExperienceSearch.cs" Link="AppConfig.ExperienceSearch.cs" />
+    <Compile Include="../../Models/ExperiencePreferenceAttribute.cs" Link="ExperiencePreferenceAttribute.cs" />
+    <Compile Include="../../Models/FeatureSearchEntry.cs" Link="FeatureSearchEntry.cs" />
+    <Compile Include="../../Services/ExperienceSearchState.cs" Link="ExperienceSearchState.cs" />
+    <Compile Include="../../Services/FeatureSearchMatcher.cs" Link="FeatureSearchMatcher.cs" />
+  </ItemGroup>
+</Project>

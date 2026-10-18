@@ -18,7 +18,7 @@ namespace XCL2.App.Services;
 ///
 /// 这个服务补上缺的那一半：
 ///   1. 读整合包清单，拿到它声明的 **MC 版本 + 加载器 + 加载器版本**
-///      （mrpack 读 modrinth.index.json 的 dependencies；.xclpack 读 manifest.json；
+///      （mrpack 读 modrinth.index.json 的 dependencies；.xclpack 读 xclpack.json；
 ///      CurseForge 包读 manifest.json 的 minecraft.modLoaders）
 ///   2. 用用户指定的实例名新建一个**全新的、跟任何已有实例无关的**版本目录
 ///   3. 下载对应的原版本体（DownloadService）
@@ -56,8 +56,7 @@ public class ModpackInstallService
             var mrIndex = archive.GetEntry("modrinth.index.json");
             if (mrIndex != null)
             {
-                using var stream = mrIndex.Open();
-                using var doc = JsonDocument.Parse(stream);
+                using var doc = JsonDocument.Parse(ArchiveImportSafety.ReadManifest(mrIndex));
                 var root = doc.RootElement;
 
                 string? name = root.TryGetProperty("name", out var n) ? n.GetString() : null;
@@ -75,21 +74,19 @@ public class ModpackInstallService
             }
 
             // --- XCL2 .xclpack ---
-            var xclManifest = archive.GetEntry("xcl2-modpack.json");
+            var xclManifest = archive.GetEntry("xclpack.json") ?? archive.GetEntry("xcl2-modpack.json");
             if (xclManifest != null)
             {
-                using var stream = xclManifest.Open();
-                var m = JsonSerializer.Deserialize<ModpackManifest>(stream);
+                var m = JsonSerializer.Deserialize<ModpackManifest>(ArchiveImportSafety.ReadManifest(xclManifest));
                 if (m != null)
-                    return new ModpackRequirements(m.Name, m.McVersion, m.ModLoader, m.ModLoaderVersion);
+                    return new ModpackRequirements(m.Name, m.McVersion, NormalizeLoader(m.ModLoader), m.ModLoaderVersion);
             }
 
             // --- CurseForge manifest.json ---
             var cfManifest = archive.GetEntry("manifest.json");
             if (cfManifest != null)
             {
-                using var stream = cfManifest.Open();
-                using var doc = JsonDocument.Parse(stream);
+                using var doc = JsonDocument.Parse(ArchiveImportSafety.ReadManifest(cfManifest));
                 var root = doc.RootElement;
                 string? name = root.TryGetProperty("name", out var n2) ? n2.GetString() : null;
                 string? mc = null, loader = null, loaderVer = null;
@@ -101,7 +98,9 @@ public class ModpackInstallService
                         loaders.ValueKind == JsonValueKind.Array && loaders.GetArrayLength() > 0)
                     {
                         // CurseForge 的 id 形如 "forge-47.2.0" / "fabric-0.15.11" / "neoforge-21.1.66"
-                        var id = loaders[0].TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                        var selected = loaders.EnumerateArray().FirstOrDefault(item => item.TryGetProperty("primary", out var primary) && primary.ValueKind == JsonValueKind.True);
+                        if (selected.ValueKind == JsonValueKind.Undefined) selected = loaders[0];
+                        var id = selected.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
                         if (!string.IsNullOrEmpty(id))
                         {
                             var dash = id.IndexOf('-');
@@ -113,7 +112,7 @@ public class ModpackInstallService
                                 "quilt" => "Quilt",
                                 "neoforge" => "NeoForge",
                                 "forge" => "Forge",
-                                _ => null,
+                                _ => kind,
                             };
                         }
                     }
@@ -128,6 +127,9 @@ public class ModpackInstallService
 
         return new ModpackRequirements(Path.GetFileNameWithoutExtension(modpackPath), null, null, null);
     }
+
+    private static string? NormalizeLoader(string? loader) => string.IsNullOrWhiteSpace(loader) ? null : loader.Trim().ToLowerInvariant() switch
+    { "fabric" => "Fabric", "quilt" => "Quilt", "forge" => "Forge", "neoforge" => "NeoForge", "vanilla" => null, _ => loader.Trim() };
 
     /// <summary>
     /// 把版本目录名规整成合法的文件夹名。用户输入的实例名可能带 \ / : * ? " &lt; &gt; |
@@ -183,15 +185,23 @@ public class ModpackInstallService
         CancellationToken ct = default)
     {
         var req = ReadRequirements(modpackPath);
+        if (string.IsNullOrWhiteSpace(req.McVersion))
+            throw new InvalidOperationException("这个整合包未声明 Minecraft 版本，无法新建可启动实例；请先创建匹配版本后导入内容。");
 
+        if (req.Loader is not (null or "Fabric" or "Quilt" or "Forge" or "NeoForge"))
+            throw new InvalidDataException($"尚不支持清单声明的加载器 {req.Loader}，未创建实例。");
+        if ((req.Loader is "Forge" or "NeoForge") && string.IsNullOrWhiteSpace(req.LoaderVersion))
+            throw new InvalidDataException($"整合包未提供 {req.Loader} 版本，未创建实例。");
         var instanceId = MakeUniqueInstanceName(minecraftDir, instanceName);
-        var instanceDir = Path.Combine(minecraftDir, "versions", instanceId);
+        var instanceDir = ArchiveImportSafety.Resolve(Path.Combine(minecraftDir, "versions"), instanceId);
+        ArchiveImportSafety.CheckLinks(modpackPath);
+        using (var archive = ZipFile.OpenRead(modpackPath)) ArchiveImportSafety.ValidateArchive(archive, instanceDir);
         await Plugins.PluginInterceptionRegistry.ValidateInstanceAsync(minecraftDir, instanceId, "modpack", ct);
 
         var createdDir = false;
         try
         {
-            Directory.CreateDirectory(instanceDir);
+            ArchiveImportSafety.CreateNewDirectory(instanceDir);
             createdDir = true;
 
             // ---------- 1. 原版本体 ----------
@@ -287,6 +297,9 @@ public class ModpackInstallService
                 MergeProducedVersionInto(minecraftDir, req.McVersion!, instanceId, instanceDir, copyOnly: true);
             }
 
+            if (!File.Exists(Path.Combine(instanceDir, instanceId + ".json")))
+                throw new InvalidDataException("安装器未生成实例版本描述，未将整合包标为可启动。");
+
             // ---------- 4. 解整合包内容 ----------
             progress?.Report(new ProgressInfo("正在导入整合包内容", 0, 1, Path.GetFileName(modpackPath)));
 
@@ -297,12 +310,25 @@ public class ModpackInstallService
                     new Progress<string>(msg => progress?.Report(new ProgressInfo(msg, 0, 1, ""))), ct);
                 failed.AddRange(r.FailedFiles);
             }
+            else if (ModpackService.IsCurseForgePack(modpackPath))
+            {
+                var r = await _modpackService.ImportCurseForgeAsync(modpackPath, instanceDir,
+                    new Progress<string>(msg => progress?.Report(new ProgressInfo(msg, 0, 1, ""))), ct);
+                failed.AddRange(r.FailedFiles);
+            }
             else
             {
                 _modpackService.Import(modpackPath, instanceDir,
                     new Progress<string>(msg => progress?.Report(new ProgressInfo(msg, 0, 1, ""))));
             }
 
+            // Content overrides can replace version metadata, so validate after importing as well as provisioning.
+            var ready = VersionInheritanceResolver.Load(minecraftDir, instanceId, FolderService.ResolveVersionJson);
+            var client = ready.ClientLayer;
+            var jarName = string.IsNullOrEmpty(client.Detail.Id) ? client.VersionId : client.Detail.Id;
+            var clientJar = LauncherService.ResolveVersionFile(client.Directory, jarName, "jar");
+            if (string.IsNullOrWhiteSpace(ready.Effective.MainClass) || clientJar == null || new FileInfo(clientJar).Length == 0)
+                throw new InvalidDataException("整合包导入后的版本描述或客户端主程序不完整，未将其标为可启动。");
             Plugins.PluginHostBridge.Current?.NotifyInstanceCreated(minecraftDir, instanceId);
             return new InstallResult(instanceId, instanceDir, req.McVersion, req.Loader, failed);
         }
@@ -329,15 +355,17 @@ public class ModpackInstallService
         string targetVersionId, string targetDir, bool copyOnly = false)
     {
         var sourceDir = Path.Combine(minecraftDir, "versions", sourceVersionId);
-        if (!Directory.Exists(sourceDir)) return;
+        if (!Directory.Exists(sourceDir)) throw new DirectoryNotFoundException("安装器没有生成预期版本目录，未将整合包标为可启动。");
 
+        ArchiveImportSafety.CheckLinks(sourceDir); ArchiveImportSafety.CheckLinks(targetDir);
         Directory.CreateDirectory(targetDir);
 
         foreach (var file in Directory.GetFiles(sourceDir))
         {
+            ArchiveImportSafety.CheckLinks(file);
             var ext = Path.GetExtension(file);
-            var isJson = ext.Equals(".json", StringComparison.OrdinalIgnoreCase);
-            var isJar = ext.Equals(".jar", StringComparison.OrdinalIgnoreCase);
+            var isJson = string.Equals(Path.GetFileName(file), sourceVersionId + ".json", StringComparison.OrdinalIgnoreCase);
+            var isJar = string.Equals(Path.GetFileName(file), sourceVersionId + ".jar", StringComparison.OrdinalIgnoreCase);
 
             var destName = (isJson || isJar) ? targetVersionId + ext : Path.GetFileName(file);
             var dest = Path.Combine(targetDir, destName);
@@ -361,7 +389,7 @@ public class ModpackInstallService
                         continue;
                     }
                 }
-                catch { /* 解析失败就退回原样复制 */ }
+                catch (JsonException ex) { throw new InvalidDataException("安装器生成的版本描述无效，未将整合包标为可启动。", ex); }
             }
 
             File.Copy(file, dest, overwrite: true);
@@ -374,20 +402,19 @@ public class ModpackInstallService
             CopyDirRecursive(dir, destSub);
         }
 
-        // 搬完之后把加载器自己产出的那个目录删掉，避免版本列表里同时出现
-        // "我的整合包" 和 "fabric-loader-0.15.11-1.20.1" 两个看起来一样的实例。
-        if (!copyOnly)
-        {
-            try { Directory.Delete(sourceDir, recursive: true); }
-            catch { /* 删不掉不影响使用，只是列表里多一项 */ }
-        }
+        // Loader directories may have existed before this task or be referenced by other instances.
+        // Keep the source; importing a pack must never remove an existing installed version.
     }
 
     private static void CopyDirRecursive(string source, string dest)
     {
+        ArchiveImportSafety.CheckLinks(source); ArchiveImportSafety.CheckLinks(dest);
         Directory.CreateDirectory(dest);
         foreach (var f in Directory.GetFiles(source))
-            File.Copy(f, Path.Combine(dest, Path.GetFileName(f)), overwrite: true);
+        {
+            ArchiveImportSafety.CheckLinks(f);
+            File.Copy(f, ArchiveImportSafety.Resolve(dest, Path.GetFileName(f)), overwrite: true);
+        }
         foreach (var d in Directory.GetDirectories(source))
             CopyDirRecursive(d, Path.Combine(dest, Path.GetFileName(d)));
     }

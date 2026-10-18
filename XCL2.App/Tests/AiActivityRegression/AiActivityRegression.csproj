@@ -7,11 +7,15 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Models/AiAssistantModels.cs" Link="AiAssistantModels.cs" />
+    <Compile Include="../../Models/AiAgentSettings.cs" Link="AiAgentSettings.cs" />
+    <Compile Include="../../Models/AiCommandPermissions.cs" Link="AiCommandPermissions.cs" />
+    <Compile Include="../../Models/AiAttachmentModels.cs" Link="AiAttachmentModels.cs" />
     <Compile Include="../../Models/AiAssistantActivity.cs" Link="AiAssistantActivity.cs" />
     <Compile Include="../../Models/AiFileDiff.cs" Link="AiFileDiff.cs" />
     <Compile Include="../../Services/AiCompletionContentParser.cs" Link="AiCompletionContentParser.cs" />
     <Compile Include="../../Services/AiSubAgentProtocol.cs" Link="AiSubAgentProtocol.cs" />
     <Compile Include="../../Views/AiAssistantActivityVm.cs" Link="AiAssistantActivityVm.cs" />
     <Compile Include="../../Services/AiControlProtocol.cs" Link="AiControlProtocol.cs" />
+    <Compile Include="../../Services/AiPlanProtocol.cs" Link="AiPlanProtocol.cs" />
   </ItemGroup>
 </Project>

@@ -25,13 +25,8 @@ namespace XCL2.App.Services;
 ///     文件——`Get-Content -Wait` 本身是 PowerShell 自带命令，窗口的存活完全依赖操作系统
 ///     给它的这个独立进程，不会因为我们主进程卡死/被杀而跟着卡死/消失。
 ///
-/// 跟 GameConsoleWindowService 的差异：LauncherLogService 是纯内存 StringBuilder，没有
-/// OutputReceived 这样的"新增一行就推送"事件（游戏进程的 stdout 逐行到达，天然适合事件；
-/// 启动器日志是"整段缓冲区"的概念，随时可能被别处一次性 AppendLine 追加，没有现成的
-/// 增量事件源）。这里改用一个轻量 DispatcherTimer 定时（跟 LogsPage 里
-/// _fullLauncherLogTimer 用的是同一种"没有事件源就轮询"思路）：每次把最新的完整缓冲区
-/// 文本重新写入文件——文件很小（内存日志本身也就几十 KB 到几百 KB 量级），全量覆盖写
-/// 开销可以忽略，不需要做增量 diff。
+/// 实时缓冲区有固定上限。计时器先检查修订号，没有新增内容时不复制字符串或写文件；
+/// 有新增内容则追加增量，缓冲裁剪后镜像新的尾部与裁剪提示。完整会话前缀由日志服务独立保存。
 /// </summary>
 public class LauncherLogWindowService : IDisposable
 {
@@ -39,9 +34,10 @@ public class LauncherLogWindowService : IDisposable
     private string? _logFilePath;
     private DispatcherTimer? _syncTimer;
     private string _lastSyncedText = "";
+    private long _lastSyncedRevision = -1;
 
     /// <summary>
-    /// 弹出一个独立的 CMD 窗口，持续镜像显示当前会话的完整启动器日志
+    /// 弹出一个独立的 CMD 窗口，持续镜像显示当前会话的有界实时启动器日志
     /// （LauncherLogService.GetBufferedText()）。
     /// </summary>
     public void Open()
@@ -53,7 +49,7 @@ public class LauncherLogWindowService : IDisposable
             _logFilePath = Path.Combine(logDir, $"launcher-log-{Environment.ProcessId}-{DateTime.Now:yyyyMMdd-HHmmss}.log");
 
             // 先把已有内容一次性写入文件，避免用户打开窗口时前面已经发生的日志漏看。
-            var initial = LauncherLogService.GetBufferedText();
+            LauncherLogService.TryGetBufferedText(ref _lastSyncedRevision, out var initial);
             File.WriteAllText(_logFilePath,
                 "==== XCL2 启动器完整日志（独立窗口，实时镜像，只读）====" + Environment.NewLine, Encoding.UTF8);
             if (!string.IsNullOrEmpty(initial))
@@ -99,13 +95,10 @@ public class LauncherLogWindowService : IDisposable
         if (_logFilePath == null) return;
         try
         {
-            var text = LauncherLogService.GetBufferedText();
-            if (text == _lastSyncedText) return; // 没有新内容，跳过这次磁盘 IO
+            var revision = _lastSyncedRevision;
+            if (!LauncherLogService.TryGetBufferedText(ref revision, out var text)) return; // No copy or IO while unchanged.
 
-            // 只追加新增的那一部分：LauncherLogService 的缓冲区只会在末尾追加、不会中途改写
-            // 历史内容（见其 AppendLine 实现），所以"新文本以旧文本为前缀"这个假设总是成立，
-            // 用 StartsWith 校验一下防御性地兜底——万一意外不成立（缓冲区被清空重置等极端
-            // 情况），退化为全量重写，保证窗口显示的内容不会跟实际状态脱节。
+            // Append until the bounded live buffer rotates; after rotation mirror its new tail and notice.
             if (text.StartsWith(_lastSyncedText, StringComparison.Ordinal))
             {
                 var delta = text[_lastSyncedText.Length..];
@@ -118,6 +111,7 @@ public class LauncherLogWindowService : IDisposable
                     Encoding.UTF8);
             }
             _lastSyncedText = text;
+            _lastSyncedRevision = revision;
         }
         catch { /* 文件可能被占用或已被清理，忽略，不影响启动器本身 */ }
     }

@@ -68,15 +68,16 @@ public partial class ToolboxPage : UserControl
 
         _lastNonStickyToolboxTab = ToolboxTabControl.SelectedItem as TabItem;
         InitializeToolboxNavigation();
+        InitializeToolboxPreferences();
 
         _dlHttp.DefaultRequestHeaders.UserAgent.ParseAdd("XCL2-Launcher-Toolbox/1.0");
 
         RefreshAchBedrockDirText();
-        MemOptCheck.IsChecked = _owner.ConfigService.Config.EnableMemoryOptimization;
         // RadioButton.Checked 事件在 IsChecked 被代码设成 true 时也会触发；这里只是初始化
         // UI 状态，先记一个标记避免刚加载页面就把配置写回一遍（值没变，写不写其实无所谓，
         // 但用这个标记更干净，跟别处"避免加载阶段触发保存"的写法保持一致）。
         _suppressMemOptTimingSave = true;
+        MemOptCheck.IsChecked = _owner.ConfigService.Config.EnableMemoryOptimization;
         if (_owner.ConfigService.Config.MemoryOptimizationTiming == MemoryOptimizationTiming.OnLauncherOpen)
             MemOptTimingOnOpenRadio.IsChecked = true;
         else
@@ -232,8 +233,17 @@ public partial class ToolboxPage : UserControl
 
     private void RefreshToolboxSearch(int? preferredTabIndex = null)
     {
-        var matches = string.IsNullOrWhiteSpace(ToolboxSearchBox.Text) ? _toolboxSearchEntries
+        IEnumerable<FeatureSearchEntry> matches = string.IsNullOrWhiteSpace(ToolboxSearchBox.Text) ? _toolboxSearchEntries
             : FeatureSearchMatcher.Match(_toolboxSearchEntries, ToolboxSearchBox.Text, "toolbox");
+        var cfg = _owner.ConfigService.Config;
+        if (ToolboxSearchFilter?.SelectedIndex == 1)
+            matches = matches.Where(entry => entry.TabIndex is int id && (cfg.FavoriteToolTabs?.Contains(id) ?? false));
+        else if (ToolboxSearchFilter?.SelectedIndex == 2)
+        {
+            var recent = cfg.EnableRecentToolHistory ? cfg.RecentToolTabs ?? new List<int>() : new List<int>();
+            matches = matches.Where(entry => entry.TabIndex is int id && recent.Contains(id))
+                .OrderBy(entry => recent.IndexOf(entry.TabIndex!.Value));
+        }
         AllToolboxItems.Items.Clear();
         int selectedIndex = 0;
         foreach (var entry in matches)
@@ -242,12 +252,14 @@ public partial class ToolboxPage : UserControl
                 || ToolboxTabControl.Items[index] is not TabItem tab || tab.Visibility != Visibility.Visible || !tab.IsEnabled)
                 continue;
             if (index == preferredTabIndex) selectedIndex = AllToolboxItems.Items.Count;
-            AllToolboxItems.Items.Add(new ListBoxItem
+            var row = new ListBoxItem
             {
-                Content = $"{ToolboxIcon(index)} {ToolboxTitle(tab)}", Tag = index,
+                Content = $"{((cfg.FavoriteToolTabs?.Contains(index) ?? false) ? "★ " : "")}{ToolboxIcon(index)} {ToolboxTitle(tab)}", Tag = index,
                 Padding = new Thickness(8, 7, 8, 7),
-                ToolTip = $"打开 {ToolboxTitle(tab)}"
-            });
+                ToolTip = $"打开 {ToolboxTitle(tab)}；右键可收藏",
+                ContextMenu = CreateToolPreferenceMenu(index)
+            };
+            AllToolboxItems.Items.Add(row);
         }
         AllToolboxItems.SelectedIndex = AllToolboxItems.Items.Count == 0 ? -1 : selectedIndex;
         if (AllToolboxItems.SelectedItem != null) AllToolboxItems.ScrollIntoView(AllToolboxItems.SelectedItem);
@@ -264,6 +276,13 @@ public partial class ToolboxPage : UserControl
         ToolboxSearchCountText.Text = count == 0 ? "0 个结果" : $"{AllToolboxItems.SelectedIndex + 1} / {count} 个结果";
         ToolboxSearchPreviousButton.IsEnabled = count > 0;
         ToolboxSearchNextButton.IsEnabled = count > 0;
+        ToolboxSearchEmptyText.Text = ToolboxSearchFilter?.SelectedIndex switch
+        {
+            1 => "还没有匹配的收藏。可在全部工具中右键选择收藏。",
+            2 when !_owner.ConfigService.Config.EnableRecentToolHistory => "最近使用记录默认关闭。可右键「全部工具」按钮开启。",
+            2 => "还没有匹配的使用记录。打开工具后会出现在这里。",
+            _ => "没有找到匹配的工具，请尝试其他关键词。"
+        };
         ToolboxSearchEmptyText.Visibility = count == 0 ? Visibility.Visible : Visibility.Collapsed;
         AllToolboxItems.Visibility = count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -310,6 +329,8 @@ public partial class ToolboxPage : UserControl
 
     private void ToolboxSearch_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // 筛选下拉框保留系统键盘操作，不能让外层搜索截走方向键与 Enter。
+        if (ToolboxSearchFilter?.IsKeyboardFocusWithin == true) return;
         switch (e.Key)
         {
             case Key.Up:
@@ -353,7 +374,9 @@ public partial class ToolboxPage : UserControl
             || ToolboxTabControl.Items[tabIndex] is not TabItem { Visibility: Visibility.Visible, IsEnabled: true })
             return false;
         ToolboxTabControl.SelectedIndex = tabIndex;
-        return ToolboxTabControl.SelectedIndex == tabIndex;
+        var selected = ToolboxTabControl.SelectedIndex == tabIndex;
+        if (selected) RecordToolVisit(tabIndex);
+        return selected;
     }
 
     // ============================================================
@@ -2265,12 +2288,13 @@ public partial class ToolboxPage : UserControl
 
     private void MemOptCheck_Changed(object sender, RoutedEventArgs e)
     {
+        if (_suppressMemOptTimingSave) return;
         var cfg = _owner.ConfigService.Config;
         cfg.EnableMemoryOptimization = MemOptCheck.IsChecked == true;
         _owner.ConfigService.Save();
 
         MemOptStatusText.Text = cfg.EnableMemoryOptimization
-            ? "已开启：下次启动游戏前会自动按当前可用内存重新计算 -Xms/-Xmx。"
+            ? "已开启：每次启动都会按所选动态模式和总物理内存重新计算 -Xms/-Xmx；实例显式手动值优先。"
             : "已关闭：启动游戏将使用「设置」页手动填写的固定内存数值。";
     }
 
@@ -2287,14 +2311,14 @@ public partial class ToolboxPage : UserControl
         _owner.ConfigService.Save();
 
         MemOptStatusText.Text = cfg.MemoryOptimizationTiming == MemoryOptimizationTiming.OnLauncherOpen
-            ? "已切换为「启动器打开时」：下次打开启动器会自动算好一次并直接写回内存设置，启动游戏时不再重新计算。"
-            : "已切换为「游戏启动前」：每次点「启动游戏」之前才临场按当前可用内存重新计算。";
+            ? "已开启额外启动预览：下次打开启动器会预览推荐值，实际启动仍重新计算，不改写手动设置。"
+            : "已关闭额外启动预览：每次启动游戏前重新计算，不改写手动设置。";
     }
 
     private void MemOptPreview_Click(object sender, RoutedEventArgs e)
     {
         var cfg = _owner.ConfigService.Config;
-        var recommendation = MemoryOptimizerService.Calculate(cfg.MemoryOptimizationReserveMb);
+        var recommendation = MemoryOptimizerService.Calculate(cfg);
 
         MemOptStatusText.Text = recommendation == null
             ? "无法获取系统内存信息（可能不是 Windows 系统），此功能暂不可用。"
@@ -2969,7 +2993,7 @@ public partial class ToolboxPage : UserControl
             case XclDangerFourChoiceResult.Confirm3:
                 // 红色“确定”：不再固定跳视频，而是无视当前日期，随机启用一个正常只会在
                 // 4 月 1 日出现的彩蛋。状态仅保存在本次启动器进程中，重启后自动消失；
-                // 小白旗/F1、10 秒 Windows 通知、60 秒 Win32 恢复提示全部沿用正式愚人节逻辑。
+                // 小白旗/F1 和10秒后的提醒中心消息沿用正式愚人节逻辑，不创建原生恢复弹窗。
                 AprilFoolsService.ActivateRandomSessionEffect();
                 return;
         }

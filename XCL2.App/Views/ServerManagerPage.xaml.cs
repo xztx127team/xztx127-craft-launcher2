@@ -70,6 +70,7 @@ public partial class ServerManagerPage : UserControl
     /// Category_Checked 一读就是 NullReferenceException。用同一套 _initialized 短路方案。
     /// </summary>
     private bool _initialized;
+    private string _serverListFilter = "all";
 
     public ServerManagerPage(MainWindow owner)
     {
@@ -96,6 +97,7 @@ public partial class ServerManagerPage : UserControl
         Loaded += (_, _) =>
         {
             _owner.ServerInstanceService.InstanceAdded += OnInstanceAddedByBackgroundTask;
+            PresentationPreferencesService.Changed += OnAddressDisplayChanged;
             ResumeInstanceRefresh();
         };
         InstancesPanel.IsVisibleChanged += (_, e) =>
@@ -106,6 +108,7 @@ public partial class ServerManagerPage : UserControl
         Unloaded += (_, _) =>
         {
             _owner.ServerInstanceService.InstanceAdded -= OnInstanceAddedByBackgroundTask;
+            PresentationPreferencesService.Changed -= OnAddressDisplayChanged;
             CancelInstanceRefresh();
             _instanceRefreshNeeded = true;
             _serverResourceDebounceTimer?.Stop();
@@ -115,6 +118,43 @@ public partial class ServerManagerPage : UserControl
         Category_Checked(CatHome, new RoutedEventArgs()); // 补上初始化阶段被跳过的那次面板显隐
 
         _ = LoadMcVersionsAsync();
+    }
+
+    private void ServerListMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button anchor) return;
+        var cfg = _owner.ConfigService.Config;
+        cfg.FavoriteServerIds ??= new(); cfg.RecentServerIds ??= new();
+        var menu = new ContextMenu { PlacementTarget = anchor };
+        foreach (var (key, text) in new[] { ("all", "所有服务器"), ("favorites", "已收藏"), ("recent", "最近启动") })
+        {
+            var item = new MenuItem { Header = text, IsCheckable = true, IsChecked = _serverListFilter == key };
+            item.Click += (_, _) => { _serverListFilter = key; RefreshInstanceList(); };
+            menu.Items.Add(item);
+        }
+        menu.Items.Add(new Separator());
+        var history = new MenuItem { Header = "记录最近启动的服务器", IsCheckable = true, IsChecked = cfg.EnableRecentServerHistory };
+        history.Click += (_, _) =>
+        {
+            cfg.EnableRecentServerHistory = history.IsChecked;
+            if (!history.IsChecked) cfg.RecentServerIds.Clear();
+            _owner.ConfigService.Save(); RefreshInstanceList();
+        };
+        menu.Items.Add(history);
+        var clear = new MenuItem { Header = "清空服务器启动记录", IsEnabled = cfg.RecentServerIds.Count > 0 };
+        clear.Click += (_, _) => { cfg.RecentServerIds.Clear(); _owner.ConfigService.Save(); RefreshInstanceList(); }; menu.Items.Add(clear);
+        menu.Items.Add(new Separator());
+        var guide = new MenuItem { Header = "如何联机 / 端口转发教程…" }; guide.Click += OpenNetworkGuide_Click; menu.Items.Add(guide);
+        menu.IsOpen = true;
+    }
+
+    private void OnAddressDisplayChanged()
+    {
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _instanceRefreshNeeded = true;
+            if (IsLoaded && InstancesPanel.IsVisible) RefreshInstanceList();
+        }));
     }
 
     private void OnInstanceAddedByBackgroundTask() => _ = Dispatcher.BeginInvoke(new Action(RefreshInstanceList));
@@ -723,7 +763,13 @@ public partial class ServerManagerPage : UserControl
         var cancellation = new CancellationTokenSource();
         _instanceRefreshCancellation = cancellation;
         var token = cancellation.Token;
-        var instances = _owner.ServerInstanceService.Instances.ToArray();
+        var config = _owner.ConfigService.Config;
+        config.FavoriteServerIds ??= new(); config.RecentServerIds ??= new();
+        var allInstances = _owner.ServerInstanceService.Instances.ToArray();
+        var instances = (_serverListFilter == "favorites" ? allInstances.Where(i => config.FavoriteServerIds.Contains(i.Id))
+            : _serverListFilter == "recent" ? allInstances.Where(i => config.EnableRecentServerHistory && config.RecentServerIds.Contains(i.Id))
+                .OrderBy(i => config.RecentServerIds.IndexOf(i.Id)) : allInstances.AsEnumerable()).ToArray();
+        ServerListMenuButton.Content = _serverListFilter == "favorites" ? "已收藏 ▾" : _serverListFilter == "recent" ? "最近启动 ▾" : "筛选与更多 ▾";
         UiAnimationHelper.Reset(InstanceListPanel);
         InstanceListPanel.Children.Clear();
 
@@ -731,7 +777,10 @@ public partial class ServerManagerPage : UserControl
         {
             InstanceListPanel.Children.Add(new TextBlock
             {
-                Text = "还没有创建任何服务器，点击右上角「创建服务器」开始。",
+                Text = allInstances.Length == 0 ? "还没有创建任何服务器，点击右上角「创建服务器」开始。"
+                    : _serverListFilter == "recent" && !config.EnableRecentServerHistory ? "最近启动记录默认关闭。可在「筛选与更多」菜单中开启，或切回所有服务器。"
+                    : "此筛选下没有服务器。可在卡片的更多菜单中收藏，或切回所有服务器。",
+                TextWrapping = TextWrapping.Wrap,
                 Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
                 Margin = new Thickness(0, 20, 0, 0),
                 HorizontalAlignment = HorizontalAlignment.Center
@@ -785,7 +834,7 @@ public partial class ServerManagerPage : UserControl
                         }
                         catch { /* 图标损坏或已移除时使用原占位图标。 */ }
                     }
-                    var address = ip != null ? $"{ip}:{port}" : $"本机(localhost):{port}";
+                    var address = ip != null ? $"{ip}:{port}" : $"localhost:{port}";
                     return new InstanceCardData(request.Instance, port, address, icon);
                 }).ToArray();
             }, token);
@@ -867,32 +916,32 @@ public partial class ServerManagerPage : UserControl
         grid.Children.Add(iconHost);
 
         var infoPanel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-        var titleLine = new StackPanel { Orientation = Orientation.Horizontal };
+        var titleLine = new Grid();
+        titleLine.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        titleLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        titleLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         titleLine.Children.Add(new TextBlock
         {
-            Text = instance.DisplayName, FontSize = 15, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center
+            Text = (_owner.ConfigService.Config.FavoriteServerIds?.Contains(instance.Id) == true ? "★ " : "") + instance.DisplayName,
+            ToolTip = instance.DisplayName, TextTrimming = TextTrimming.CharacterEllipsis,
+            FontSize = 15, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center
         });
-        titleLine.Children.Add(new Border
+        var statusBadge = new Border
         {
-            Background = isRunning ? System.Windows.Media.Brushes.SeaGreen : System.Windows.Media.Brushes.Gray,
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(6, 1, 6, 1),
-            Margin = new Thickness(8, 0, 0, 0),
-            Child = new TextBlock
-            {
-                Text = isRunning ? "运行中" : "已停止", Foreground = System.Windows.Media.Brushes.White, FontSize = 11
-            }
-        });
+            Background = isRunning ? Brushes.SeaGreen : Brushes.Gray,
+            CornerRadius = new CornerRadius(4), Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(8, 0, 0, 0),
+            Child = new TextBlock { Text = isRunning ? "运行中" : "已停止", Foreground = Brushes.White, FontSize = 11 }
+        };
+        Grid.SetColumn(statusBadge, 1); titleLine.Children.Add(statusBadge);
         if (instance.IsDefault)
         {
-            titleLine.Children.Add(new Border
+            var defaultBadge = new Border
             {
-                Background = (System.Windows.Media.Brush)FindResource("AccentBrush"),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(6, 1, 6, 1),
-                Margin = new Thickness(6, 0, 0, 0),
-                Child = new TextBlock { Text = "默认", Foreground = System.Windows.Media.Brushes.White, FontSize = 11 }
-            });
+                Background = (Brush)FindResource("AccentBrush"), CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0),
+                Child = new TextBlock { Text = "默认", Foreground = Brushes.White, FontSize = 11 }
+            };
+            Grid.SetColumn(defaultBadge, 2); titleLine.Children.Add(defaultBadge);
         }
         infoPanel.Children.Add(titleLine);
         infoPanel.Children.Add(new TextBlock
@@ -900,7 +949,7 @@ public partial class ServerManagerPage : UserControl
             Text = $"{instance.CoreType} · MC {instance.McVersion} · 内存 {instance.MinMemoryMb}~{instance.MaxMemoryMb}MB" +
                    (instance.CpuLimitPercent != null ? $" · CPU上限 {instance.CpuLimitPercent}%" : ""),
             Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
-            FontSize = 12,
+            FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis,
             Margin = new Thickness(0, 4, 0, 0)
         });
 
@@ -908,10 +957,13 @@ public partial class ServerManagerPage : UserControl
         // 这里读取 server.properties 的 server-port + 本机局域网 IP 拼出连接地址；
         // 未运行时也照样展示（server.properties 在核心下载完成后就已经存在，不需要等服务器启动）。
         var connectionText = data.ConnectionText;
-        var addressLine = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        var addressLine = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        addressLine.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        addressLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         addressLine.Children.Add(new TextBlock
         {
-            Text = $"连接地址：{connectionText}",
+            Text = "连接地址：" + PresentationPreferencesService.FormatServerAddress(connectionText, _owner.ConfigService.Config),
+            TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
             FontSize = 12
         });
@@ -923,8 +975,26 @@ public partial class ServerManagerPage : UserControl
         };
         copyAddrBtn.Click += (_, _) =>
         {
-            try { Clipboard.SetText(connectionText); } catch { /* 剪贴板偶发被占用，忽略即可，不阻断界面 */ }
+            try { Clipboard.SetText(ServerConnectionCopyService.AddressOnly(connectionText)); ToastService.ShowSuccess("连接地址已复制。"); }
+            catch { ToastService.ShowWarning("复制失败，请检查连接地址或稍后重试。"); }
         };
+        var copyMenu = new ContextMenu();
+        var sensitiveCopy = new MenuItem { Header = "复制 RCON 连接信息（含密码）…" };
+        sensitiveCopy.Click += async (_, _) =>
+        {
+            if (await MessageBoxDialog.ShowConfirmAsync("RCON 连接信息含管理密码。复制后，其他能读取剪贴板的程序可能访问这些信息。确认复制？", "复制敏感连接信息", "复制") != true) return;
+            try
+            {
+                var text = await Task.Run(() => ServerConnectionCopyService.BuildRconConnection(instance.Directory, connectionText));
+                Clipboard.SetText(text);
+                ToastService.ShowSuccess("RCON 连接信息已复制，请勿公开分享。");
+            }
+            catch (Exception ex) { ToastService.ShowWarning(DiagnosticRedactionService.Sanitize(ex.Message, 1000)); }
+        };
+        copyMenu.Items.Add(sensitiveCopy);
+        copyAddrBtn.ContextMenu = copyMenu;
+        copyAddrBtn.ToolTip = "复制游戏连接地址；右键可选择复制 RCON 管理连接信息。";
+        Grid.SetColumn(copyAddrBtn, 1);
         addressLine.Children.Add(copyAddrBtn);
         infoPanel.Children.Add(addressLine);
 
@@ -995,6 +1065,15 @@ public partial class ServerManagerPage : UserControl
     private void ShowInstanceMoreMenu(Button anchor, ServerInstance instance)
     {
         var menu = new ContextMenu { PlacementTarget = anchor };
+        var config = _owner.ConfigService.Config;
+        config.FavoriteServerIds ??= new();
+        var favorite = new MenuItem { Header = config.FavoriteServerIds.Contains(instance.Id) ? "取消收藏" : "收藏服务器" };
+        favorite.Click += (_, _) =>
+        {
+            if (!config.FavoriteServerIds.Remove(instance.Id)) config.FavoriteServerIds.Add(instance.Id);
+            _owner.ConfigService.Save(); RefreshInstanceList();
+        };
+        menu.Items.Add(favorite); menu.Items.Add(new Separator());
 
         // 修复"没有自定义服务器名称功能"：创建向导里虽然可以填初始名称，但创建完之后
         // 没有任何地方能改名字——之前"更多"菜单只有导入/导出/图标/默认/重装这几项，缺重命名。
@@ -1104,6 +1183,15 @@ public partial class ServerManagerPage : UserControl
         {
             var previousPort = ServerPortService.ReadPort(instance);
             var process = _owner.ServerProcessManager.Start(instance);
+            var config = _owner.ConfigService.Config;
+            if (config.EnableRecentServerHistory)
+            {
+                config.RecentServerIds ??= new();
+                config.RecentServerIds.RemoveAll(id => id == instance.Id);
+                config.RecentServerIds.Insert(0, instance.Id);
+                if (config.RecentServerIds.Count > 12) config.RecentServerIds.RemoveRange(12, config.RecentServerIds.Count - 12);
+                _owner.ConfigService.Save();
+            }
             _owner.ServerInstanceService.Update(instance);
             if (process.ServerPort != previousPort)
                 ToastService.ShowWarning($"端口 {previousPort} 已占用或与其他服务器冲突，本次使用 {process.ServerPort}。");
@@ -1181,7 +1269,7 @@ public partial class ServerManagerPage : UserControl
         var console = new ServerConsoleWindow(_owner, instance);
         // ServerConsoleWindow 已迁移成内嵌 Overlay，没有 Window.Closed，
         // 改用等价的 IOverlayDialog.RequestClose。
-        console.RequestClose += (_, _) => RefreshInstanceList(); // 控制台关闭时（可能服务器也被停止了）刷新状态
+        console.OverlayClosed += (_, _) => RefreshInstanceList(); // 控制台关闭时（可能服务器也被停止了）刷新状态
         console.Show();
     }
 
@@ -1312,41 +1400,56 @@ public partial class ServerManagerPage : UserControl
         }
     }
 
+    private readonly HashSet<string> _serverModpackImports = new(StringComparer.OrdinalIgnoreCase);
     private async Task InstallModpackToServerAsync(ServerInstance instance, string? suppliedPath = null)
     {
+        if (_owner.ServerProcessManager.IsRunning(instance.Id))
+        { MessageBoxDialog.ShowInfo("请先停止服务器，再导入整合包。"); return; }
         var path = suppliedPath;
         if (string.IsNullOrWhiteSpace(path))
         {
-            var dialog = new OpenFileDialog
-            {
-                Title = "选择 Modrinth、CurseForge 或 XCL2 整合包",
-                Filter = "整合包|*.mrpack;*.zip;*.xclpack|所有文件|*.*"
-            };
+            var dialog = new OpenFileDialog { Title = "选择 Modrinth、CurseForge 或 XCL2 整合包", Filter = "整合包|*.mrpack;*.zip;*.xclpack|所有文件|*.*" };
             if (dialog.ShowDialog() != true) return;
             path = dialog.FileName;
         }
-
+        if (!_serverModpackImports.Add(instance.Id))
+        { ToastService.ShowInfo("此服务器已有整合包导入任务，请等待完成。"); return; }
         try
         {
-            var service = new ModpackService();
-            if (ModpackService.IsMrpack(path))
+            var source = path;
+            var isMrpack = await Task.Run(() => ModpackService.IsMrpack(source));
+            var isCurseForge = !isMrpack && await Task.Run(() => ModpackService.IsCurseForgePack(source));
+            var requirements = await Task.Run(() => new ModpackInstallService(_owner.ConfigService.Config).ReadRequirements(source));
+            if ((isMrpack || isCurseForge) && string.IsNullOrWhiteSpace(requirements.McVersion))
+                throw new InvalidDataException("整合包未声明 Minecraft 版本，无法核对服务器环境，未执行导入。");
+            if (!string.IsNullOrWhiteSpace(requirements.McVersion) && !string.Equals(requirements.McVersion, instance.McVersion, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"整合包需要 Minecraft {requirements.McVersion}，当前服务器是 {instance.McVersion}。请先创建匹配的服务器，未执行导入。");
+            if (!string.IsNullOrWhiteSpace(requirements.Loader) && !string.Equals(requirements.Loader, instance.CoreType.ToString(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"整合包需要 {requirements.Loader}，当前服务器核心为 {instance.CoreType}。请先安装匹配的核心，未执行导入。");
+            var note = isCurseForge ? "CurseForge 清单不标注每个模组的客户端/服务端用途，请确认这是适用于服务器的包。可选文件不会自动下载。\n" : "";
+            if (!MessageBoxDialog.ShowConfirm(note + $"将内容合并到服务器「{instance.DisplayName}」：\n{instance.Directory}\n同名内容会被覆盖。此操作不更换服务器核心或加载器，请先备份重要数据。", "导入服务器整合包")) return;
+            var result = await DownloadQueueService.Instance.RunAndWaitAsync("服务器整合包 " + instance.DisplayName, async (item, ct) =>
             {
-                var result = await service.ImportMrpackAsync(path, instance.Directory);
-                MessageBoxDialog.ShowSuccess($"Modrinth 整合包已安装到服务器「{instance.DisplayName}」。" +
-                    (result.FailedFiles.Count == 0 ? "" : $"\n有 {result.FailedFiles.Count} 个文件下载失败，可重试。"));
-            }
-            else
-            {
-                // XCL 包与 CurseForge ZIP 都先按覆盖目录导入。标准 CurseForge overrides 会被保留到服务端目录，
-                // 供用户补充服务端核心/不兼容客户端 Mod 后直接启动。
-                service.Import(path, instance.Directory);
-                MessageBoxDialog.ShowSuccess($"整合包内容已导入服务器「{instance.DisplayName}」。");
-            }
+                if (_owner.ServerProcessManager.IsRunning(instance.Id)) throw new InvalidOperationException("服务器已启动，未执行整合包导入。");
+                var taskProgress = item.CreateProgress();
+                var progress = new Progress<string>(message => taskProgress.Report(new ProgressInfo(message, 0, 1, "")));
+                var service = new ModpackService();
+                return await Task.Run(async () =>
+                {
+                    if (isMrpack) return await service.ImportMrpackAsync(source, instance.Directory, progress, ct, server: true);
+                    if (isCurseForge) return await service.ImportCurseForgeAsync(source, instance.Directory, progress, ct);
+                    ct.ThrowIfCancellationRequested();
+                    var manifest = service.Import(source, instance.Directory, progress);
+                    return new MrpackImportResult(manifest?.Name ?? Path.GetFileNameWithoutExtension(source), manifest?.McVersion, new());
+                }, ct);
+            });
+            if (result.FailedFiles.Count > 0)
+                MessageBoxDialog.ShowWarning($"服务器内容部分导入，但 {result.FailedFiles.Count} 个文件未完成，请补齐后启动：\n" + string.Join("\n", result.FailedFiles.Take(10)), "服务器整合包未完整导入");
+            else MessageBoxDialog.ShowSuccess($"整合包内容已导入服务器「{instance.DisplayName}」。服务器核心保持原配置。");
         }
-        catch (Exception ex)
-        {
-            MessageBoxDialog.ShowError($"服务器整合包安装失败：{ex.Message}");
-        }
+        catch (OperationCanceledException) { ToastService.ShowInfo("服务器整合包导入已取消，已完成的内容保留，请核对后再启动。"); }
+        catch (Exception ex) { MessageBoxDialog.ShowError($"服务器整合包导入未完成：{ex.Message}"); }
+        finally { _serverModpackImports.Remove(instance.Id); }
     }
 
     private void ServerManagerPage_DragOver(object sender, DragEventArgs e)

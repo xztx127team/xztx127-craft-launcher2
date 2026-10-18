@@ -12,18 +12,19 @@ namespace XCL2.App.Services;
 /// - 文件名在**进程启动时**就已经确定（日期-时间-分钟-今日第N次启动），而不是等到关闭
 ///   那一刻才决定——这样文件名反映的是"这个启动器实例是什么时候起来的"，符合直觉；
 ///   如果换成用"关闭时刻"命名，用户开着启动器挂一整晚，文件名却是第二天的时间，会很怪。
-/// - 内容来源：全程订阅本类暴露的 Append/AppendLine，把关键事件（启动游戏、下载、报错等）
-///   写入内存缓冲，关闭时一次性落盘。不用"边运行边写文件"是因为大部分事件已经有自己的
-///   日志出口（crash.log 记异常、GameProcessInfo.OutputBuffer 记游戏输出），这个文件的
-///   定位是"启动器自身运行期间的时间线摘要"，没必要每一行都实时 IO。
+/// - 内存实时视图最多保留约 1Mi 字符；达到上限时把较早的完整前缀按块写入临时文件，
+///   避免长期运行时内存无限增长。关闭时按顺序合并临时前缀与当前尾部，保留完整磁盘会话日志。
+///   临时写入失败不影响启动器运行，并在最终日志中标明可能缺失内容。
 /// - "今日第几次启动"：计数存在 config.json 里，按日期分桶，同一天启动器每次启动（不是
 ///   "点启动游戏"，是"启动器程序本身被打开"）计数 +1，跨天自动从 1 重新开始。
 /// </summary>
 public static class LauncherLogService
 {
     private static readonly object Lock = new();
-    private static readonly StringBuilder Buffer = new();
+    private static readonly BoundedLogBuffer Buffer = new();
     private static string? _sessionLogPath;
+    private static string? _spoolPath;
+    private static bool _spoolIncomplete;
     private static bool _written;
 
     /// <summary>这一次启动器运行会话最终要写入的日志文件完整路径。
@@ -70,14 +71,37 @@ public static class LauncherLogService
     {
         lock (Lock)
         {
-            Buffer.Append('[').Append(DateTime.Now.ToString("HH:mm:ss")).Append("] ").AppendLine(line);
+            var discarded = Buffer.Append('[' + DateTime.Now.ToString("HH:mm:ss") + "] " + line + Environment.NewLine);
+            if (discarded.Length == 0) return;
+            try
+            {
+                _spoolPath ??= Path.Combine(Path.GetTempPath(), "XCL2-session-" + Environment.ProcessId + "-" + Guid.NewGuid().ToString("N") + ".log");
+                File.AppendAllText(_spoolPath, discarded, new UTF8Encoding(false));
+            }
+            catch { _spoolIncomplete = true; } // The live view remains bounded even if disk is unavailable.
         }
     }
 
-    /// <summary>返回当前已经缓冲的完整会话日志文本（用于崩溃时"导出完整日志"读取，不需要等到关闭）。</summary>
+    /// <summary>Bounded diagnostic snapshot, without allocating the full session log.</summary>
+    public static string GetBufferedTail(int maxChars = 384 * 1024)
+    {
+        maxChars = Math.Clamp(maxChars, 256, 384 * 1024);
+        lock (Lock)
+        {
+            return Buffer.GetTail(maxChars);
+        }
+    }
+
+    /// <summary>返回有界的实时会话日志；发生裁剪时包含明确提示，磁盘会话日志仍保留完整前缀。</summary>
     public static string GetBufferedText()
     {
-        lock (Lock) return Buffer.ToString();
+        lock (Lock) return Buffer.GetText();
+    }
+
+    /// <summary>No string allocation or projection is required while the revision stays unchanged.</summary>
+    public static bool TryGetBufferedText(ref long revision, out string text)
+    {
+        lock (Lock) return Buffer.TryGetChangedText(ref revision, out text);
     }
 
     /// <summary>
@@ -95,7 +119,19 @@ public static class LauncherLogService
             {
                 AppendLine($"===== XCL2 启动器关闭 {DateTime.Now:yyyy-MM-dd HH:mm:ss} =====");
                 Directory.CreateDirectory(Path.GetDirectoryName(_sessionLogPath)!);
-                File.WriteAllText(_sessionLogPath, Buffer.ToString());
+                using (var destination = File.Create(_sessionLogPath))
+                {
+                    if (_spoolIncomplete)
+                    {
+                        var warning = Encoding.UTF8.GetBytes("[较早日志写入临时文件失败，本文件可能缺少部分内容]" + Environment.NewLine);
+                        destination.Write(warning);
+                    }
+                    if (_spoolPath != null && File.Exists(_spoolPath))
+                        using (var prefix = File.OpenRead(_spoolPath)) prefix.CopyTo(destination);
+                    using var writer = new StreamWriter(destination, new UTF8Encoding(false));
+                    writer.Write(Buffer.GetText(includeTruncationNotice: false));
+                }
+                if (_spoolPath != null) { try { File.Delete(_spoolPath); } catch { } }
             }
             catch (Exception ex)
             {

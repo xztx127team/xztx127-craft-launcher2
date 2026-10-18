@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AppConfig.ExperienceInstances.cs" Link="AppConfig.ExperienceInstances.cs"/>
+    <Compile Include="../../Models/ExperiencePreferenceAttribute.cs" Link="ExperiencePreferenceAttribute.cs"/>
+    <Compile Include="../../Models/GameFolder.cs" Link="GameFolder.cs"/>
+    <Compile Include="../../Services/InstanceExperienceService.cs" Link="InstanceExperienceService.cs"/>
+    <Compile Include="../../Services/ImportPreviewService.cs" Link="ImportPreviewService.cs"/>
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs"/>
+    <Compile Include="../../Services/ModUpdatePreferenceService.cs" Link="ModUpdatePreferenceService.cs"/>
+  </ItemGroup>
+</Project>

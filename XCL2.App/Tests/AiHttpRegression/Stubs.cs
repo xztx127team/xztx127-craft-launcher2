@@ -6,6 +6,7 @@ namespace XCL2.App.Services
     public static class DefaultSystemPrompt { public const string Text = "You are a test assistant."; }
     public static class AiQuickAnswers { public static string? TryAnswer(string text) => null; }
     public static class AiShellPolicy { public static string BuildPrompt(AiAssistantConfig config) => ""; }
+    public static class AiComputerControlService { public static string BuildPrompt(AiAssistantConfig config) => ""; }
     public static class BuiltInAiDefaults
     {
         public const string BaseUrl = "https://builtin.example/v1";
@@ -32,11 +33,13 @@ namespace XCL2.App.Services
     {
         internal static XCL2.App.Services.Workbench.ChangeJournal Changes => new(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "xcl-test-changes"));
         public delegate bool ConfirmCallback(object request, object information);
-        public static List<string> GetApprovedRoots() => new();
-        public static bool IsFullAccess() => false;
-        public static bool IsUnrestrictedAccess() => false;
-        public static bool IsAbsoluteAccess() => false;
-        public static bool IsSystemControlAccess() => false;
+        public static List<string> ApprovedRoots { get; } = new();
+        public static bool GrantAllAccess;
+        public static List<string> GetApprovedRoots() => new(ApprovedRoots);
+        public static bool IsFullAccess() => GrantAllAccess;
+        public static bool IsUnrestrictedAccess() => GrantAllAccess;
+        public static bool IsAbsoluteAccess() => GrantAllAccess;
+        public static bool IsSystemControlAccess() => GrantAllAccess;
         public static bool HasAccessRequest(string text) => text.Contains("<<XCL2_ACCESS:");
         public static string StripAccessMarkers(string text) => text.Split("<<XCL2_ACCESS:")[0];
         public static int DispatchCalls;
