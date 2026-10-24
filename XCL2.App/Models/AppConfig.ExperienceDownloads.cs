@@ -14,6 +14,6 @@ public partial class AppConfig
     public string Ux50DownloadQuietEnd { get; set; } = "08:00";
     [ExperiencePreference("下载细节", "任务详情显示发起页面")]
     public bool Ux50DownloadShowOrigin { get; set; } = true;
-    [ExperiencePreference("下载细节", "下载面板速度曲线", Description = "默认关闭；仅在下载列表打开时按真实传输字节采样，不在后台积累历史。")]
+    [ExperiencePreference("下载细节", "下载面板速度曲线", Description = "仅在下载列表打开时按真实传输字节采样，不在后台积累历史。")]
     public bool Ux50DownloadSpeedGraph { get; set; }
 }

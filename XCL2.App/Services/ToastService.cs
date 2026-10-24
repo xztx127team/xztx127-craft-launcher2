@@ -125,6 +125,25 @@ public static class ToastService
         if (intensity <= 0) return slide;
 
         var generation = state.Generation;
+        card.Opacity = 1 - 0.6 * intensity;
+        slide.X = direction * 8 * intensity;
+        _ = ShowCardAfterRenderAsync(card, slide, direction, generation, intensity);
+        return slide;
+    }
+
+    private static async Task ShowCardAfterRenderAsync(Border card, TranslateTransform slide,
+        double direction, int generation, double intensity)
+    {
+        // 等待通知卡片的首布局，避免批量消息或冷启动时在第一帧前就耗尽动画。
+        await UiRenderScheduler.AfterRenderAsync(card);
+        if (!Cards.TryGetValue(card, out var state) || state.Generation != generation || state.Dismissing) return;
+        if (!card.IsVisible || !AnimationSettingsService.IsEnabled(AnimationKind.Toast))
+        {
+            StopAnimations(card, state);
+            return;
+        }
+        card.Opacity = 1;
+        slide.X = 0;
         var duration = AnimationSettingsService.Duration(180, AnimationKind.Toast);
         var fade = new DoubleAnimation(1 - 0.6 * intensity, 1, duration) { FillBehavior = FillBehavior.Stop };
         fade.Completed += (_, _) =>
@@ -133,13 +152,12 @@ public static class ToastService
                 StopAnimations(card, current);
         };
         slide.BeginAnimation(TranslateTransform.XProperty,
-            new DoubleAnimation(direction * 20 * intensity, 0, duration)
+            new DoubleAnimation(direction * 8 * intensity, 0, duration)
             {
                 FillBehavior = FillBehavior.Stop,
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             }, HandoffBehavior.SnapshotAndReplace);
         card.BeginAnimation(UIElement.OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
-        return slide;
     }
 
     private static void StartLifetime(Border card, double seconds)
@@ -170,7 +188,7 @@ public static class ToastService
         state.Timer?.Stop();
         state.Timer = null;
         if (!slideTarget.HasValue && state.SlideOutLeft)
-            slideTarget = -Math.Max(card.ActualWidth, card.DesiredSize.Width) - 24;
+            slideTarget = -10;
         var intensity = AnimationSettingsService.Intensity(AnimationKind.Toast);
         if (intensity <= 0) { RemoveCard(card); return; }
         var from = card.Opacity;

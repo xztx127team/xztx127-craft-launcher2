@@ -29,11 +29,10 @@ internal sealed class PluginApiSettingsDialog : OverlayDialogControl
         panel.Children.Add(new TextBlock { Text = "允许 0.1～3600 秒（最长 1 小时），默认 3 秒。适合较长安装或生成任务；取消任务与停止插件仍会中止等待。网络请求和 EXE 握手保持独立超时。", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 14) });
         panel.Children.Add(new TextBlock { Text = "新增启动器控制能力", FontWeight = FontWeights.SemiBold, FontSize = 16 });
         panel.Children.Add(new TextBlock { Text = "页面导航、账户 / 实例选择、启动 / 取消、窗口标题和尺寸、置顶与侧栏、主题与透明度、内存与下载源，均通过明确权限授权。插件管理 → 选择插件 → 授权，可单独撤销。", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 7, 0, 14) });
-        var docs = new Button { Content = "打开 API 开发中心 · 6 个专题与样例", Padding = new Thickness(12, 8, 12, 8), HorizontalAlignment = HorizontalAlignment.Left };
+        var docs = new Button { Content = "打开 API 开发中心 · 7 个专题与样例", Padding = new Thickness(12, 8, 12, 8), HorizontalAlignment = HorizontalAlignment.Left };
         docs.Click += (_, _) =>
         {
-            CloseWith(false);
-            if (Application.Current.MainWindow is MainWindow owner) owner.NavigateToApiDocumentation();
+            OverlayDialogService.ShowNonModal(new PluginApiDocumentationDialog());
         };
         panel.Children.Add(docs);
         panel.Children.Add(new TextBlock { Text = "授权只限制宿主 API。DLL 插件和源码编译拥有当前用户的系统权限，请使用可信来源。", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 10) });

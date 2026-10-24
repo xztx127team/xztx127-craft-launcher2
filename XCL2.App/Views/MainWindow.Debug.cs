@@ -49,7 +49,7 @@ public partial class MainWindow
 
     private bool CanUseDebugShortcuts()
     {
-        if (!App.StartupArgs.DebugMode || !IsActive || !IsVisible || _isWindowClosed || _closeAnimationPlayed ||
+        if (!App.StartupArgs.DebugMode || !IsActive || !IsVisible || _isWindowClosed || _windowCloseCommitted ||
             OverlayDialogService.HasActiveOverlay) return false;
         DependencyObject? focused = Keyboard.FocusedElement as DependencyObject;
         while (focused != null)

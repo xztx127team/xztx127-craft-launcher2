@@ -40,7 +40,10 @@ public sealed record WorldSettings(string Name, int GameMode, int Difficulty, bo
     public IReadOnlyDictionary<string, string> GameRules { get; init; } = new Dictionary<string, string>();
     public WorldPlayerSettings? Player { get; init; }
 }
-public sealed record WorldArchive(string Path, WorldSettings Settings, DateTime ModifiedUtc);
+public sealed record WorldArchive(string Path, WorldSettings Settings, DateTime ModifiedUtc)
+{
+    public string Source { get; init; } = "客户端";
+}
 /// <summary>Optional fields preserve the stored value when omitted/null. Player edits target Data.Player only.</summary>
 public sealed record WorldEdit(string Name, int GameMode, int Difficulty, bool AllowCommands, bool Hardcore)
 {
@@ -66,7 +69,7 @@ public sealed record WorldEdit(string Name, int GameMode, int Difficulty, bool A
 }
 public sealed record WorldEditField(string Key, string Label, string Type, double? Minimum = null, double? Maximum = null, string? Note = null);
 
-public static class WorldArchiveService
+public static partial class WorldArchiveService
 {
     private static readonly object Gate = new();
     public static IReadOnlyList<WorldEditField> EditableFields { get; } = Array.AsReadOnly(new WorldEditField[]

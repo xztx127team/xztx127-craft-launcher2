@@ -21,7 +21,12 @@ public class GenericFileDownloadService : IDisposable
     /// </summary>
     public async Task<string> DownloadAsync(string url, string saveDir, string fileName, string? userAgent,
         IProgress<ProgressInfo>? progress = null, CancellationToken ct = default)
+        => await DownloadAsync(new[] { url }, saveDir, fileName, userAgent, progress, ct);
+
+    public async Task<string> DownloadAsync(IReadOnlyList<string> urls, string saveDir, string fileName, string? userAgent,
+        IProgress<ProgressInfo>? progress = null, CancellationToken ct = default, string? expectedSha256 = null, Action<string>? validateFile = null)
     {
+        var url = urls.FirstOrDefault() ?? "";
         if (string.IsNullOrWhiteSpace(url)) throw new ArgumentException("下载地址不能为空。", nameof(url));
         Directory.CreateDirectory(saveDir);
 
@@ -43,7 +48,7 @@ public class GenericFileDownloadService : IDisposable
         if (fileName != Path.GetFileName(fileName) || fileName.IndexOfAny(new[] { '/', '\\', ':' }) >= 0)
             throw new ArgumentException("文件名不能包含目录或驱动器路径。", nameof(fileName));
         var destPath = Path.Combine(saveDir, fileName);
-        return await DownloadEndpoints.DownloadFileWithFallbackAsync(_http, url, DownloadEndpoints.PreferMirror,
-            destPath, "下载失败：请检查网络及链接的直接下载权限", progress, ct, userAgent: userAgent);
+        return await DownloadEndpoints.DownloadFilesWithFallbackAsync(_http, urls, DownloadEndpoints.PreferMirror,
+            destPath, "下载失败：请检查网络及链接的直接下载权限", progress, ct, userAgent: userAgent, expectedSha256: expectedSha256, validateFile: validateFile);
     }
 }

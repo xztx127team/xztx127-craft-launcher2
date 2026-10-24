@@ -13,7 +13,7 @@ public partial class ToolboxPreferencesDialog : OverlayDialogControl
         _cfg = cfg;
         InitializeComponent();
         // 同工具箱 TabItem 顺序；只存 ID，不存翻译后的标题。
-        string[] names = { "成就图片", "皮肤头像", "文件下载", "加载器下载", "系统工具", "计算器", "桌面便签", "电脑清理", "服务器测速", "坐标换算", "颜色代码编辑器", "系统内存监视", "离线UUID生成器", "JVM参数生成器", "资源包校验", "快捷键速查", "随机种子", "种子结构查询", "经验等级计算", "坐标距离", "指令生成器", "Base64编解码", "游戏时间换算", "堆叠格子", "RGB颜色转换", "红石延时", "随机玩家名", "MOTD长度检查", "时间戳", "服务器地址解析", "药水时长", "颜色代码速查", "附魔书架计算", "数据包互转", "Web2", "下载正版账户皮肤" };
+        string[] names = { "成就图片", "皮肤头像", "文件下载", "加载器下载", "系统工具", "计算器", "桌面便签", "电脑清理", "服务器测速", "坐标换算", "颜色代码编辑器", "系统内存监视", "离线UUID生成器", "JVM参数生成器", "资源包校验", "快捷键速查", "随机种子", "种子结构查询", "经验等级计算", "坐标距离", "指令生成器", "Base64编解码", "游戏时间换算", "堆叠格子", "RGB颜色转换", "红石延时", "随机玩家名", "MOTD长度检查", "时间戳", "服务器地址解析", "药水时长", "颜色代码速查", "附魔书架计算", "数据包互转", "Web2", "下载正版账户皮肤", "服务器端口探测" };
         var indices = (cfg.ToolboxPinnedTabOrder ?? new List<int>()).Where(i => i >= 0 && i < names.Length).Distinct().ToList();
         indices.AddRange(Enumerable.Range(0, names.Length).Except(indices));
         _ordered = indices.Select(i => (i, names[i])).ToList();

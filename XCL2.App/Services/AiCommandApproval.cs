@@ -11,6 +11,8 @@ public sealed class AiCommandApproval
     private const string Changed = "系统：命令授权或工作目录已变更，本次未执行。请重新发起请求以便确认。";
     private readonly string _permissionState;
     private int _consumed;
+    private int _elevatedRetryConsumed;
+    internal string PermissionFingerprint => _permissionState;
     public string OriginalShell { get; }
     public string OriginalCommand { get; }
     public string Shell { get; }
@@ -74,6 +76,36 @@ public sealed class AiCommandApproval
     /// <summary>紧邻 Process.Start 调用；许可绑定固定命令/目录，只能消费一次，执行前复检撤销和模式。</summary>
     public bool TryBeginExecution(AiAssistantConfig? config, AiWorkModeContext workMode, CancellationToken ct, out string? denial)
     {
+        if (!ValidateExecution(config, workMode, ct, out denial)) return false;
+        if (Interlocked.Exchange(ref _consumed, 1) != 0)
+        { denial = "系统：本次命令许可已经使用，未重复执行。"; return false; }
+        return true;
+    }
+
+    /// <summary>Only the same already-attempted command can receive one UAC retry. UI consent is separate.</summary>
+    internal bool TryBeginElevatedRetry(AiAssistantConfig? config, AiWorkModeContext workMode, CancellationToken ct, out string? denial)
+    {
+        if (!CanRequestElevatedRetry(config, workMode, ct, out denial)) return false;
+        if (Interlocked.Exchange(ref _elevatedRetryConsumed, 1) != 0)
+        { denial = "系统：本次命令的提权重试许可已使用，未重复执行。"; return false; }
+        return true;
+    }
+
+    internal bool CanRequestElevatedRetry(AiAssistantConfig? config, AiWorkModeContext workMode, CancellationToken ct, out string? denial)
+    {
+        if (!ValidateExecution(config, workMode, ct, out denial)) return false;
+        if (Volatile.Read(ref _consumed) != 1)
+        { denial = "系统：原命令尚未正常尝试，不能直接提权执行。"; return false; }
+        if (Volatile.Read(ref _elevatedRetryConsumed) != 0)
+        { denial = "系统：本次提权重试许可已使用。"; return false; }
+        return true;
+    }
+
+    internal bool IsStillPermitted(AiAssistantConfig? config, AiWorkModeContext workMode, out string? denial)
+        => ValidateExecution(config, workMode, CancellationToken.None, out denial);
+
+    private bool ValidateExecution(AiAssistantConfig? config, AiWorkModeContext workMode, CancellationToken ct, out string? denial)
+    {
         ct.ThrowIfCancellationRequested();
         denial = null;
         if (!workMode.Allows("run_command")) { denial = workMode.DeniedMessage; return false; }
@@ -89,8 +121,6 @@ public sealed class AiCommandApproval
                 && AiCommandPermissionService.IsPreauthorizedPython(config, "python", PreauthorizedPythonSource, Directory, workMode.EffectiveMode);
             if (AiShellPolicy.RequiresConfirmation(config, workMode.EffectiveMode) && !pythonStillApproved) { denial = Changed; return false; }
         }
-        if (Interlocked.Exchange(ref _consumed, 1) != 0)
-        { denial = "系统：本次命令许可已经使用，未重复执行。"; return false; }
         return true;
     }
 

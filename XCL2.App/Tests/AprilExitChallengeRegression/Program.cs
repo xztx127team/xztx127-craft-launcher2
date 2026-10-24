@@ -2,8 +2,22 @@ using XCL2.App.Services;
 
 static void Check(bool value, string message) { if (!value) throw new Exception(message); }
 Check(AprilFoolsExitChallengeState.ReadingCount > 6, "More than six confirmation stages");
-Check(AprilFoolsExitChallengeState.MiniGameCount == 8, "Exactly eight mini games");
-Check(AprilFoolsExitChallengeState.StageCount == 16, "Seven readings, eight games and one local human stage");
+Check(AprilFoolsExitChallengeState.MiniGameCount == 12, "Twelve mini games include additional word and rule puzzles");
+Check(AprilFoolsExitChallengeState.StageCount == 20, "Seven readings, twelve games and one multi-step local human stage");
+Check(AprilFoolsExitChallengeState.Questions.Count == AprilFoolsExitChallengeState.ReadingCount, "Reading count matches the questions");
+var password = AprilFoolsExitChallengeState.SessionPassword;
+Check(password.Length == 16 && password.All(c => char.IsAsciiHexDigit(c)), "Session password is a sixteen-character random token");
+Check(AprilFoolsExitChallengeState.IsShortcutCode(password) &&
+    AprilFoolsExitChallengeState.IsShortcutCode(" " + password.ToLowerInvariant() + "\t"), "Session answer is accepted with normal input normalization");
+Check(new AprilFoolsExitChallengeState().TryUnlockShortcut(password), "Session password unlocks a new challenge");
+var independentlyGenerated = Enumerable.Range(0, 32).Select(_ => AprilFoolsExitChallengeState.GenerateSessionPassword()).ToHashSet();
+Check(independentlyGenerated.Count == 32, "New process-password generation is not a fixed/default token");
+Check(AprilFoolsExitChallengeState.SessionPassword == password, "Independent generation and reopening do not rotate this process password");
+Check(AprilFoolsExitChallengeState.MatchesPuzzleAnswer(" ｍ ｋ\tＡ ", "MKA"), "Text-game entry accepts case, whitespace and fullwidth typing");
+Check(!AprilFoolsExitChallengeState.MatchesPuzzleAnswer("MAK", "MKA"), "Wrong word ordering is not accepted");
+Check(!AprilFoolsExitChallengeState.MatchesPuzzleAnswer("\uD800", "MKA"), "Malformed pasted Unicode is rejected without throwing");
+Check(AprilFoolsExitChallengeState.ReverseLettersWithoutDigits("A3k7M2P") == "PMkA", "Text-game operation removes digits before reversing letters");
+Check(AprilFoolsExitChallengeState.ReverseVerificationCode("C4B2ZA") == "AZ2B4C", "Final verification reverses digits and letters together");
 foreach (var code in new[] { "跳过", "  跳过\t", "xztx127", " XZTX127 ", "xZtX127" })
 {
     Check(AprilFoolsExitChallengeState.IsShortcutCode(code), "Valid shortcut accepts surrounding whitespace and Latin letter case");
@@ -39,9 +53,9 @@ foreach (var question in AprilFoolsExitChallengeState.Questions)
 Check(state.Stage == 7 && !state.IsReading && !state.IsHumanCheck, "Reading transitions to games");
 var failures = state.Failures;
 Check(!state.AnswerReading(0) && state.Failures == failures, "Reading answers cannot advance a game");
-for (var i = 0; i < 8; i++) state.Pass();
-Check(state.IsHumanCheck && !state.Completed && state.Stage == 15, "Games do not skip local human stage");
+for (var i = 0; i < AprilFoolsExitChallengeState.MiniGameCount; i++) state.Pass();
+Check(state.IsHumanCheck && !state.Completed && state.Stage == 19, "Games do not omit the final local human stage");
 state.Fail(); Check(state.IsHumanCheck && state.Failures == 3, "Human failure preserves progress");
 state.Pass(); Check(state.Completed && state.CanClose && !state.ShortcutUnlocked, "All stages complete and allow closing without a shortcut");
-state.Pass(); state.Fail(); Check(state.Stage == 16 && state.Failures == 3, "Completed flow is stable");
+state.Pass(); state.Fail(); Check(state.Stage == 20 && state.Failures == 3, "Completed flow is stable");
 Console.WriteLine("April exit challenge state checks passed.");

@@ -19,6 +19,22 @@ internal static class WorldCatalog
     }
     internal static IReadOnlyList<WorldArchive> ReadAll(Action<string>? warning = null)
         => WorldArchiveService.Discover(GameRoots(), warning);
+    // Background backups may also target a registered server world. Plugin world access remains
+    // restricted to configured client saves through RequireKnown below.
+    internal static void RequireBackupKnown(string path, IEnumerable<string> serverRoots)
+    {
+        try { RequireKnown(path); return; }
+        catch (UnauthorizedAccessException) { }
+        var full = Path.GetFullPath(path);
+        if (!serverRoots.Any(root =>
+        {
+            var server = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+            return full.Equals(server, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(Path.GetDirectoryName(full), server, StringComparison.OrdinalIgnoreCase);
+        })) throw new UnauthorizedAccessException("自动备份仅支持已配置的客户端或服务器世界。");
+        WorldArchiveService.RejectLinks(full);
+        _ = WorldArchiveService.Read(full);
+    }
     internal static void RequireKnown(string path)
     {
         var full = Path.GetFullPath(path);

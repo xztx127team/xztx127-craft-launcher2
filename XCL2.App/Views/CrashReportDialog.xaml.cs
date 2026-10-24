@@ -140,6 +140,50 @@ public partial class CrashReportDialog : OverlayDialogControl
         OverlayDialogService.ShowNonModal(dlg);
     }
 
+    public static void ShowLogWarnings(MainWindow owner, GameProcessInfo processInfo)
+    {
+        var running = !processInfo.HasExited;
+        var dlg = new CrashReportDialog(owner,
+            running ? "游戏仍在运行，以下日志只作为警告，不表示游戏崩溃。每项均提供排查建议。" : "游戏已经退出，可查看本次运行的日志线索与修复建议。",
+            processInfo, suppressAutomaticAnalysis: true, title: running ? "游戏日志警告" : "本次游戏日志");
+        dlg.DiagnosticIcon.Text = "⚠";
+        dlg.ErrorCodeText.Text = "记录：XCL-GAME-LOG";
+        dlg.MoreErrorsExpander.IsExpanded = true;
+        OverlayDialogService.ShowNonModal(dlg);
+    }
+
+    private bool _moreErrorsLoading;
+    private async void MoreErrors_Expanded(object sender, RoutedEventArgs e)
+    {
+        if (_moreErrorsLoading || _closed) return;
+        _moreErrorsLoading = true;
+        MoreErrorsText.Text = "正在扫描本次日志…";
+        try
+        {
+            var text = await Task.Run(BuildMoreErrors);
+            if (!_closed) MoreErrorsText.Text = text;
+        }
+        catch (Exception ex) { if (!_closed) MoreErrorsText.Text = "读取日志失败：" + ex.Message; }
+        finally { _moreErrorsLoading = false; }
+    }
+
+    private string BuildMoreErrors()
+    {
+        if (_processInfo == null) return "没有可用的本次游戏日志。";
+        try
+        {
+            var evidence = new System.Text.StringBuilder(_processInfo.GetOutputSnapshot());
+            foreach (var file in CrashAiLogService.GetCurrentIncidentFiles(_processInfo, _incidentObservedAt))
+            {
+                try { evidence.AppendLine(DiagnosticRedactionService.ReadTextTail(file)); }
+                catch { /* 控制台证据仍然可用 */ }
+            }
+            var issues = GameLogDiagnostics.Scan(evidence.ToString());
+            return DiagnosticRedactionService.Sanitize(GameLogDiagnostics.Format(issues, !_processInfo.HasExited), 60000);
+        }
+        catch (Exception ex) { return "读取日志失败：" + ex.Message; }
+    }
+
     /// <summary>"补全 DirectX"：从微软官方下载并静默安装 DirectX 最终用户运行库，不是显卡驱动。</summary>
     private void InstallDirectX_Click(object sender, RoutedEventArgs e)
         => DirectXRuntimeInstallService.StartWithConfirmation();

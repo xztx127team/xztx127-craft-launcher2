@@ -36,6 +36,86 @@ Check(LauncherUpdatePolicy.ShouldCheckOnStartup(true), "existing enabled startup
 Check(!LauncherUpdatePolicy.CanInstall(false, true), "disabled updates cannot install even after confirmation");
 Check(!LauncherUpdatePolicy.CanInstall(true, false), "enabled updates still require explicit user confirmation");
 Check(LauncherUpdatePolicy.CanInstall(true, true), "installation proceeds only with both permission and confirmation");
+
+LauncherReleaseVersion Release(string text) => LauncherUpdatePolicy.ParseReleaseVersion(text)
+    ?? throw new InvalidOperationException("Invalid version fixture: " + text);
+Check(Release("v2.2.25-rc1") == Release("2.2.25-rc(1)") &&
+      Release("2.2.25-rc（1）") == Release("2.2.25-rc.1"), "RC bracket and dot spellings normalize identically");
+Check(LauncherUpdatePolicy.IsNewer(Release("2.2.25-rc1"), Release("2.2.24")), "higher-core RC is an update from current final");
+Check(!LauncherUpdatePolicy.IsNewer(Release("2.2.24-rc99"), Release("2.2.24")), "same-core RC cannot replace an installed final");
+Check(!LauncherUpdatePolicy.IsNewer(Release("2.2.23-rc99"), Release("2.2.24")), "lower-core RC cannot downgrade");
+Check(LauncherUpdatePolicy.IsNewer(Release("2.2.25-rc10"), Release("2.2.25-rc2")), "RC ordinal comparison is numeric");
+Check(!LauncherUpdatePolicy.IsNewer(Release("2.2.25-rc2"), Release("2.2.25-rc10")), "lower RC ordinal cannot replace higher RC");
+Check(LauncherUpdatePolicy.IsNewer(Release("2.2.25"), Release("2.2.25-rc10")), "final release upgrades every same-core RC");
+Check(!LauncherUpdatePolicy.IsNewer(Release("2.2.25-rc1+build.a"), Release("v2.2.25-rc1+build.b")), "build metadata does not create updates");
+Check(LauncherUpdatePolicy.ParseReleaseVersion("2.2.25-rc") == null &&
+      LauncherUpdatePolicy.ParseReleaseVersion("2.2.25-rc(1）") == null &&
+      LauncherUpdatePolicy.ParseReleaseVersion("2.2.25-beta1") == null &&
+      LauncherUpdatePolicy.ParseReleaseVersion("2.2.25-rc999999999999999999999") == null,
+    "malformed or unknown prereleases cannot masquerade as finals");
+Check(Release("v2.2.25-fix1") == Release("2.2.25"), "historical stable fix tags remain supported");
+Check(LauncherUpdatePolicy.ShouldCheckOnStartup(false, true, false), "preview opt-in checks even with stable startup checks disabled");
+Check(!LauncherUpdatePolicy.ShouldCheckOnStartup(true, true, true), "explicit skip-update-check suppresses both channels");
+Check(!LauncherUpdatePolicy.ShouldCheckOnStartup(false, false, false), "both preferences off avoids startup network request");
+var dismissed = new[] { "v2.2.25-rc1" };
+Check(LauncherUpdatePolicy.IsSuppressedPreviewTag("V2.2.25-RC1", dismissed), "preview dismissal matches exact tag ignoring case");
+Check(!LauncherUpdatePolicy.IsSuppressedPreviewTag("v2.2.25-rc2", dismissed) &&
+      !LauncherUpdatePolicy.IsSuppressedPreviewTag("v2.2.26-rc1", dismissed), "dismissal never suppresses a different preview version");
+var releases = new[]
+{
+    ("v2.2.25-rc99", true, false), ("v2.2.25", false, false),
+    ("v2.2.26-rc2", true, false), ("v2.2.26-rc10", false, false),
+    ("v9.0.0-rc1", true, true), ("v10.0.0-beta1", false, false)
+};
+Check(LauncherUpdatePolicy.PickReleaseTag(releases, false) == "v2.2.25", "stable channel excludes RC even when publisher forgot prerelease flag");
+Check(LauncherUpdatePolicy.PickReleaseTag(releases, true) == "v2.2.26-rc10", "manual check picks highest valid full version, ignoring drafts and unsupported prereleases");
+Check(LauncherUpdatePolicy.PickReleaseTag(releases, true, true) == "v2.2.26-rc10", "preview channel selects numerically highest RC");
+Check(LauncherUpdatePolicy.PickReleaseTag(new[] { ("2.2.25-rc99", true, false), ("2.2.25", false, false) }, true, true) == null,
+    "published final suppresses obsolete RC startup reminders of the same or older core");
+// GitHub's official prerelease flag also classifies numeric and non-RC snapshot tags.
+var flagged = LauncherUpdatePolicy.ParseReleaseVersion("v2.3.0", true)!.Value;
+Check(flagged.IsPreview && !LauncherUpdatePolicy.ParseReleaseVersion("v2.3.0", false)!.Value.IsPreview,
+    "GitHub prerelease flag classifies otherwise numeric tags");
+Check(LauncherUpdatePolicy.IsNewer(Release("2.3.0"), flagged), "published final supersedes a same-core GitHub snapshot");
+Check(LauncherUpdatePolicy.PickReleaseTag(new[] { ("v2.3.0", true, false), ("v2.2.25", false, false) }, false) == "v2.2.25",
+    "stable channel excludes GitHub numeric snapshots");
+Check(LauncherUpdatePolicy.PickReleaseTag(new[] { ("v2.3.0", true, false), ("v2.2.25", false, false) }, true, true) == "v2.3.0",
+    "preview channel includes GitHub numeric snapshots");
+Check(LauncherUpdatePolicy.ParseReleaseVersion("v2.3.0-snapshot.5", true) is { IsPreview: true },
+    "GitHub snapshot suffixes can be used without inventing a final version");
+Check(LauncherUpdatePolicy.ParseReleaseVersion("latest", true) == null, "channel flag does not invent a missing version");
+Check(LauncherUpdatePolicy.IsNewer(LauncherUpdatePolicy.ParseReleaseVersion("v2.3.0-snapshot.10", true)!.Value,
+    LauncherUpdatePolicy.ParseReleaseVersion("v2.3.0-snapshot.2", true)!.Value), "snapshot ordinal compares numerically");
+Check(LauncherUpdatePolicy.IsNewer(LauncherUpdatePolicy.ParseReleaseVersion("v2.3.0-beta2", true)!.Value,
+    LauncherUpdatePolicy.ParseReleaseVersion("v2.3.0-beta1", true)!.Value), "same-core GitHub beta progression is detected");
+var today = new DateOnly(2026, 10, 22);
+Check(LauncherReleaseInstructions.Parse(null) == LauncherReleaseInstructions.Default,
+    "missing setup.ini preserves previous behavior");
+Check(LauncherReleaseInstructions.Parse("b=off\nc=no\nd=on=invalid") == LauncherReleaseInstructions.Default,
+    "disabled and invalid directives preserve previous behavior");
+var minor = LauncherReleaseInstructions.Parse("\uFEFF; comment\n[update]\nb=on\nc=off");
+Check(minor.Minor && !minor.IsRequired(today), "minor updates do not become mandatory");
+Check(LauncherReleaseInstructions.Parse("b=on\nc=on\nd=on=2030/01/01").IsRequired(today),
+    "immediate requirement takes precedence over minor and future deadline");
+var deadline = LauncherReleaseInstructions.Parse("d=on=2026/10/22");
+Check(!deadline.IsRequired(today) && deadline.IsRequired(today.AddDays(1)),
+    "deadline permits installation through the specified local calendar date");
+Check(LauncherReleaseInstructions.Parse("d=on=2026/02/30").Deadline == null,
+    "invalid calendar dates do not lock launcher");
+Check(LauncherReleaseInstructions.Parse("d=off=2026/10/22").Deadline == null,
+    "disabled deadline never locks launcher");
+var now = new DateTimeOffset(2026, 10, 22, 12, 0, 0, TimeSpan.Zero);
+var snooze = new LauncherReminderPreference(LauncherReminderMode.Snooze, now.AddHours(-1), now.AddHours(1));
+Check(snooze.SuppressAutomaticReminder(now, minor, today), "snooze suppresses optional reminder");
+Check(!snooze.SuppressAutomaticReminder(now, new(Required: true), today), "mandatory update overrides snooze");
+Check(!snooze.SuppressAutomaticReminder(now, deadline, today.AddDays(1)), "expired deadline overrides snooze");
+Check(snooze.EffectiveMode(now.AddHours(1)) == LauncherReminderMode.Normal,
+    "snooze expires exactly at restore instant");
+var badge = new LauncherReminderPreference(LauncherReminderMode.BadgeOnly, now.AddHours(1), now.AddHours(2));
+Check(badge.EffectiveMode(now) == LauncherReminderMode.Normal && badge.EffectiveMode(now.AddMinutes(90)) == LauncherReminderMode.BadgeOnly,
+    "badge-only schedule honors both interval boundaries");
+Check(!badge.SuppressAutomaticReminder(now.AddMinutes(90), minor, today), "badge-only mode retains notification badge");
+
 void Reject<T>(Action action, string name) where T : Exception
 {
     try { action(); }

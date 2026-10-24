@@ -91,4 +91,35 @@ MemoryOptimizerService.NormalizeConfig(cfg);
 Check(cfg.DynamicMemoryMinimumPercent == 5 && cfg.MemoryDisplayBasis == MemoryDisplayBasis.Total &&
     cfg.MinMemoryMb == 1024 && cfg.MaxMemoryMb == 4096 && !cfg.EnableMemoryOptimization,
     "configuration normalization repairs dynamic fields without enabling or altering manual memory");
-Console.WriteLine($"PASS: {checks} memory allocation checks.");
+// 预览始终在实际启动解析结果上应用相同的“后参数覆盖前参数”顺序。
+var baseHeap = new MemoryOptimizerService.LaunchMemory(1024, 4096, false, null);
+var basicPreview = MemoryLaunchPreviewPolicy.Apply(baseHeap, Array.Empty<string>());
+Check(basicPreview.InitialBytes == 1024L * 1024 * 1024 && basicPreview.MaximumBytes == 4096L * 1024 * 1024 &&
+    !basicPreview.HasOverride && basicPreview.Error == null, "preview starts with the launch allocation without changing it");
+var customPreview = MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "-Xmx6G", "-Xms512M", "-Xmx2G" });
+Check(customPreview.InitialBytes == 512L * 1024 * 1024 && customPreview.MaximumBytes == 2048L * 1024 * 1024 &&
+    customPreview.HasOverride && customPreview.Error == null, "last custom JVM heap arguments win in the live preview");
+var aliases = MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "-XX:InitialHeapSize=256M", "-XX:MaxHeapSize=3G" });
+Check(aliases.InitialBytes == 256L * 1024 * 1024 && aliases.MaximumBytes == 3072L * 1024 * 1024,
+    "HotSpot heap aliases are included instead of showing misleading launcher defaults");
+Check(MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "-Xmx4096" }).Error != null,
+    "a missing heap unit does not misleadingly preview 4096 MB");
+Check(MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "-Xmx2.5G" }).Error != null &&
+    MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "-Xmx999999999999999999G" }).Error != null,
+    "malformed and overflowing heap overrides produce a preview error");
+Check(MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "-Xms8G" }).Error != null,
+    "preview detects effective initial heap greater than maximum including custom overrides");
+Check(MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "@jvm.args" }).Uncertainty != null,
+    "external argument files explicitly qualify the preview instead of silently claiming exactness");
+Check(MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "--module-path", "-Xmx8G" }).MaximumBytes == basicPreview.MaximumBytes,
+    "a separate option value is not mistaken for a heap flag");
+Check(MemoryLaunchPreviewPolicy.Apply(baseHeap, new[] { "-Xms0" }).Error != null,
+    "zero initial heap receives the same invalid-memory warning as launch preflight");
+var sessionMemory = CommandLineSessionPolicy.ResolveMemory(1024, 4096, null, 512);
+var sessionPreview = MemoryLaunchPreviewPolicy.Apply(baseHeap with
+    { MinMemoryMb = sessionMemory.MinMb, MaxMemoryMb = sessionMemory.MaxMb }, Array.Empty<string>());
+Check(sessionPreview.InitialBytes == 512L * 1024 * 1024 && sessionPreview.MaximumBytes == 512L * 1024 * 1024,
+    "session-only memory override uses the launch policy before previewing effective heaps");
+Check(CommandLineSessionPolicy.CombineJvmArguments(false, "-Xmx8G", "-Xmx6G", "-Xmx2G") == "-Xmx2G",
+    "ordinary mode ignores saved JVM overrides while preserving explicitly supplied session arguments");
+Console.WriteLine($"PASS: {checks} memory allocation and preview checks.");

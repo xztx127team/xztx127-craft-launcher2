@@ -36,6 +36,8 @@ public sealed record PerformanceSnapshot(
     string? LauncherMemoryUnavailableReason,
     string? DiscoveryWarning)
 {
+    public PerformanceHardwareSnapshot? Hardware { get; init; }
+
     public long? UsedMemoryBytes => TotalMemoryBytes.HasValue && AvailableMemoryBytes.HasValue
         ? Math.Max(0, TotalMemoryBytes.Value - AvailableMemoryBytes.Value) : null;
 }
@@ -44,3 +46,17 @@ public sealed record PerformanceSnapshot(
 public sealed record PerformanceGameTotals(
     int GameCount, double? CpuPercent, long? WorkingSetBytes,
     string? CpuUnavailableReason, string? MemoryUnavailableReason);
+
+/// <summary>设备使用率为最繁忙引擎，同一引擎的各进程读数先合计，避免把不同引擎重复相加。</summary>
+public sealed record PerformanceDeviceSample(string DeviceId, string DisplayName, string Kind,
+    double? UtilizationPercent, long? DedicatedMemoryBytes, long? SharedMemoryBytes, string? UnavailableReason);
+
+public sealed record PerformanceHardwareSnapshot(IReadOnlyList<PerformanceDeviceSample> Devices,
+    double? DiskReadBytesPerSecond, double? DiskWriteBytesPerSecond,
+    double? NetworkReceivedBytesPerSecond, double? NetworkSentBytesPerSecond,
+    string? GpuUnavailableReason, string? NpuUnavailableReason, string? IoUnavailableReason)
+{
+    // Published as a complete snapshot, never mutated by UI consumers.
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Metadata { get; init; }
+        = new Dictionary<string, IReadOnlyDictionary<string, string>>();
+}

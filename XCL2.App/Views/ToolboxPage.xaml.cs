@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -32,15 +32,9 @@ public partial class ToolboxPage : UserControl
 {
     private readonly MainWindow _owner;
 
-    // ===== Tab 7：桌面便签 —— 已知问题排查期间的临时拦截 =====
-    // 便签功能目前有已知问题（自动保存/文件读写偶发异常），修好之前先在入口拦一下，
-    // 而不是放任用户进去踩坑。不直接把 TabItem 禁用/隐藏，是因为还是想留给用户一个
-    // "我知道有问题，就是要进去看看"的口子（比如手动抢救已经写在里面的内容）。
-    private TabItem? _lastNonStickyToolboxTab;
     /// <summary>加载页面、用代码设置内存优化时机单选框初始状态时，临时置 true 抑制
     /// RadioButton.Checked 事件里的保存逻辑，避免刚打开页面就多写一次配置文件。</summary>
     private bool _suppressMemOptTimingSave;
-    private bool _suppressToolboxTabSelection = false;
     private IReadOnlyList<FeatureSearchEntry> _toolboxSearchEntries = Array.Empty<FeatureSearchEntry>();
     private bool _resumeToolboxSearchOnOpen;
 
@@ -66,7 +60,6 @@ public partial class ToolboxPage : UserControl
         _owner = owner;
         InitializeComponent();
 
-        _lastNonStickyToolboxTab = ToolboxTabControl.SelectedItem as TabItem;
         InitializeToolboxNavigation();
         InitializeToolboxPreferences();
 
@@ -93,7 +86,7 @@ public partial class ToolboxPage : UserControl
         _memMonTimer.Tick += (_, _) => RefreshMemoryMonitor();
         Loaded += (_, _) => UpdateMemoryMonitorActivity();
         IsVisibleChanged += (_, _) => UpdateMemoryMonitorActivity();
-        Unloaded += (_, _) => _memMonTimer.Stop();
+        Unloaded += (_, _) => { _memMonTimer.Stop(); _serverPingCancellation?.Cancel(); };
 
         // ===== Tab 13：离线 UUID 生成器 =====
         OfflineUuidNameBox_TextChanged(this, null!);
@@ -379,45 +372,10 @@ public partial class ToolboxPage : UserControl
         return selected;
     }
 
-    // ============================================================
-    // Tab 7：桌面便签 —— 入口拦截提示
-    // ============================================================
-
-    /// <summary>
-    /// 便签功能目前有已知问题，修好之前先在切进这个 Tab 时弹一次提示，让用户自己
-    /// 决定要不要冒着"功能均不可用"的风险进去（比如抢救已经写在里面的旧内容）。
-    /// 只在真正切换到"桌面便签"这个 Tab 时弹一次；用户选择"返回"就把选中项还原成
-    /// 切换前的那个 Tab——期间用 _suppressToolboxTabSelection 挡住这次程序自己触发的
-    /// 选中变化，避免又递归弹一次。
-    /// </summary>
+    // 工具标签切换保留监控启停；桌面便签直接进入，不再弹出旧的故障拦截提示。
     private void ToolboxTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressToolboxTabSelection) return;
-        if (e.OriginalSource != ToolboxTabControl) return; // 避免内部控件的 SelectionChanged 冒泡误触发
-
-        var selected = ToolboxTabControl.SelectedItem as TabItem;
-
-        if (selected == StickyNoteTabItem)
-        {
-            var enter = MessageBoxDialog.ShowCustomYesNo(
-                "当前便签功能出现问题，功能均不可用，建议不要进入。",
-                "桌面便签",
-                leftText: "进入",
-                rightText: "返回",
-                rightIsPrimary: true);
-
-            if (!enter)
-            {
-                _suppressToolboxTabSelection = true;
-                ToolboxTabControl.SelectedItem = _lastNonStickyToolboxTab;
-                _suppressToolboxTabSelection = false;
-                return;
-            }
-        }
-        else if (selected != null)
-        {
-            _lastNonStickyToolboxTab = selected;
-        }
+        if (e.OriginalSource != ToolboxTabControl) return;
         UpdateMemoryMonitorActivity();
     }
 
@@ -2345,47 +2303,7 @@ public partial class ToolboxPage : UserControl
     // Tab 9：服务器测速（Minecraft Server List Ping 协议实测延迟/MOTD/人数）
     // ============================================================
 
-    private async void PingGo_Click(object sender, RoutedEventArgs e)
-    {
-        var host = PingHostBox.Text.Trim();
-        if (string.IsNullOrEmpty(host))
-        {
-            PingResultText.Text = "请先填写服务器地址。";
-            return;
-        }
-        if (!int.TryParse(PingPortBox.Text.Trim(), out var port) || port is <= 0 or > 65535)
-        {
-            PingResultText.Text = "端口号不对，应该是 1-65535 之间的数字（默认 25565）。";
-            return;
-        }
-
-        PingGoBtn.IsEnabled = false;
-        PingResultText.Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush");
-        PingResultText.Text = "正在连接测速…";
-        try
-        {
-            var result = await ServerPingService.PingAsync(host, port);
-            if (!result.Success)
-            {
-                PingResultText.Foreground = System.Windows.Media.Brushes.IndianRed;
-                PingResultText.Text = result.ErrorMessage;
-            }
-            else
-            {
-                var motd = string.IsNullOrWhiteSpace(result.MotdPlain) ? "(空)" : result.MotdPlain;
-                PingResultText.Foreground = (System.Windows.Media.Brush)FindResource("TextPrimaryBrush");
-                PingResultText.Text =
-                    $"延迟：{result.LatencyMs} ms\n" +
-                    $"版本：{result.VersionName ?? "未知"}\n" +
-                    $"在线人数：{result.OnlinePlayers?.ToString() ?? "?"} / {result.MaxPlayers?.ToString() ?? "?"}\n" +
-                    $"MOTD：{motd}";
-            }
-        }
-        finally
-        {
-            PingGoBtn.IsEnabled = true;
-        }
-    }
+    // Server probe handlers are kept in ToolboxPage.ServerPing.cs.
 
     // ============================================================
     // Tab 10：主世界 / 下界坐标换算（1:8 比例，Y 不参与换算）

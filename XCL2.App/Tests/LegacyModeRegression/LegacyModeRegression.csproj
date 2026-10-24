@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/LegacyTouchModeRecoveryPolicy.cs" Link="LegacyTouchModeRecoveryPolicy.cs" />
+    <Compile Include="../../Services/LegacyTouchWorldEvidence.cs" Link="LegacyTouchWorldEvidence.cs" />
+    <Compile Include="../../Services/TouchModeStability.cs" Link="TouchModeStability.cs" />
+    <Compile Include="../../Services/TouchInputModePolicy.cs" Link="TouchInputModePolicy.cs" />
+    <Compile Include="../../Models/TouchControlDefinition.cs" Link="TouchControlDefinition.cs" />
+  </ItemGroup>
+</Project>

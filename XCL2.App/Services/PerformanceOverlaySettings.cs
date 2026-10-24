@@ -4,6 +4,9 @@ using XCL2.App.Models;
 namespace XCL2.App.Services;
 
 /// <summary>悬浮窗独立的配置边界；读取坏配置时也不会创建不可见或高频刷新的窗口。</summary>
+public sealed record PerformanceHardwareDisplay(bool Show, bool ShowUtilization, string UtilizationFormat,
+    bool ShowDedicatedMemory, string DedicatedMemoryUnit, bool ShowSharedMemory, string SharedMemoryUnit);
+
 public static class PerformanceOverlaySettings
 {
     public static double FontSize(AppConfig cfg) => FiniteClamp(cfg.PerformanceOverlayFontSize, 10, 26, 14);
@@ -19,6 +22,43 @@ public static class PerformanceOverlaySettings
     public static string MemoryUnit(AppConfig cfg)
         => cfg.PerformanceOverlayMemoryUnit is "MB" or "GB" ? cfg.PerformanceOverlayMemoryUnit : "Auto";
 
+    public static string HardwareUtilizationFormat(string? format)
+        => format is "PercentInteger" or "Ratio" ? format : "Percent";
+    public static string HardwareMemoryUnit(string? unit, AppConfig cfg)
+        => unit == null ? MemoryUnit(cfg) switch { "MB" => "MiB", "GB" => "GiB", _ => "Auto" }
+            : unit is "B" or "KiB" or "MiB" or "GiB" ? unit : "Auto";
+
+    public static PerformanceHardwareDisplay HardwareDisplay(AppConfig cfg, string kind)
+    {
+        var gpu = kind == "GPU";
+        return new(gpu ? cfg.PerformanceOverlayShowGpu : cfg.PerformanceOverlayShowNpu,
+            gpu ? cfg.PerformanceOverlayGpuShowUtilization : cfg.PerformanceOverlayNpuShowUtilization,
+            HardwareUtilizationFormat(gpu ? cfg.PerformanceOverlayGpuUtilizationFormat : cfg.PerformanceOverlayNpuUtilizationFormat),
+            (gpu ? cfg.PerformanceOverlayGpuShowDedicatedMemory : cfg.PerformanceOverlayNpuShowDedicatedMemory) ?? cfg.PerformanceOverlayShowDeviceMemory,
+            HardwareMemoryUnit(gpu ? cfg.PerformanceOverlayGpuDedicatedMemoryUnit : cfg.PerformanceOverlayNpuDedicatedMemoryUnit, cfg),
+            (gpu ? cfg.PerformanceOverlayGpuShowSharedMemory : cfg.PerformanceOverlayNpuShowSharedMemory) ?? cfg.PerformanceOverlayShowDeviceMemory,
+            HardwareMemoryUnit(gpu ? cfg.PerformanceOverlayGpuSharedMemoryUnit : cfg.PerformanceOverlayNpuSharedMemoryUnit, cfg));
+    }
+
+    public static string FormatHardwareUtilization(double? percent, string? format = "Percent")
+    {
+        if (percent is not { } value || !double.IsFinite(value) || value < 0 || value > 100) return "暂不可用";
+        return HardwareUtilizationFormat(format) switch
+        {
+            "Ratio" => (value / 100).ToString("0.000", CultureInfo.CurrentCulture) + "（0–1）",
+            "PercentInteger" => value.ToString("0", CultureInfo.CurrentCulture) + "%",
+            _ => value.ToString("0.0", CultureInfo.CurrentCulture) + "%"
+        };
+    }
+    public static string FormatHardwareMemory(long? bytes, string? unit = "Auto")
+    {
+        if (bytes is null or < 0) return "暂不可用";
+        var chosen = unit is "B" or "KiB" or "MiB" or "GiB" ? unit : bytes.Value switch
+        { >= 1073741824 => "GiB", >= 1048576 => "MiB", >= 1024 => "KiB", _ => "B" };
+        var divisor = chosen switch { "KiB" => 1024d, "MiB" => 1048576d, "GiB" => 1073741824d, _ => 1d };
+        return (chosen == "B" ? bytes.Value.ToString("0", CultureInfo.CurrentCulture) : (bytes.Value / divisor).ToString("0.00", CultureInfo.CurrentCulture)) + " " + chosen;
+    }
+
     public static double FiniteClamp(double value, double minimum, double maximum, double fallback)
         => double.IsFinite(value) ? Math.Clamp(value, minimum, maximum) : fallback;
 
@@ -32,8 +72,8 @@ public static class PerformanceOverlaySettings
     }
 
     public static string FormatCpu(double? percent)
-        => percent is { } value && double.IsFinite(value)
-            ? Math.Clamp(value, 0, 100).ToString("0.0", CultureInfo.CurrentCulture) + "%" : "采样中 / 不可用";
+        => percent is { } value && double.IsFinite(value) && value is >= 0 and <= 100
+            ? value.ToString("0.0", CultureInfo.CurrentCulture) + "%" : "采样中 / 不可用";
 
     public static IReadOnlyList<PerformanceGameSample> SelectGames(PerformanceSnapshot snapshot, AppConfig cfg)
     {

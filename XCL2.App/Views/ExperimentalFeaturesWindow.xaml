@@ -58,15 +58,12 @@
                     </StackPanel>
                 </Button>
 
-                <Button HorizontalContentAlignment="Left" Padding="12,10" Margin="0,0,0,8"
-                        Click="PluginManager_Click">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="🧩" FontSize="16" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                        <StackPanel>
-                            <TextBlock Text="插件管理" FontWeight="Bold"/>
-                            <TextBlock Text="管理、授权、配置、导入和重新加载第三方 DLL / EXE 插件"
-                                       FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
-                        </StackPanel>
+                <Button x:Name="MiniWorldFeatureButton" HorizontalContentAlignment="Left" Padding="12,10" Margin="0,0,0,8"
+                        Click="MiniWorldFeature_Click">
+                    <StackPanel>
+                        <TextBlock Text="迷你世界 · 下载与启动（实验性）" FontWeight="Bold"/>
+                        <TextBlock Text="官方与社区渠道 · 需先阅读作者声明并完成阅读确认"
+                                   FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Button>
 

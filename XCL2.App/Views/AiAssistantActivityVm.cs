@@ -107,6 +107,7 @@ public sealed class AiActivityVm : INotifyPropertyChanged
         AiActivityKind.Command => "执行命令",
         AiActivityKind.ReasoningSummary => "思考过程摘要 · 供应商公开内容",
         AiActivityKind.Reasoning => "思考过程 · 供应商公开内容",
+        AiActivityKind.RequestParameters => "实际请求参数",
         _ => "执行记录"
     };
     public bool IsRunning => _snapshot.Status == AiActivityStatus.Running;

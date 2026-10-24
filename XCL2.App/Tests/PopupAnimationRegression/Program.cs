@@ -24,11 +24,12 @@ internal static class Program
             ReopenCancelsOldDismissCallback(card);
             OverlayScaleWaitsForFirstRender(card);
             OverlayScaleRespectsIntensity(card);
-            WindowRestoreActuallyAnimatesScale(card);
+            WindowRestoreKeepsNaturalSize(card);
             DisabledOverlayRestoresItsScale(card);
             CanceledEntranceDoesNotNotifyHost(card);
             HiddenEntranceRestoresItsScale(card);
-            Console.WriteLine("PASS: 12 popup animation regression checks.");
+            VisibleContentReplacementAnimates(window);
+            Console.WriteLine("PASS: 13 popup and page animation regression checks.");
             return 0;
         }
         catch (Exception exception)
@@ -112,10 +113,10 @@ internal static class Program
         card.RenderTransform = scale;
         var shown = false;
         UiAnimationHelper.PopupFadeIn(card, () => shown = true, scale);
-        AssertNear(scale.ScaleX, 0.94, "Overlay preparation must include the visible scale start.");
+        AssertNear(scale.ScaleX, 0.985, "Overlay preparation must include the visible scale start.");
         Thread.Sleep(350);
-        AssertNear(scale.ScaleX, 0.94, "Cold layout must not consume the scale animation.");
-        PumpUntil(() => scale.ScaleX > 0.95 && scale.ScaleX < 0.999,
+        AssertNear(scale.ScaleX, 0.985, "Cold layout must not consume the scale animation.");
+        PumpUntil(() => scale.ScaleX > 0.9855 && scale.ScaleX < 0.999,
             "An overlay must actually animate its supplied scale transform.");
         PumpUntil(() => shown, "The host must be notified after the entrance completes.");
         AssertNear(scale.ScaleX, 1, "The overlay must settle at its original size.");
@@ -130,20 +131,22 @@ internal static class Program
         card.RenderTransform = scale;
         var shown = false;
         UiAnimationHelper.PopupFadeIn(card, () => shown = true, scale);
-        AssertNear(scale.ScaleX, 0.985, "Popup intensity must scale down the size change.");
+        AssertNear(scale.ScaleX, 0.99625, "Popup intensity must scale down the size change.");
         PumpUntil(() => shown, "The low intensity scale animation must finish.");
         AssertNear(scale.ScaleX, 1, "Low intensity must not change the final size.");
     }
 
-    private static void WindowRestoreActuallyAnimatesScale(FrameworkElement card)
+    private static void WindowRestoreKeepsNaturalSize(FrameworkElement card)
     {
         AnimationSettingsService.Strength = 1;
         var scale = new ScaleTransform();
         card.RenderTransform = scale;
         var finished = false;
         UiAnimationHelper.SettleScale(card, scale, () => finished = true);
-        PumpUntil(() => scale.ScaleX > 0.96 && scale.ScaleX < 0.999,
-            "Window restore must use the scale passed to SettleScale.");
+        AssertNear(scale.ScaleX, 1, "Window restore must preserve natural geometry.");
+        PumpUntil(() => card.Opacity > 0.92 && card.Opacity < 0.999,
+            "Window restore uses a subtle fade without stretching content.");
+        AssertNear(scale.ScaleX, 1, "Window restore must not shrink text while fading.");
         PumpUntil(() => finished, "The window restore must finish.");
         AssertNear(scale.ScaleX, 1, "Window restore must return to its natural size.");
     }
@@ -183,6 +186,26 @@ internal static class Program
         AssertNear(card.Opacity, 1, "A hidden preparation must restore its base opacity.");
         card.Visibility = Visibility.Visible;
         PumpFor(20);
+    }
+
+    private static void VisibleContentReplacementAnimates(Window window)
+    {
+        AnimationSettingsService.Strength = 1;
+        var host = new ContentControl { Content = new TextBlock { Text = "First detail page" } };
+        PageTransitionBehavior.SetAnimateOnVisible(host, true);
+        window.Content = host;
+        PumpUntil(() => host.IsLoaded && host.Opacity >= 0.999, "The initial detail page must settle.");
+
+        host.Content = new TextBlock { Text = "Second detail page" };
+        PumpUntil(() => host.Opacity < 0.95, "Replacing a visible detail page must start a transition.");
+        host.Content = new TextBlock { Text = "Third detail page" };
+        PumpUntil(() => host.Opacity >= 0.999, "Rapid page replacement must settle on the latest page.");
+        Assert(host.IsEnabled && host.IsHitTestVisible, "Page transitions must preserve pointer interaction.");
+
+        PageTransitionBehavior.SetAnimateOnVisible(host, false);
+        host.Content = new TextBlock { Text = "Animations disabled" };
+        PumpFor(30);
+        AssertNear(host.Opacity, 1, "Disabling the behavior must stop observing content replacements.");
     }
 
     private static void PumpUntil(Func<bool> condition, string failure)

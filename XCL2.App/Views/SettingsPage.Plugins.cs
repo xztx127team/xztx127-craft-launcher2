@@ -22,14 +22,14 @@ public partial class SettingsPage
 
         area.Children.Add(new TextBlock
         {
-            Text = "第三方插件",
+            Text = "管理与授权",
             FontSize = 16,
             FontWeight = FontWeights.Bold,
             Margin = new Thickness(0, 0, 0, 4)
         });
         area.Children.Add(new TextBlock
         {
-            Text = "管理 DLL / EXE 插件、启动策略、回调超时，以及插件注册到设置页的扩展项。插件管理属于基础功能，不受实验功能或简洁模式限制。",
+            Text = "管理 DLL / EXE 插件、启动策略、回调超时和扩展设置。导入插件时确认来源，并按清单审核敏感 API 权限。",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 11,
             Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
@@ -37,10 +37,10 @@ public partial class SettingsPage
         });
 
         var toolbar = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
-        var openManager = new Button { Content = "插件管理…", Padding = new Thickness(14, 8, 14, 8), Margin = new Thickness(0, 0, 8, 8) };
-        var rescan = new Button { Content = "重新扫描 / 重新加载", Padding = new Thickness(14, 8, 14, 8), Margin = new Thickness(0, 0, 8, 8) };
-        var openDirectory = new Button { Content = "打开插件目录", Padding = new Thickness(14, 8, 14, 8), Margin = new Thickness(0, 0, 8, 8) };
-        var apiCenter = new Button { Content = "API 开发中心 / 样例", Padding = new Thickness(14, 8, 14, 8), Margin = new Thickness(0, 0, 8, 8) };
+        var openManager = new Button { Style = (Style)FindResource("CompactActionButton"), Content = "插件管理…", Padding = new Thickness(11, 5, 11, 5), Margin = new Thickness(0, 0, 8, 8) };
+        var rescan = new Button { Style = (Style)FindResource("CompactActionButton"), Content = "重新扫描 / 重新加载", Padding = new Thickness(11, 5, 11, 5), Margin = new Thickness(0, 0, 8, 8) };
+        var openDirectory = new Button { Style = (Style)FindResource("CompactActionButton"), Content = "打开插件目录", Padding = new Thickness(11, 5, 11, 5), Margin = new Thickness(0, 0, 8, 8) };
+        var apiCenter = new Button { Style = (Style)FindResource("CompactActionButton"), Content = "API 开发中心 / 样例", Padding = new Thickness(11, 5, 11, 5), Margin = new Thickness(0, 0, 8, 8) };
         apiCenter.Click += (_, _) => _owner.NavigateToApiDocumentation();
         toolbar.Children.Add(openManager);
         toolbar.Children.Add(rescan);
@@ -82,7 +82,7 @@ public partial class SettingsPage
             Padding = new Thickness(6),
             Text = _owner.ConfigService.Config.PluginCallbackTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture)
         };
-        var applyTimeout = new Button { Content = "应用", Padding = new Thickness(10, 5, 10, 5), Margin = new Thickness(8, 0, 0, 0) };
+        var applyTimeout = new Button { Style = (Style)FindResource("CompactActionButton"), Content = "应用", Padding = new Thickness(10, 5, 10, 5), Margin = new Thickness(8, 0, 0, 0) };
         var timeoutHint = new TextBlock { FontSize = 11, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
         applyTimeout.Click += (_, _) =>
         {
@@ -183,7 +183,7 @@ public partial class SettingsPage
 
         openManager.Click += (_, _) =>
         {
-            OverlayDialogService.ShowModal(new PluginManagerDialog(_owner));
+            _owner.OpenPluginManager();
             UpdatePluginStatus();
             RefreshContributions();
         };

@@ -9,5 +9,7 @@
     <Compile Include="../../Models/MemoryAllocation.cs" Link="MemoryAllocation.cs" />
     <Compile Include="../../Services/MemoryAllocationPolicy.cs" Link="MemoryAllocationPolicy.cs" />
     <Compile Include="../../Services/MemoryOptimizerService.cs" Link="MemoryOptimizerService.cs" />
+    <Compile Include="../../Services/MemoryLaunchPreviewPolicy.cs" Link="MemoryLaunchPreviewPolicy.cs" />
+    <Compile Include="../../Services/CommandLineSessionPolicy.cs" Link="CommandLineSessionPolicy.cs" />
   </ItemGroup>
 </Project>

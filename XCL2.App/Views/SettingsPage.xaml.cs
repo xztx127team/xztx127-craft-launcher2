@@ -223,6 +223,7 @@ public partial class SettingsPage : UserControl
 
         // 外观与视觉效果：Win11 新光效 + 窗口透明度，均默认关闭，见 AppConfig 对应字段注释。
         Win11EffectsCheck.IsChecked = cfg.EnableWin11VisualEffects;
+        NativeApprovalsCheck.IsChecked = cfg.NativeBackgroundApprovals;
         WinUi3DesignCheck.IsChecked = cfg.EnableWinUi3Design;
         ShowFeatureSearchCheck.IsChecked = cfg.ShowFeatureSearch;
         SelectComboByTag(AppFontCombo, cfg.AppFontFamily);
@@ -786,6 +787,8 @@ public partial class SettingsPage : UserControl
             parts.Add($"R|{Key(rb, "RadioButton")}|{rb.IsChecked}");
         foreach (var combo in FindSettingsControls<ComboBox>(this))
         {
+            // 模板字段选择器只是插入工具；选中候选项不修改任何配置。
+            if (ReferenceEquals(combo, PerformanceTemplateFieldCombo)) continue;
             string value;
             if (ReferenceEquals(combo, UiSkinCombo))
             {
@@ -879,6 +882,7 @@ public partial class SettingsPage : UserControl
         // 恢复/撤销后旧控件即将被替换；离页结算不能再把旧值保存回刚恢复的配置。
         _suppressDirtyTracking = true;
         _owner.EndFeatureSearchPreview();
+        PerformanceOverlayService.PreviewHardwareSettings(null);
         _hasUnsavedChanges = false;
         _editDebounceTimer?.Stop();
         _dirtyPollTimer?.Stop();
@@ -1445,21 +1449,25 @@ public partial class SettingsPage : UserControl
     /// 字段），探测成功直接回填输入框，不需要用户自己去皮肤站后台/文档翻 API 地址。</summary>
     private async void DetectSkinApiRoot_Click(object sender, RoutedEventArgs e)
     {
+        if (!DetectSkinApiRootBtn.IsEnabled) return;
         var input = SkinApiRootBox.Text?.Trim();
         if (string.IsNullOrEmpty(input))
         {
             MessageBoxDialog.ShowInfo("请先填写皮肤站主页地址（例如 littleskin.cn），再点「自动检测」。", Loc.T("Str_Status_Tip", "提示"));
             return;
         }
-
+        var originalContent = DetectSkinApiRootBtn.Content;
+        var cancellation = _pageLoadCancellation?.Token ?? CancellationToken.None;
         DetectSkinApiRootBtn.IsEnabled = false;
+        DetectSkinApiRootBtn.Content = "检测中…";
         try
         {
-            var authService = new AuthServerAuthService();
-            var resolved = await authService.DetectApiRootAsync(input);
+            var resolved = await new AuthServerAuthService().DetectApiRootAsync(input, cancellation);
+            if (!IsLoaded || cancellation.IsCancellationRequested) return;
             SkinApiRootBox.Text = resolved;
             ToastService.ShowSuccess($"已自动检测到 API 地址：{resolved}");
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (AuthStepException ex)
         {
             MessageBoxDialog.ShowWarning(ex.Message, "自动检测失败");
@@ -1471,16 +1479,20 @@ public partial class SettingsPage : UserControl
         }
         finally
         {
+            DetectSkinApiRootBtn.Content = originalContent;
             DetectSkinApiRootBtn.IsEnabled = true;
         }
     }
 
     private async void DownloadJava_Click(object sender, RoutedEventArgs e)
     {
+        if (!DownloadJavaBtn.IsEnabled) return;
+        var originalContent = DownloadJavaBtn.Content;
         var advanced = AdvancedModeCheck.IsChecked == true;
         var javaService = new JavaService();
 
         DownloadJavaBtn.IsEnabled = false;
+        DownloadJavaBtn.Content = "下载中…";
         StatusText.Text = "Java 下载已加入右上角下载列表，可继续使用其它页面。";
         try
         {
@@ -1529,6 +1541,7 @@ public partial class SettingsPage : UserControl
         }
         finally
         {
+            DownloadJavaBtn.Content = originalContent;
             DownloadJavaBtn.IsEnabled = true;
         }
     }
@@ -1542,7 +1555,8 @@ public partial class SettingsPage : UserControl
     /// </summary>
     private async void RefreshDetectJava_Click(object sender, RoutedEventArgs e)
     {
-        var button = (Button)sender;
+        if (sender is not Button button || !button.IsEnabled) return;
+        var cancellation = _pageLoadCancellation?.Token ?? CancellationToken.None;
         button.IsEnabled = false;
         var originalContent = button.Content;
         button.Content = "探测中...";
@@ -1551,7 +1565,8 @@ public partial class SettingsPage : UserControl
         try
         {
             var javaService = new JavaService();
-            var candidates = await Task.Run(() => javaService.QuickDetectJavaAsync());
+            var candidates = await Task.Run(() => javaService.QuickDetectJavaAsync(cancellation), cancellation);
+            if (!IsLoaded || cancellation.IsCancellationRequested) return;
 
             var cfg = _owner.ConfigService.Config;
             var existingPaths = new HashSet<string>(
@@ -1582,6 +1597,7 @@ public partial class SettingsPage : UserControl
                     ? $"自动探测完成：新增 {added} 个 Java 到列表（共探测到 {candidates.Count} 个）。"
                     : $"自动探测完成：探测到的 {candidates.Count} 个 Java 都已经在列表里了。";
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
         {
             MessageBoxDialog.ShowError(Loc.T("Str_Cs_Auto_Detection_Failed_N", "自动探测失败：\n") + ex.Message);
@@ -1600,70 +1616,107 @@ public partial class SettingsPage : UserControl
     /// </summary>
     private async void ScanDiskForJava_Click(object sender, RoutedEventArgs e)
     {
-        var confirm = MessageBoxDialog.ShowConfirm(
-            "即将扫描本机所有固定磁盘（不含移动硬盘/U盘/网络盘），查找已安装的 Java (javaw.exe)。\n\n" +
-            "这个过程可能需要几分钟，取决于磁盘上的文件数量。默认情况下 XCL2 只会在常见默认路径" +
-            "(注册表、JAVA_HOME、PATH、便携版目录)查找 Java，不会做全盘扫描；\n\n" +
-            "是否同意开始全盘扫描？",
-            "全盘扫描 Java - 需要确认");
-        if (!confirm) return;
+        if (sender is not Button button || !button.IsEnabled) return;
+        if (!MessageBoxDialog.ShowConfirm(
+            "即将扫描本机所有固定磁盘（不含移动硬盘/U盘/网络盘），查找 javaw.exe。\n\n" +
+            "扫描可能需要几分钟。可关闭进度提示取消；平时建议先使用「刷新（自动探测）」查找常见位置。\n\n是否开始？",
+            "全盘扫描 Java")) return;
 
-        var javaService = new JavaService();
-        var progressWin = new ProgressDialog("正在全盘扫描 Java，请稍候...");
-        progressWin.Show();
-
-        var cts = new System.Threading.CancellationTokenSource();
-        var textProgress = new Progress<string>(msg => progressWin.Progress.Report(new ProgressInfo(Loc.T("Str_Cs_Scan_The_Whole_Disk_For_Java", "全盘扫描 Java"), 0, 0, msg)));
-
+        var originalContent = button.Content;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_pageLoadCancellation?.Token ?? CancellationToken.None);
+        ProgressDialog? progressWin = null;
+        EventHandler<bool?> cancelOnClose = (_, _) => cancellation.Cancel();
+        var progress = new Progress<string>(message =>
+        {
+            if (!cancellation.IsCancellationRequested)
+                progressWin?.Progress.Report(new ProgressInfo("全盘扫描 Java", 0, 0, message));
+        });
         try
         {
-            var candidates = await javaService.ScanWholeDiskForJavaAsync(textProgress, cts.Token);
+            progressWin = new ProgressDialog("正在全盘扫描 Java，按 Esc 取消…", indeterminate: true);
+            progressWin.RequestClose += cancelOnClose;
+            progressWin.OverlayClosed += cancelOnClose;
+            button.IsEnabled = false;
+            button.Content = "扫描中…";
+            progressWin.Show();
+            // The iterator walks directories synchronously before its first candidate/await.
+            // Keep that work off the dispatcher so progress and cancellation stay responsive.
+            var candidates = await Task.Run(() => new JavaService().ScanWholeDiskForJavaAsync(progress, cancellation.Token), cancellation.Token);
+            progressWin.RequestClose -= cancelOnClose;
+            progressWin.OverlayClosed -= cancelOnClose;
             progressWin.Close();
-
+            if (!IsLoaded || cancellation.IsCancellationRequested) return;
             if (candidates.Count == 0)
             {
-                MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Scan_Finished_No_Javaw_Exe_Was_Found_Any", "扫描完成，没有在本机磁盘上找到任何 javaw.exe。"), "全盘扫描结果");
+                MessageBoxDialog.ShowInfo("扫描完成，没有找到 javaw.exe。", "全盘扫描结果");
                 return;
             }
-
             var picker = new JavaCandidatePickerWindow(candidates);
             if (picker.ShowDialog() == true && picker.SelectedPath != null)
             {
-                // 选中的这个候选自动登记进 Java 列表；候选自带的版本号（字符串，如 "21.0.5"）
-                // 解析成主版本号一并存进去，省得再跑一次外部进程重新探测。
-                var picked = candidates.FirstOrDefault(c => c.JavawPath == picker.SelectedPath);
+                var picked = candidates.FirstOrDefault(candidate => candidate.JavawPath == picker.SelectedPath);
                 int? major = picked?.Version != null ? JavaService.ParseJavaMajorVersion($"\"{picked.Version}\"") : null;
                 var entry = _owner.ConfigService.RegisterJava(picker.SelectedPath, major, "Scanned");
                 _owner.ConfigService.Save();
-                RefreshJavaList();
-
-                StatusText.Text = $"已选择扫描到的 Java，并自动加入 Java 列表（{entry.Name}）。";
+                RunWithoutDirtyTracking(RefreshJavaList);
+                StatusText.Text = $"已添加扫描到的 Java：{entry.Name}";
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            progressWin.Close();
+            if (IsLoaded) StatusText.Text = "Java 全盘扫描已取消，可再次点击重试。";
         }
         catch (Exception ex)
         {
-            progressWin.Close();
-            MessageBoxDialog.ShowError("全盘扫描失败：\n" + ex.Message);
+            ErrorPresenter.ShowFriendlyError("全盘扫描失败，可以重试或浏览选择 Java。", ex.ToString(), "扫描失败");
+        }
+        finally
+        {
+            try
+            {
+                if (progressWin != null)
+                {
+                    progressWin.RequestClose -= cancelOnClose;
+                    progressWin.OverlayClosed -= cancelOnClose;
+                    progressWin.Close();
+                }
+            }
+            catch (Exception ex) { ErrorPresenter.LogFallback("关闭 Java 扫描提示失败", ex); }
+            finally
+            {
+                button.Content = originalContent;
+                button.IsEnabled = true;
+            }
         }
     }
 
     /// <summary>浏览选择一个 javaw.exe，实测探测版本号后登记进 Java 列表。</summary>
-    private void AddJavaByBrowse_Click(object sender, RoutedEventArgs e)
+    private async void AddJavaByBrowse_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is not Button button || !button.IsEnabled) return;
         var dialog = new OpenFileDialog { Filter = "javaw.exe|javaw.exe|所有文件|*.*", Title = "选择要添加到 Java 列表的 javaw.exe" };
         FilePickerExperience.Prepare(dialog, "settings-java");
         if (dialog.ShowDialog() != true) return;
         FilePickerExperience.Remember(dialog, "settings-java");
-
-        AddJavaPathToList(dialog.FileName);
+        var originalContent = button.Content;
+        button.IsEnabled = false;
+        button.Content = "读取 Java 版本…";
+        var cancellation = _pageLoadCancellation?.Token ?? CancellationToken.None;
+        try { await AddJavaPathToListAsync(dialog.FileName, cancellation); }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError("添加 Java 失败，请检查文件路径后重试。", ex.ToString(), "添加 Java 失败");
+        }
+        finally
+        {
+            button.Content = originalContent;
+            button.IsEnabled = true;
+        }
     }
 
-    /// <summary>实测探测版本号(java -version)后登记进 cfg.InstalledJavas 并保存、刷新界面。</summary>
-    private void AddJavaPathToList(string javawPath)
+    /// <summary>有界异步读取 java -version；不能在 UI 线程先 ReadToEnd 再等待退出。</summary>
+    private async Task AddJavaPathToListAsync(string javawPath, CancellationToken cancellation)
     {
         var javaExe = Path.Combine(Path.GetDirectoryName(javawPath) ?? "", "java.exe");
         int? majorVersion = null;
@@ -1671,32 +1724,21 @@ public partial class SettingsPage : UserControl
         {
             try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo(javaExe, "-version")
-                {
-                    UseShellExecute = false,
-                    RedirectStandardError = true,
-                    RedirectStandardOutput = true,
-                    CreateNoWindow = true
-                };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null)
-                {
-                    var output = proc.StandardError.ReadToEnd();
-                    proc.WaitForExit(5000);
-                    majorVersion = JavaService.ParseJavaMajorVersion(output);
-                }
+                var output = await Task.Run(() => JavaProcessProbe.ReadVersionOutputAsync(javaExe,
+                    TimeSpan.FromSeconds(5), cancellation), cancellation);
+                if (!string.IsNullOrWhiteSpace(output)) majorVersion = JavaService.ParseJavaMajorVersion(output);
             }
-            catch { /* 探测失败也不阻止添加，只是版本号显示"未知" */ }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { LauncherLogService.AppendLine("[Java 探测] " + ex.Message); }
         }
-
+        cancellation.ThrowIfCancellationRequested();
+        if (!IsLoaded) return;
         var entry = _owner.ConfigService.RegisterJava(javawPath, majorVersion, "Manual");
         _owner.ConfigService.Save();
-        RefreshJavaList();
-
-        var added = JavaListBox.Items.Cast<JavaListItem>().FirstOrDefault(i => i.Entry?.Id == entry.Id);
+        RunWithoutDirtyTracking(RefreshJavaList);
+        var added = JavaListBox.Items.Cast<JavaListItem>().FirstOrDefault(item => item.Entry?.Id == entry.Id);
         if (added != null) JavaListBox.SelectedItem = added;
-
-        StatusText.Text = $"已添加到 Java 列表：{entry.Name}";
+        StatusText.Text = majorVersion.HasValue ? $"已添加到 Java 列表：{entry.Name}" : $"已添加 {entry.Name}；未能在 5 秒内识别版本，可手动确认此 Java。";
     }
 
     private void RenameJava_Click(object sender, RoutedEventArgs e)
@@ -2153,6 +2195,7 @@ public partial class SettingsPage : UserControl
         cfg.IsolateVersionsByDefault = IsolateVersionsCheck.IsChecked == true;
 
         cfg.EnableWin11VisualEffects = Win11EffectsCheck.IsChecked == true;
+        cfg.NativeBackgroundApprovals = NativeApprovalsCheck.IsChecked == true;
         cfg.EnableWinUi3Design = WinUi3DesignCheck.IsChecked == true;
         cfg.ShowFeatureSearch = ShowFeatureSearchCheck.IsChecked == true;
         SaveFeatureSearchSettings(cfg);

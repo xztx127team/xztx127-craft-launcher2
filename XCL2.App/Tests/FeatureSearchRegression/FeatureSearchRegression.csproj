@@ -12,5 +12,7 @@
     <Compile Include="../../Services/FeatureSearchLayoutPolicy.cs" Link="FeatureSearchLayoutPolicy.cs" />
     <EmbeddedResource Include="../../Resources/Data/FeatureSearchCatalog.json"
                       LogicalName="XCL2.App.Resources.Data.FeatureSearchCatalog.json" />
+    <EmbeddedResource Include="../../Views/ToolboxPage.xaml"
+                      LogicalName="ToolboxPage.xaml" />
   </ItemGroup>
 </Project>

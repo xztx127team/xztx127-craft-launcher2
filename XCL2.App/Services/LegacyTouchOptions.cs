@@ -49,7 +49,19 @@ internal sealed class LegacyTouchOptions : IDisposable
             var bytes = ProjectFiles.ReadBytes(options); var text = ProjectFiles.Decode(bytes).Text;
             var matches = Raw.Matches(text);
             if (matches.Count > 0 && matches.Cast<Match>().All(m => m.Value.TrimEnd('\r', '\n') == "rawMouseInput:false"))
-                ProjectFiles.AtomicWrite(options, ProjectFiles.EncodeLike(Raw.Replace(text, saved.Line == null ? "" : saved.Line.TrimEnd('\r', '\n') + (text.Contains("\r\n") ? "\r\n" : "\n"), 1), bytes));
+            {
+                // A duplicated key must not leave a later temporary false overriding the restored value.
+                // Restore one effective option while preserving all unrelated settings written by the game.
+                var restored = false;
+                var line = saved.Line == null ? "" : saved.Line.TrimEnd('\r', '\n') + (text.Contains("\r\n") ? "\r\n" : "\n");
+                var updated = Raw.Replace(text, _ =>
+                {
+                    if (restored) return "";
+                    restored = true;
+                    return line;
+                });
+                ProjectFiles.AtomicWrite(options, ProjectFiles.EncodeLike(updated, bytes));
+            }
         }
         File.Delete(record);
     }
@@ -68,11 +80,12 @@ internal sealed class LegacyTouchOptions : IDisposable
             }
             var path = Path.Combine(dir, "options.txt"); var bytes = File.Exists(path) ? ProjectFiles.ReadBytes(path) : null;
             var text = bytes == null ? "" : ProjectFiles.Decode(bytes).Text;
-            var old = Raw.Match(text);
+            // Minecraft loads options in order, so the final occurrence is the effective original value.
+            var old = Raw.Matches(text).Cast<Match>().LastOrDefault();
             using var current = Process.GetCurrentProcess();
-            ProjectFiles.AtomicWrite(record, JsonSerializer.SerializeToUtf8Bytes(new Backup(old.Success ? old.Value : null, current.Id, current.StartTime.ToUniversalTime().Ticks, new())));
+            ProjectFiles.AtomicWrite(record, JsonSerializer.SerializeToUtf8Bytes(new Backup(old?.Value, current.Id, current.StartTime.ToUniversalTime().Ticks, new())));
             var newline = text.Contains("\r\n") ? "\r\n" : "\n";
-            var updated = old.Success ? Raw.Replace(text, "rawMouseInput:false" + newline) : text + (text.Length > 0 && !text.EndsWith('\n') ? newline : "") + "rawMouseInput:false" + newline;
+            var updated = old != null ? Raw.Replace(text, "rawMouseInput:false" + newline) : text + (text.Length > 0 && !text.EndsWith('\n') ? newline : "") + "rawMouseInput:false" + newline;
             try { ProjectFiles.AtomicWrite(path, ProjectFiles.EncodeLike(updated, bytes)); }
             catch { File.Delete(record); throw; }
             Users[dir] = 1;

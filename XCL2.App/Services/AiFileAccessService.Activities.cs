@@ -429,12 +429,15 @@ public static partial class AiFileAccessService
                 // 子进程也可能继承管道句柄；正常父进程退出后最多额外收集一秒，避免永久等待。
                 drain.CancelAfter(TimeSpan.FromSeconds(1));
                 var output = CombineCommandOutput(await stdoutTask, await stderrTask);
+                var elevated = await TryRunElevatedCommandAsync(approval, psi, timeoutSeconds, proc.ExitCode,
+                    output, null, activity, report, ct, workMode);
+                if (elevated != null) return elevated;
                 var details = $"Shell：{(usePython ? "Python" : useCmd ? "cmd" : "PowerShell")} · 退出码：{proc.ExitCode} · 耗时：{watch.Elapsed.TotalSeconds:0.0} 秒\n{output}";
                 FinishActivity(activity, proc.ExitCode == 0 ? AiActivityStatus.Completed : AiActivityStatus.Failed, details, report);
                 AuditSystemLog($"命令结束，退出码 {proc.ExitCode}");
                 return $"系统：命令已执行，退出码 {proc.ExitCode}。输出：\n```\n{output}\n```\n请如实向用户说明结果，不要声称做了没有做的事。";
             }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            catch (OperationCanceledException) when (linked.IsCancellationRequested && activity.Status != AiActivityStatus.Cancelled)
             {
                 var stopped = false;
                 try
@@ -472,6 +475,9 @@ public static partial class AiFileAccessService
         }
         catch (Exception ex)
         {
+            var elevated = await TryRunElevatedCommandAsync(approval, psi, timeoutSeconds, null,
+                ex.Message, ex, activity, report, ct, workMode);
+            if (elevated != null) return elevated;
             var result = $"系统：命令执行失败：{ex.Message}";
             FinishActivity(activity, AiActivityStatus.Failed, $"Shell：{(usePython ? "Python" : useCmd ? "cmd" : "PowerShell")}\n{result}", report);
             AuditSystemLog(result);

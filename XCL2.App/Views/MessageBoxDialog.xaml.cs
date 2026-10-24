@@ -269,10 +269,13 @@ public partial class MessageBoxDialog : OverlayDialogControl
     /// <summary>等价于 MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Question)，
     /// 返回 true 表示用户点了"是"。</summary>
     public static bool ShowConfirm(string message, string title = "确认")
-        => Show(message, title, XclMessageKind.Info, XclMessageButtons.YesNo) == true;
+        => NativeApprovalService.ShouldUseNative ? NativeApprovalService.Confirm(message, title)
+            : Show(message, title, XclMessageKind.Info, XclMessageButtons.YesNo) == true;
 
     public static Task<bool?> ShowConfirmAsync(string message, string title = "确认", string confirmText = "确定")
     {
+        if (NativeApprovalService.ShouldUseNative)
+            return Task.FromResult<bool?>(NativeApprovalService.Confirm(message, title));
         var dlg = new MessageBoxDialog(message, title, XclMessageKind.Info, XclMessageButtons.OKCancel);
         dlg.ButtonPanel.Children.Clear();
         dlg.ButtonPanel.Children.Add(dlg.MakeButton("取消", false, isPrimary: false, isDefault: false));
@@ -285,6 +288,9 @@ public partial class MessageBoxDialog : OverlayDialogControl
     /// choice == MessageBoxResult.Xxx，现在就怎么判断 result == XclMessageResult.Xxx。</summary>
     public static XclMessageResult ShowYesNoCancel(string message, string title = "确认")
     {
+        if (NativeApprovalService.ShouldUseNative)
+            return NativeApprovalService.Ask(message, title, true) switch
+            { 6 => XclMessageResult.Yes, 7 => XclMessageResult.No, _ => XclMessageResult.Cancel };
         var dlg = new MessageBoxDialog(message, title, XclMessageKind.Info, XclMessageButtons.YesNoCancel);
         OverlayDialogService.ShowModal(dlg);
         return dlg.Result3;
@@ -323,8 +329,8 @@ public partial class MessageBoxDialog : OverlayDialogControl
     {
         var dlg = new MessageBoxDialog(message, title, kind, XclMessageButtons.OK);
         dlg.ButtonPanel.Children.Clear();
-        dlg.ButtonPanel.Children.Add(dlg.MakeButton(leftText, true, isPrimary: !rightIsPrimary, isDefault: !rightIsPrimary));
-        dlg.ButtonPanel.Children.Add(dlg.MakeButton(rightText, false, isPrimary: rightIsPrimary, isDefault: rightIsPrimary));
+        dlg.ButtonPanel.Children.Add(dlg.MakeButton(leftText, false, isPrimary: !rightIsPrimary, isDefault: !rightIsPrimary));
+        dlg.ButtonPanel.Children.Add(dlg.MakeButton(rightText, true, isPrimary: rightIsPrimary, isDefault: rightIsPrimary));
         return OverlayDialogService.ShowModal(dlg) == true;
     }
 

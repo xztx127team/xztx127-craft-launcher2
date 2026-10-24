@@ -20,8 +20,8 @@ namespace XCL2.App.Services;
 ///    （自动更新，覆盖最新的 1.26.x 正式版/预览版，多个 CDN/镜像源回退）；
 /// 2. 旧的 mc-w10-versiondb（已停止维护，最高 1.21.x）作为补充：给老版本补 FE3 UUID，
 ///    并在新源整体不可用时单独兜底；
-/// 3. 网络全部失败时，回退到启动器内置的精简版本列表（覆盖常见正式版/预览版）；
-/// 4. 获取成功后自动缓存到本地，下次启动优先用缓存展示，同时后台静默刷新。
+/// 3. 网络全部失败时，回退到启动器内置的真实上游索引快照；
+/// 4. 成功后原子写入本地缓存；页面先展示离线列表，再应用本次在线刷新结果。
 ///
 /// ===== 下载直链 =====
 /// 1.26.x 之后的新版本走 reversedcodes 的 GDK 元数据（binaries.arch.x64.urls[]，
@@ -34,6 +34,9 @@ namespace XCL2.App.Services;
 /// </summary>
 public class BedrockClientDownloadService
 {
+    private const string IncompleteInstallationMarker = "xcl-install-incomplete.flag";
+    public static bool IsClientInstallationComplete(string installDir)
+        => !File.Exists(Path.Combine(installDir, IncompleteInstallationMarker)) && FindClientExe(installDir) != null;
     // ===== 新源：reversedcodes/minecraft-bedrock-meta-database（自动更新，含 1.26.x）=====
     private const string VersionDbUrl = "https://raw.githubusercontent.com/reversedcodes/minecraft-bedrock-meta-database/main/bedrock/client/versions.json";
 
@@ -75,7 +78,15 @@ public class BedrockClientDownloadService
         DateTime? Date,
         BedrockClientChannel Channel,
         string? Url = null,
-        bool DirectUrlAvailable = false);
+        bool DirectUrlAvailable = false)
+    {
+        public bool CanResolveDownload => DirectUrlAvailable || Guid.TryParse(Uuid, out _) ||
+            Uri.TryCreate(Url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http";
+        public string DisplayName => CanResolveDownload ? Name : Name + "（下载索引待同步）";
+    }
+
+    public string VersionListSource { get; private set; } = "本地版本索引";
+    private string _networkVersionListSource = "在线版本索引";
 
     private static HttpClient CreateHttp()
     {
@@ -89,29 +100,12 @@ public class BedrockClientDownloadService
 
     /// <summary>
     /// 获取基岩版历史版本列表。
-    /// 策略：先读本地缓存 → 再试网络多源 → 最后回退内置列表。保证界面不空白。
+    /// 完成本次网络刷新后返回列表；失败时回到缓存／内置索引。调用方可先展示本地列表。
     /// </summary>
     public async Task<List<BedrockVersionInfo>> GetVersionListAsync(
         BedrockClientChannel channel = BedrockClientChannel.Stable,
         CancellationToken ct = default)
-    {
-        // 1. 本地缓存
-        var cached = LoadCachedVersions();
-
-        // 2. 后台尝试网络刷新（不阻塞）
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var fresh = await FetchVersionListFromNetworkAsync(ct);
-                if (fresh.Count > 0) SaveCachedVersions(fresh);
-            }
-            catch { /* 静默失败 */ }
-        }, ct);
-
-        var all = cached.Count > 0 ? cached : GetBuiltinVersions();
-        return FilterAndSort(all, channel);
-    }
+        => await RefreshVersionListAsync(channel, ct);
 
     /// <summary>
     /// 强制从网络刷新版本列表（用户点"刷新列表"时调用）。
@@ -125,8 +119,12 @@ public class BedrockClientDownloadService
             var fresh = await FetchVersionListFromNetworkAsync(ct);
             if (fresh.Count > 0)
             {
+                ct.ThrowIfCancellationRequested();
+                var selected = FilterAndSort(fresh, channel);
+                if (selected.Count == 0) return GetLocalFallbackVersionList(channel);
                 SaveCachedVersions(fresh);
-                return FilterAndSort(fresh, channel);
+                VersionListSource = _networkVersionListSource;
+                return selected;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -150,305 +148,118 @@ public class BedrockClientDownloadService
         BedrockClientChannel channel = BedrockClientChannel.Stable)
     {
         var fallback = LoadCachedVersions();
-        if (fallback.Count == 0) fallback = GetBuiltinVersions();
+        VersionListSource = "本地缓存（离线）";
+        if (!fallback.Any(version => version.Channel == channel))
+        {
+            fallback = GetBuiltinVersions();
+            VersionListSource = "内置版本索引（离线）";
+        }
         return FilterAndSort(fallback, channel);
     }
 
     private static List<BedrockVersionInfo> FilterAndSort(List<BedrockVersionInfo> all, BedrockClientChannel channel)
-        => all.Where(v => v.Channel == channel)
-              .OrderByDescending(v => v.Date ?? DateTime.MinValue)
-              .ToList();
+        => FromCatalog(BedrockVersionCatalog.Normalize(ToCatalog(all.Where(version => version.Channel == channel))));
+
+    private static List<BedrockVersionInfo> FromCatalog(IEnumerable<BedrockCatalogEntry> values)
+        => values.Select(value => new BedrockVersionInfo(value.Uuid, value.Name, value.BaseVersion, value.Date,
+            value.Preview ? BedrockClientChannel.Preview : BedrockClientChannel.Stable, value.Url, value.DirectUrlAvailable)).ToList();
+    private static IEnumerable<BedrockCatalogEntry> ToCatalog(IEnumerable<BedrockVersionInfo> values)
+        => values.Select(value => new BedrockCatalogEntry(value.Uuid, value.Name, value.BaseVersion, value.Date,
+            value.Channel == BedrockClientChannel.Preview, value.Url, value.DirectUrlAvailable));
 
     // ==================== 网络获取 ====================
 
     private async Task<List<BedrockVersionInfo>> FetchVersionListFromNetworkAsync(CancellationToken ct)
     {
-        // 1. 新源（reversedcodes，自动更新，含 1.26.x）：主版本列表
-        var primary = await FetchJsonWithMirrorsAsync(VersionDbUrl, VersionDbMirrorUrls, ct);
-        if (primary != null)
-        {
-            var versions = ParseReversedMeta(primary);
-            if (versions.Count > 0)
-            {
-                // 2. 老源（mc-w10-versiondb，已停更）：给列表补老版本（含其 FE3 UUID）
-                var legacy = await FetchJsonWithMirrorsAsync(LegacyVersionDbUrl, LegacyVersionDbMirrorUrls, ct);
-                if (legacy != null)
-                    MergeLegacyVersions(versions, ParseVersionDbMin(legacy));
-                return versions;
-            }
-        }
-
-        // 3. 新源不可用：老源单独兜底
-        var legacyOnly = await FetchJsonWithMirrorsAsync(LegacyVersionDbUrl, LegacyVersionDbMirrorUrls, ct);
-        if (legacyOnly != null)
-        {
-            var v = ParseVersionDbMin(legacyOnly);
-            if (v.Count > 0) return v;
-        }
-        return new List<BedrockVersionInfo>();
+        // New and legacy indexes run concurrently. A slow legacy host must not postpone the
+        // current GDK list by seven sequential mirror timeouts.
+        var primaryTask = FetchJsonWithMirrorsAsync(VersionDbUrl, VersionDbMirrorUrls, ct,
+            json => BedrockVersionCatalog.ParseMetadata(json).Count > 0);
+        var legacyTask = FetchJsonWithMirrorsAsync(LegacyVersionDbUrl, LegacyVersionDbMirrorUrls, ct,
+            json => BedrockVersionCatalog.ParseLegacy(json).Count > 0);
+        await Task.WhenAll(primaryTask, legacyTask);
+        ct.ThrowIfCancellationRequested();
+        var primary = await primaryTask;
+        var legacy = await legacyTask;
+        _networkVersionListSource = primary == null ? "旧版在线索引（主索引暂不可用）"
+            : legacy == null ? "在线主索引（旧版 Store 索引暂不可用）" : "在线版本索引";
+        var versions = primary == null ? new List<BedrockVersionInfo>() : ParseReversedMeta(primary);
+        var old = legacy == null ? new List<BedrockVersionInfo>() : ParseVersionDbMin(legacy);
+        if (versions.Count == 0) return old;
+        MergeLegacyVersions(versions, old);
+        return FilterAndSort(versions, BedrockClientChannel.Stable)
+            .Concat(FilterAndSort(versions, BedrockClientChannel.Preview)).ToList();
     }
 
-    private static async Task<string?> FetchJsonWithMirrorsAsync(string primary, string[] mirrors, CancellationToken ct)
+    private static async Task<string?> FetchJsonWithMirrorsAsync(string primary, string[] mirrors,
+        CancellationToken ct, Func<string, bool> valid)
     {
-        foreach (var url in new[] { primary }.Concat(mirrors))
+        ct.ThrowIfCancellationRequested();
+        using var requests = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        requests.CancelAfter(TimeSpan.FromSeconds(10));
+        // Only the actual upstream and its established CDN hosts are used for the index race.
+        // Arbitrary proxy error pages must never be accepted as a successful JSON index.
+        var pending = new[] { primary }.Concat(mirrors.Take(3)).Select(async url =>
         {
             try
             {
                 using var http = CreateHttp();
-                http.Timeout = TimeSpan.FromSeconds(12);
-                var json = await http.GetStringAsync(url, ct);
-                if (!string.IsNullOrWhiteSpace(json)) return json;
+                var json = await http.GetStringAsync(url, requests.Token);
+                return valid(json) ? json : null;
             }
-            catch
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception error) when (error is HttpRequestException or JsonException or OperationCanceledException) { return null; }
+        }).ToList();
+        try
+        {
+            while (pending.Count > 0)
             {
-                // 试下一个源
+                var completed = await Task.WhenAny(pending);
+                pending.Remove(completed);
+                var json = await completed;
+                if (json != null) return json;
             }
+            ct.ThrowIfCancellationRequested();
+            return null;
         }
-        return null;
+        finally
+        {
+            requests.Cancel();
+            // Observe all losing requests after cancellation; no abandoned failing tasks.
+            try { await Task.WhenAll(pending); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { }
+        }
     }
 
     // ==================== 解析 ====================
-
     private static List<BedrockVersionInfo> ParseVersionDb(string json)
-    {
-        var versions = new List<BedrockVersionInfo>();
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return versions;
-
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                var uuid = item.TryGetProperty("uuid", out var u) ? u.GetString() ?? "" : "";
-                var name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                var baseVer = item.TryGetProperty("base", out var b) ? b.GetString() : null;
-                var url = item.TryGetProperty("url", out var urlProp)
-                    ? (urlProp.ValueKind == JsonValueKind.String ? urlProp.GetString() : null)
-                    : null;
-
-                var directUrl = item.TryGetProperty("directUrl", out var directProp)
-                    && (directProp.ValueKind == JsonValueKind.True || (directProp.ValueKind == JsonValueKind.String && directProp.GetString() == "True"));
-
-                DateTime? date = null;
-                if (item.TryGetProperty("date", out var d) && d.ValueKind == JsonValueKind.String)
-                    if (DateTime.TryParse(d.GetString(), out var dt))
-                        date = dt;
-
-                if (string.IsNullOrEmpty(uuid) || string.IsNullOrEmpty(name))
-                    continue;
-
-                versions.Add(new BedrockVersionInfo(uuid, name, baseVer, date, DetectChannel(name, baseVer), url, directUrl));
-            }
-        }
-        catch { /* 解析失败返回空 */ }
-        return versions;
-    }
-
-    private static BedrockClientChannel DetectChannel(string name, string? baseVersion)
-    {
-        var check = (name + " " + (baseVersion ?? "")).ToLowerInvariant();
-        if (check.Contains("preview") || check.Contains("beta") || check.Contains("预览"))
-            return BedrockClientChannel.Preview;
-        return BedrockClientChannel.Stable;
-    }
-
-    /// <summary>
-    /// 解析 reversedcodes/minecraft-bedrock-meta-database 的版本列表：
-    /// { "version": { "latest": {...}, "versions": { "gdk": {"release":[], "preview":[]}, "uwp": {...} } } }
-    /// gdk 通道才有 1.26.x（有微软官方直链元数据）；uwp 是老通道（最新仍停留在 1.21.x，走 Store 路径）。
-    /// </summary>
+        => FromCatalog(BedrockVersionCatalog.ParseCache(json));
     private static List<BedrockVersionInfo> ParseReversedMeta(string json)
-    {
-        var versions = new List<BedrockVersionInfo>();
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (!doc.RootElement.TryGetProperty("version", out var versionNode)) return versions;
-            if (!versionNode.TryGetProperty("versions", out var all)) return versions;
-
-            if (all.TryGetProperty("gdk", out var gdk))
-            {
-                AddList(gdk, "release", BedrockClientChannel.Stable, directUrl: true);
-                AddList(gdk, "preview", BedrockClientChannel.Preview, directUrl: true);
-            }
-            if (all.TryGetProperty("uwp", out var uwp))
-            {
-                AddList(uwp, "release", BedrockClientChannel.Stable, directUrl: false);
-                AddList(uwp, "preview", BedrockClientChannel.Preview, directUrl: false);
-            }
-        }
-        catch { /* 解析失败返回空 */ }
-        return versions;
-
-        void AddList(JsonElement obj, string prop, BedrockClientChannel channel, bool directUrl)
-        {
-            if (!obj.TryGetProperty(prop, out var arr) || arr.ValueKind != JsonValueKind.Array) return;
-            foreach (var item in arr.EnumerateArray())
-            {
-                var name = item.GetString();
-                if (string.IsNullOrWhiteSpace(name)) continue;
-                versions.Add(new BedrockVersionInfo("", name, name, null, channel, null, directUrl));
-            }
-        }
-    }
-
-    /// <summary>
-    /// 解析老源 mc-w10-versiondb 的 versions.json.min：
-    /// [[name, uuid, isBeta], ...]，isBeta: 0=正式版, 1=预览版, 2=预览版（1.21.50 预览之后）。
-    /// 该源已停止维护（最高 1.21.x），只作为新源的补充和兜底。
-    /// </summary>
+        => FromCatalog(BedrockVersionCatalog.ParseMetadata(json));
     private static List<BedrockVersionInfo> ParseVersionDbMin(string json)
-    {
-        var versions = new List<BedrockVersionInfo>();
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return versions;
+        => FromCatalog(BedrockVersionCatalog.ParseLegacy(json));
 
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                if (item.ValueKind != JsonValueKind.Array || item.GetArrayLength() < 2) continue;
-                var name = item[0].ValueKind == JsonValueKind.String ? item[0].GetString() : null;
-                var uuid = item[1].ValueKind == JsonValueKind.String ? item[1].GetString() : null;
-                if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(uuid)) continue;
-
-                var isBeta = item.GetArrayLength() > 2 && item[2].ValueKind == JsonValueKind.Number && item[2].GetInt32() > 0;
-                var channel = isBeta ? BedrockClientChannel.Preview : BedrockClientChannel.Stable;
-                versions.Add(new BedrockVersionInfo(uuid, name, name, null, channel));
-            }
-        }
-        catch { /* 解析失败返回空 */ }
-        return versions;
-    }
-
-    /// <summary>
-    /// 把老源的版本合并进新源列表：新列表里没有的稳定版补进去（保留其 FE3 UUID）；
-    /// 名称相同的把老源的 UUID 填进新条目（新源不提供 UUID，老版本下载时 Store 路径需要它）。
-    /// 老源的预览版数量多且多为已失效的短命版本，不合并。
-    /// </summary>
     private static void MergeLegacyVersions(List<BedrockVersionInfo> target, List<BedrockVersionInfo> legacy)
     {
-        foreach (var lv in legacy)
-        {
-            if (lv.Channel != BedrockClientChannel.Stable) continue;
-
-            var existing = target.FirstOrDefault(t => t.Channel == lv.Channel
-                && string.Equals(t.Name, lv.Name, StringComparison.OrdinalIgnoreCase));
-            if (existing != null)
-            {
-                if (string.IsNullOrEmpty(existing.Uuid) && !string.IsNullOrEmpty(lv.Uuid))
-                {
-                    var idx = target.IndexOf(existing);
-                    target[idx] = existing with { Uuid = lv.Uuid };
-                }
-            }
-            else
-            {
-                target.Add(lv);
-            }
-        }
+        var merged = BedrockVersionCatalog.MergeMetadataAndLegacy(ToCatalog(target), ToCatalog(legacy));
+        target.Clear();
+        target.AddRange(FromCatalog(merged));
     }
 
     // ==================== 内置回退列表 ====================
 
     /// <summary>
-    /// 当所有网络源都失败、且本地没有缓存时，用这个内置的精简列表兜底。
-    /// 覆盖 1.16~1.21 的主流正式版和预览版，保证用户至少能选到常见版本。
+    /// 所有网络源失败且没有可用缓存时，读取已核对真实上游数据的索引快照。
     /// </summary>
     private static List<BedrockVersionInfo> GetBuiltinVersions()
     {
-        // 这些是 mc-w10-versiondb 中比较有代表性的版本 UUID
-        // 日期和 URL 留空，下载时会走 FE3 API 换直链
-        return new List<BedrockVersionInfo>
-        {
-            // === 正式版 ===
-            // 1.26.x 起官方切换到 GDK 通道（旧 UWP 应用停止更新），
-            // DirectUrlAvailable=true 表示下载时先拉 reversedcodes 元数据拿微软官方直链
-            new("", "1.26.40.5", "1.26.40.5", new DateTime(2025, 6, 10), BedrockClientChannel.Stable, null, true),
-            new("", "1.26.0",    "1.26.0",    new DateTime(2025, 4, 8),  BedrockClientChannel.Stable, null, true),
-            new("b9fb060a-09c6-4de0-8827-ee4e544f0b50", "1.21.30", "1.21.30", new DateTime(2024, 9, 24), BedrockClientChannel.Stable),
-            new("c54cfbc7-2e74-4f87-9c26-2f3c29c755a1", "1.21.23", "1.21.23", new DateTime(2024, 9, 10), BedrockClientChannel.Stable),
-            new("3d22c64b-8e31-41d5-b3b2-e4f2f1f8f3a9", "1.21.21", "1.21.21", new DateTime(2024, 8, 20), BedrockClientChannel.Stable),
-            new("2a7d7c7e-7f35-4b1e-9b71-3e9e6f3e1b8d", "1.21.20", "1.21.20", new DateTime(2024, 8, 13), BedrockClientChannel.Stable),
-            new("9c4f3b2a-1e6d-4c8f-b7a3-2e5d8c6f4b1a", "1.21.3",  "1.21.3",  new DateTime(2024, 7, 9),  BedrockClientChannel.Stable),
-            new("8b3e2a1d-5c7f-4e9b-a2d1-6f3e5c7b9a2d", "1.21.2",  "1.21.2",  new DateTime(2024, 7, 2),  BedrockClientChannel.Stable),
-            new("7a2d1c5e-8b3f-4a9d-c1e5-7b3a9f2d1c5e", "1.21.1",  "1.21.1",  new DateTime(2024, 6, 20), BedrockClientChannel.Stable),
-            new("6f1e9b2c-7a3d-4e5f-b1c9-8a2d4e6f1b3c", "1.21.0",  "1.21.0",  new DateTime(2024, 6, 13), BedrockClientChannel.Stable),
-            new("5e0d8a1b-6c2e-4f3d-a0b8-7c1e5a3d9f2b", "1.20.81", "1.20.81", new DateTime(2024, 4, 30), BedrockClientChannel.Stable),
-            new("4d9c7f0a-5b1d-4e2c-9f7a-6b0d4c8e2a1f", "1.20.80", "1.20.80", new DateTime(2024, 4, 23), BedrockClientChannel.Stable),
-            new("3c8b6e9f-4a0c-4d1b-8e6f-5a9c3b7d1e0a", "1.20.73", "1.20.73", new DateTime(2024, 4, 9),  BedrockClientChannel.Stable),
-            new("2b7a5d8e-3c9b-4c0a-7d5e-4a8b2c6e0d9f", "1.20.72", "1.20.72", new DateTime(2024, 4, 2),  BedrockClientChannel.Stable),
-            new("1a694c7d-2b8a-4b9f-6c4d-3a7b1c5e9c8e", "1.20.71", "1.20.71", new DateTime(2024, 3, 26), BedrockClientChannel.Stable),
-            new("0f583b6c-1a79-4a8e-5b3c-2a6a0b4d8b7d", "1.20.70", "1.20.70", new DateTime(2024, 3, 19), BedrockClientChannel.Stable),
-            new("e9472a5b-0f68-4f7d-4a2b-1a5f9a3c7a6c", "1.20.62", "1.20.62", new DateTime(2024, 2, 27), BedrockClientChannel.Stable),
-            new("d836195a-e957-4e6c-391a-0a4e890b6a5b", "1.20.60", "1.20.60", new DateTime(2024, 2, 13), BedrockClientChannel.Stable),
-            new("c7250849-d846-4d5b-2809-f93d7805a94a", "1.20.50", "1.20.50", new DateTime(2023, 12, 12), BedrockClientChannel.Stable),
-            new("b614f738-c735-4c4a-1708-e82c6704a839", "1.20.41", "1.20.41", new DateTime(2023, 11, 28), BedrockClientChannel.Stable),
-            new("a503e627-b624-4b39-0607-d71b5603a728", "1.20.40", "1.20.40", new DateTime(2023, 11, 21), BedrockClientChannel.Stable),
-            new("9402d516-a513-4a28-9506-c60a4502a617", "1.20.32", "1.20.32", new DateTime(2023, 11, 7),  BedrockClientChannel.Stable),
-            new("83f1c405-9402-4917-8405-b50f34019506", "1.20.31", "1.20.31", new DateTime(2023, 10, 31), BedrockClientChannel.Stable),
-            new("72e0b394-8301-4806-7304-a40e23008405", "1.20.30", "1.20.30", new DateTime(2023, 10, 24), BedrockClientChannel.Stable),
-            new("61d0a283-7200-4705-6203-930d12007304", "1.20.15", "1.20.15", new DateTime(2023, 9, 19), BedrockClientChannel.Stable),
-            new("50c09172-61f0-4604-5102-820c01006203", "1.20.14", "1.20.14", new DateTime(2023, 9, 12), BedrockClientChannel.Stable),
-            new("4fb08061-50e0-4503-4001-710b00005102", "1.20.13", "1.20.13", new DateTime(2023, 9, 5),  BedrockClientChannel.Stable),
-            new("3ea07f50-4fd0-4402-3f00-600a9f004001", "1.20.12", "1.20.12", new DateTime(2023, 8, 29), BedrockClientChannel.Stable),
-            new("2d906e3f-3ec0-4301-2e00-5f098e003000", "1.20.10", "1.20.10", new DateTime(2023, 8, 15), BedrockClientChannel.Stable),
-            new("1c805d2e-2db0-4200-1d00-4e087d002000", "1.20.1",  "1.20.1",  new DateTime(2023, 6, 21), BedrockClientChannel.Stable),
-            new("0b704c1d-1ca0-4100-0c00-3d076c001000", "1.20.0",  "1.20.0",  new DateTime(2023, 6, 7),  BedrockClientChannel.Stable),
-            new("9a603b0c-0b90-3000-0b00-2c065b000900", "1.19.83", "1.19.83", new DateTime(2023, 5, 17), BedrockClientChannel.Stable),
-            new("89502a0b-9a80-2000-9a00-1b054a000800", "1.19.81", "1.19.81", new DateTime(2023, 4, 26), BedrockClientChannel.Stable),
-            new("7840190a-8970-1000-8900-0a0439000700", "1.19.80", "1.19.80", new DateTime(2023, 4, 19), BedrockClientChannel.Stable),
-            new("67300809-7860-0000-7800-090328000600", "1.19.73", "1.19.73", new DateTime(2023, 3, 29), BedrockClientChannel.Stable),
-            new("5620f708-6750-9000-6700-080217000500", "1.19.72", "1.19.72", new DateTime(2023, 3, 22), BedrockClientChannel.Stable),
-            new("4510e607-5640-8000-5600-070106000400", "1.19.71", "1.19.71", new DateTime(2023, 3, 15), BedrockClientChannel.Stable),
-            new("3400d506-4530-7000-4500-0600f5000300", "1.19.70", "1.19.70", new DateTime(2023, 3, 8),  BedrockClientChannel.Stable),
-            new("23f0c405-3420-6000-3400-0500e4000200", "1.19.63", "1.19.63", new DateTime(2023, 2, 22), BedrockClientChannel.Stable),
-            new("12e0b304-2310-5000-2300-0400d3000100", "1.19.62", "1.19.62", new DateTime(2023, 2, 15), BedrockClientChannel.Stable),
-            new("01d0a203-1200-4000-1200-0300c2000000", "1.19.60", "1.19.60", new DateTime(2023, 2, 8),  BedrockClientChannel.Stable),
-            new("f0c09102-0100-3000-0100-0200b1000000", "1.19.51", "1.19.51", new DateTime(2022, 12, 13), BedrockClientChannel.Stable),
-            new("e0b08001-f000-2000-f000-0100a0000000", "1.19.50", "1.19.50", new DateTime(2022, 11, 29), BedrockClientChannel.Stable),
-            new("d0a07000-e000-1000-e000-000090000000", "1.19.41", "1.19.41", new DateTime(2022, 11, 1),  BedrockClientChannel.Stable),
-            new("c0906000-d000-0000-d000-000080000000", "1.19.40", "1.19.40", new DateTime(2022, 10, 25), BedrockClientChannel.Stable),
-            new("b0805000-c000-0000-c000-000070000000", "1.19.31", "1.19.31", new DateTime(2022, 10, 4),  BedrockClientChannel.Stable),
-            new("a0704000-b000-0000-b000-000060000000", "1.19.30", "1.19.30", new DateTime(2022, 9, 20), BedrockClientChannel.Stable),
-            new("90603000-a000-0000-a000-000050000000", "1.19.22", "1.19.22", new DateTime(2022, 9, 6),  BedrockClientChannel.Stable),
-            new("80502000-9000-0000-9000-000040000000", "1.19.21", "1.19.21", new DateTime(2022, 8, 30), BedrockClientChannel.Stable),
-            new("70401000-8000-0000-8000-000030000000", "1.19.20", "1.19.20", new DateTime(2022, 8, 23), BedrockClientChannel.Stable),
-            new("60300000-7000-0000-7000-000020000000", "1.19.11", "1.19.11", new DateTime(2022, 7, 26), BedrockClientChannel.Stable),
-            new("50200000-6000-0000-6000-000010000000", "1.19.10", "1.19.10", new DateTime(2022, 7, 12), BedrockClientChannel.Stable),
-            new("40100000-5000-0000-5000-000000000000", "1.19.2",  "1.19.2",  new DateTime(2022, 6, 22), BedrockClientChannel.Stable),
-            new("30000000-4000-0000-4000-000000000000", "1.19.1",  "1.19.1",  new DateTime(2022, 6, 7),  BedrockClientChannel.Stable),
-            new("20000000-3000-0000-3000-000000000000", "1.19.0",  "1.19.0",  new DateTime(2022, 6, 7),  BedrockClientChannel.Stable),
-            new("10000000-2000-0000-2000-000000000000", "1.18.30", "1.18.30", new DateTime(2022, 4, 19), BedrockClientChannel.Stable),
-            new("00000000-1000-0000-1000-000000000000", "1.18.12", "1.18.12", new DateTime(2022, 3, 15), BedrockClientChannel.Stable),
-
-            // === 预览版 ===
-            new("", "1.26.50.24 Preview", "1.26.50.24", new DateTime(2025, 6, 18), BedrockClientChannel.Preview, null, true),
-            new("", "1.26.10.20 Preview", "1.26.10.20", new DateTime(2025, 4, 15), BedrockClientChannel.Preview, null, true),
-            new("a1b2c3d4-e5f6-7890-abcd-ef1234567890", "1.21.30.04 Preview", "1.21.30.04", new DateTime(2024, 9, 25), BedrockClientChannel.Preview),
-            new("b2c3d4e5-f6a7-8901-bcde-f12345678901", "1.21.20.03 Preview", "1.21.20.03", new DateTime(2024, 8, 14), BedrockClientChannel.Preview),
-            new("c3d4e5f6-a7b8-9012-cdef-123456789012", "1.21.10.03 Preview", "1.21.10.03", new DateTime(2024, 6, 14), BedrockClientChannel.Preview),
-            new("d4e5f6a7-b8c9-0123-def1-234567890123", "1.21.0.26 Preview",  "1.21.0.26",  new DateTime(2024, 5, 30), BedrockClientChannel.Preview),
-            new("e5f6a7b8-c9d0-1234-ef12-345678901234", "1.20.80.05 Preview", "1.20.80.05", new DateTime(2024, 4, 24), BedrockClientChannel.Preview),
-            new("f6a7b8c9-d0e1-2345-f123-456789012345", "1.20.70.05 Preview", "1.20.70.05", new DateTime(2024, 3, 20), BedrockClientChannel.Preview),
-            new("07b8c9d0-e1f2-3456-0123-567890123456", "1.20.60.04 Preview", "1.20.60.04", new DateTime(2024, 2, 14), BedrockClientChannel.Preview),
-            new("18c9d0e1-f2a3-4567-1234-678901234567", "1.20.50.03 Preview", "1.20.50.03", new DateTime(2023, 12, 13), BedrockClientChannel.Preview),
-            new("29d0e1f2-a3b4-5678-2345-789012345678", "1.20.40.04 Preview", "1.20.40.04", new DateTime(2023, 11, 22), BedrockClientChannel.Preview),
-            new("3ae1f2a3-b4c5-6789-3456-890123456789", "1.20.30.04 Preview", "1.20.30.04", new DateTime(2023, 10, 25), BedrockClientChannel.Preview),
-            new("4bf2a3b4-c5d6-7890-4567-901234567890", "1.20.20.01 Preview", "1.20.20.01", new DateTime(2023, 9, 27), BedrockClientChannel.Preview),
-            new("5ca3b4c5-d6e7-8901-5678-012345678901", "1.20.10.25 Preview", "1.20.10.25", new DateTime(2023, 6, 15), BedrockClientChannel.Preview),
-            new("6db4c5d6-e7f8-9012-6789-123456789012", "1.20.0.25 Preview",  "1.20.0.25",  new DateTime(2023, 5, 31), BedrockClientChannel.Preview),
-            new("7ec5d6e7-f8a9-0123-7890-234567890123", "1.19.80.05 Preview", "1.19.80.05", new DateTime(2023, 4, 20), BedrockClientChannel.Preview),
-            new("8fd6e7f8-a9b0-1234-8901-345678901234", "1.19.70.05 Preview", "1.19.70.05", new DateTime(2023, 3, 9),  BedrockClientChannel.Preview),
-            new("90e7f8a9-b0c1-2345-9012-456789012345", "1.19.60.04 Preview", "1.19.60.04", new DateTime(2023, 2, 9),  BedrockClientChannel.Preview),
-            new("a1f8a9b0-c1d2-3456-0123-567890123456", "1.19.50.03 Preview", "1.19.50.03", new DateTime(2022, 12, 14), BedrockClientChannel.Preview),
-            new("b2a9b0c1-d2e3-4567-1234-678901234567", "1.19.40.04 Preview", "1.19.40.04", new DateTime(2022, 11, 2),  BedrockClientChannel.Preview),
-            new("c3b0c1d2-e3f4-5678-2345-789012345678", "1.19.30.04 Preview", "1.19.30.04", new DateTime(2022, 9, 21), BedrockClientChannel.Preview),
-            new("d4c1d2e3-f4a5-6789-3456-890123456789", "1.19.20.02 Preview", "1.19.20.02", new DateTime(2022, 8, 24), BedrockClientChannel.Preview),
-            new("e5d2e3f4-a5b6-7890-4567-901234567890", "1.19.10.03 Preview", "1.19.10.03", new DateTime(2022, 7, 13), BedrockClientChannel.Preview),
-            new("f6e3f4a5-b6c7-8901-5678-012345678901", "1.19.0.28 Preview",  "1.19.0.28",  new DateTime(2022, 6, 8),  BedrockClientChannel.Preview),
-            new("07f4a5b6-c7d8-9012-6789-123456789012", "1.18.30.04 Preview", "1.18.30.04", new DateTime(2022, 4, 20), BedrockClientChannel.Preview),
-        };
+        // Snapshot of the real upstream indexes, including only their actual IDs. No guessed
+        // UUID or fabricated release date is used when the network is unavailable.
+        using var stream = typeof(BedrockClientDownloadService).Assembly.GetManifestResourceStream(
+            "XCL2.App.Resources.Data.BedrockClientVersionsFallback.json");
+        if (stream == null) return new();
+        using var reader = new StreamReader(stream);
+        return ParseVersionDb(reader.ReadToEnd());
     }
 
     // ==================== 本地缓存 ====================
@@ -469,9 +280,14 @@ public class BedrockClientDownloadService
         try
         {
             Directory.CreateDirectory(App.DataDir);
-            var arr = versions.Select(v => new { v.Uuid, v.Name, v.BaseVersion, v.Date, v.Channel, v.Url, v.DirectUrlAvailable });
-            var json = JsonSerializer.Serialize(arr, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(CachedVersionDbPath, json);
+            var json = BedrockVersionCatalog.SerializeCache(ToCatalog(versions));
+            var temporary = CachedVersionDbPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(temporary, json);
+                File.Move(temporary, CachedVersionDbPath, overwrite: true);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         catch { /* 缓存失败不阻断 */ }
     }
@@ -481,9 +297,10 @@ public class BedrockClientDownloadService
     public async Task<string> DownloadClientAsync(BedrockVersionInfo version, string targetDir,
         IProgress<ProgressInfo>? progress, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         // 0. 已经装过同版本（解压目录里能找到可执行文件）：直接复用，避免重复下载
         var extractDir = Path.Combine(targetDir, "extracted");
-        if (FindClientExe(targetDir) != null)
+        if (IsClientInstallationComplete(targetDir))
         {
             progress?.Report(new ProgressInfo($"已安装 {version.Name}，无需重复下载", 1, 1, targetDir));
             return extractDir;
@@ -492,6 +309,7 @@ public class BedrockClientDownloadService
         // 1~3. 拿到安装包文件。多源回退只发生在"下载本身失败"（连不上/文件损坏）时；
         //      一旦某个源下载成功，就固定用它安装，绝不因为后面解压之类的问题再重新下载。
         var filePath = await ResolveAndDownloadPackageAsync(version, targetDir, progress, ct);
+        ct.ThrowIfCancellationRequested();
 
         // 下载完成 → 立即开始安装（解压）。这一步只安装、不联网、不重新下载。
         progress?.Report(new ProgressInfo("正在解压", 0, 1, ""));
@@ -501,6 +319,7 @@ public class BedrockClientDownloadService
             // 删除失败以前会整条路回退到"换源重新下载"。overwriteFiles 直接覆盖同名文件，
             // 旧版本残留的额外文件不影响运行，重下才真正浪费流量和时间。
             Directory.CreateDirectory(extractDir);
+            File.WriteAllText(Path.Combine(targetDir, IncompleteInstallationMarker), version.Name);
 
             if (BedrockDecode.GdkPackageExtractor.IsMsixvcPackage(filePath))
                 // 不直接在当前（主界面）进程里调用 ExtractAsync：MSIXVC 解码涉及大量
@@ -513,7 +332,7 @@ public class BedrockClientDownloadService
                 // 详见 BedrockExtractWorkerProcess.cs 头部注释。
                 await BedrockDecode.BedrockExtractWorkerProcess.RunAsync(filePath, extractDir, version.Channel, progress, ct);
             else
-                ExtractAppxPackage(filePath, extractDir);
+                ExtractAppxPackage(filePath, extractDir, ct);
         }
         catch (OperationCanceledException)
         {
@@ -526,6 +345,8 @@ public class BedrockClientDownloadService
                 "安装包已保存在本地，重试时会直接复用，不会重新下载。", ex);
         }
 
+        ct.ThrowIfCancellationRequested();
+        File.Delete(Path.Combine(targetDir, IncompleteInstallationMarker));
         progress?.Report(new ProgressInfo(Loc.T("Str_Common_Finish", "完成"), 1, 1, version.Name));
         return extractDir;
     }
@@ -549,7 +370,7 @@ public class BedrockClientDownloadService
     ///    其它条目的解压，最后如果有失败再统一抛出汇总信息，尽量让"重试解压"而不是"重新下载"就能
     ///    解决问题。
     /// </summary>
-    private static void ExtractAppxPackage(string packagePath, string extractDir)
+    private static void ExtractAppxPackage(string packagePath, string extractDir, CancellationToken ct)
     {
         using var archive = ZipFile.OpenRead(packagePath);
 
@@ -557,6 +378,7 @@ public class BedrockClientDownloadService
 
         foreach (var entry in archive.Entries)
         {
+            ct.ThrowIfCancellationRequested();
             // 目录条目（entry.Name 为空，只有 FullName 以 / 结尾）：appx 里目录本身通常不会
             // 单独出现，但保险起见处理一下，避免下面按文件处理时创建出一个同名"文件"。
             if (string.IsNullOrEmpty(entry.Name))
@@ -576,8 +398,9 @@ public class BedrockClientDownloadService
 
             try
             {
-                ExtractSingleEntry(entry, destPath);
+                ExtractSingleEntry(entry, destPath, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 failures.Add($"{entry.FullName}：{ex.Message}");
@@ -595,7 +418,7 @@ public class BedrockClientDownloadService
     }
 
     /// <summary>解压单个 zip 条目到目标路径，用长路径前缀绕开 Windows 260 字符 MAX_PATH 限制。</summary>
-    private static void ExtractSingleEntry(ZipArchiveEntry entry, string destPath)
+    private static void ExtractSingleEntry(ZipArchiveEntry entry, string destPath, CancellationToken ct)
     {
         var destDir = Path.GetDirectoryName(destPath);
         if (!string.IsNullOrEmpty(destDir))
@@ -605,7 +428,18 @@ public class BedrockClientDownloadService
 
         using var entryStream = entry.Open();
         using var fileStream = new FileStream(writablePath, FileMode.Create, FileAccess.Write, FileShare.None);
-        entryStream.CopyTo(fileStream);
+        var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(81920);
+        try
+        {
+            int count;
+            while ((count = entryStream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                ct.ThrowIfCancellationRequested();
+                fileStream.Write(buffer, 0, count);
+            }
+            ct.ThrowIfCancellationRequested();
+        }
+        finally { System.Buffers.ArrayPool<byte>.Shared.Return(buffer); }
 
         try
         {
@@ -662,7 +496,7 @@ public class BedrockClientDownloadService
             var urls = new List<string>();
 
             // FE3（Microsoft Store）优先：给出来的是真正可解压的 .appx。
-            var fe3Url = await ResolveDownloadUrlAsync(version.Uuid, ct);
+            var fe3Url = Guid.TryParse(version.Uuid, out _) ? await ResolveDownloadUrlAsync(version.Uuid, ct) : null;
             if (!string.IsNullOrEmpty(fe3Url))
                 urls.AddRange(EnumerateCdnMirrors(fe3Url));
 
@@ -731,7 +565,8 @@ public class BedrockClientDownloadService
     private static IEnumerable<string> GdkMetaCandidateUrls(BedrockClientChannel channel, string versionName)
     {
         var rel = channel == BedrockClientChannel.Preview ? "preview" : "release";
-        var path = $"bedrock/client/{rel}/gdk/{versionName}.json";
+        var name = System.Text.RegularExpressions.Regex.Match(versionName, @"\d+(?:\.\d+){1,3}").Value;
+        var path = $"bedrock/client/{rel}/gdk/{Uri.EscapeDataString(name)}.json";
         yield return $"https://raw.githubusercontent.com/reversedcodes/minecraft-bedrock-meta-database/main/{path}";
         yield return $"https://cdn.jsdelivr.net/gh/reversedcodes/minecraft-bedrock-meta-database@main/{path}";
         yield return $"https://fastly.jsdelivr.net/gh/reversedcodes/minecraft-bedrock-meta-database@main/{path}";
@@ -966,25 +801,10 @@ public class BedrockClientDownloadService
         http.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) XCL2-Launcher/1.0");
 
-        using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-        resp.EnsureSuccessStatusCode();
-
-        var total = resp.Content.Headers.ContentLength ?? 0;
-        await using var src = await resp.Content.ReadAsStreamAsync(ct);
-        await using var dst = File.Create(filePath);
-
-        var buffer = new byte[81920];
-        long done = 0;
-        int read;
-        while ((read = await src.ReadAsync(buffer, ct)) > 0)
-        {
-            await dst.WriteAsync(buffer.AsMemory(0, read), ct);
-            done += read;
-            if (total > 0)
-                progress?.Report(new ProgressInfo($"正在下载基岩版客户端 {versionName}",
-                    (int)(done / 1024), (int)(total / 1024),
-                    $"{done / 1048576} MB / {total / 1048576} MB"));
-        }
+        // 保留当前请求的UA与微软CDN候选，使用统一传输的分片、空闲超时、总限速及原子提交。
+        // 签名URL/认证请求不会被转发到公共镜像；外层继续验证ZIP/MSIXVC包完整性。
+        await DownloadEndpoints.DownloadFileWithFallbackAsync(http, url, preferMirror: false, filePath,
+            $"基岩版客户端 {versionName} 下载失败", progress, ct).ConfigureAwait(false);
     }
 
     /// <summary>校验文件是否为完好的安装包：MSIXVC（GDK）走魔数+头解析校验，
@@ -1081,10 +901,13 @@ public class BedrockClientDownloadService
     /// 避免因缺运行库直接闪退。
     /// </summary>
     public static async Task<Process?> LaunchClientAsync(string installDir,
-        IProgress<ProgressInfo>? progress = null)
+        IProgress<ProgressInfo>? progress = null, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (!Directory.Exists(installDir))
             throw new InvalidOperationException($"安装目录不存在：{installDir}");
+        if (File.Exists(Path.Combine(installDir, IncompleteInstallationMarker)))
+            throw new InvalidOperationException("该客户端安装尚未完成，请在下载管理中继续或重试安装后再启动。");
 
         var exe = FindClientExe(installDir);
         if (exe == null)
@@ -1093,7 +916,8 @@ public class BedrockClientDownloadService
                 "请确认客户端已正确下载并解压。");
 
         // 自动补全支持库：客户端（GDK/UWP）运行依赖 VC++ 运行库等框架包
-        await BedrockContentService.EnsureSupportLibrariesInstalledAsync(progress);
+        await BedrockContentService.EnsureSupportLibrariesInstalledAsync(progress, ct);
+        ct.ThrowIfCancellationRequested();
 
         // 优先走"真正注册进系统应用清单 + 系统激活路径启动"这条路（见
         // BedrockPackageRegistrationHelper 类头注释——这才是基岩版作为 UWP/GDK 包
@@ -1113,9 +937,10 @@ public class BedrockClientDownloadService
                 progress?.Report(new ProgressInfo("正在注册基岩版客户端到系统（首次启动该版本需要这一步）", 0, 1, ""));
                 await BedrockPackageRegistrationHelper.RegisterAndLaunchAsync(manifestSearchRoot,
                     new Progress<(int Percent, string State)>(p =>
-                        progress?.Report(new ProgressInfo($"正在注册：{p.State}", p.Percent, 100, ""))));
+                        progress?.Report(new ProgressInfo($"正在注册：{p.State}", p.Percent, 100, ""))), ct);
                 return null; // 通过 shell:AppsFolder 启动，拿不到 Process 句柄，跟 BedrockLaunchService.Launch 行为一致
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 // 注册这条路失败：明确告诉用户这是降级，不要让用户以为游戏"正常装好了"
@@ -1138,6 +963,7 @@ public class BedrockClientDownloadService
             WorkingDirectory = Path.GetDirectoryName(exe)!,
             UseShellExecute = true,
         };
+        ct.ThrowIfCancellationRequested();
         return Process.Start(psi);
     }
 

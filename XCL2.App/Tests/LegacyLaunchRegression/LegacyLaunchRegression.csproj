@@ -9,5 +9,7 @@
     <Compile Include="../../Services/LegacyMinecraftCompatibility.cs" Link="LegacyMinecraftCompatibility.cs" />
     <Compile Include="../../Services/LegacyAssetLayout.cs" Link="LegacyAssetLayout.cs" />
     <Compile Include="../../Services/JavaExecutableArchitecture.cs" Link="JavaExecutableArchitecture.cs" />
+    <Compile Include="../../Services/LegacyTouchOptions.cs" Link="LegacyTouchOptions.cs" />
+    <Compile Include="../../Services/Workbench/ProjectFiles.cs" Link="ProjectFiles.cs" />
   </ItemGroup>
 </Project>

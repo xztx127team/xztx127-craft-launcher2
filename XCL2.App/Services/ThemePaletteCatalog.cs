@@ -26,6 +26,13 @@ internal static class ThemePaletteCatalog
     internal const string SkinDune = "Dune";
     internal const string SkinMidnight = "Midnight";
 
+    internal const string SkinJade = "Jade";
+    internal const string SkinCoral = "Coral";
+    internal const string SkinOcean = "Ocean";
+    internal const string SkinLavender = "Lavender";
+    internal const string SkinSlate = "Slate";
+    internal const string SkinSunflower = "Sunflower";
+
     internal static readonly IReadOnlyDictionary<(string Hue, bool Dark), Palette> Palettes =
         new Dictionary<(string Hue, bool Dark), Palette>
         {
@@ -156,5 +163,91 @@ internal static class ThemePaletteCatalog
                 TileBlue: "#1F3453", TileIndigo: "#262E50", TileGreen: "#21392E", TileOrange: "#3D3028", TilePurple: "#312D4E",
                 SuccessText: "#8ACCA7", WarningText: "#E9C18E", WarningBanner: "#3C3020", Danger: "#F0A0AB", Divider: "#34486E",
                 ButtonBackground: "#2C406D", ButtonHoverBackground: "#3B548A", ButtonForeground: "#F2F5FF"),
+
+            // 低饱和的补充色系，每套提供独立的日间和夜间资源。
+            [(SkinJade, false)] = new Palette(
+                Accent: "#267461", AccentHover: "#195A49", Glow: "#AFD6C8", GlowSoft: "#D0E9E0",
+                Panel: "#F4FAF7", Side: "#E5F1EA", Border: "#B6D2C5", BorderHover: "#77A591",
+                TextPrimary: "#182332", TextSecondary: "#4B5869", TileBlue: "#E2ECF6", TileIndigo: "#E7E3F3",
+                TileGreen: "#E2EEE5", TileOrange: "#F4E6D7", TilePurple: "#EEE4F2", SuccessText: "#237342",
+                WarningText: "#84521D", WarningBanner: "#FFF2DC", Danger: "#AE3747", Divider: "#B6D2C5",
+                ButtonBackground: "#D0E9E0", ButtonHoverBackground: "#AFD6C8", ButtonForeground: "#21483C"),
+            [(SkinJade, true)] = new Palette(
+                Accent: "#88D1B7", AccentHover: "#ACE1CD", Glow: "#ACE1CD", GlowSoft: "#193F35",
+                Panel: "#18302A", Side: "#10221D", Border: "#365B4D", BorderHover: "#578571",
+                TextPrimary: "#F3F5FA", TextSecondary: "#BEC9D7", TileBlue: "#26394D", TileIndigo: "#33304B",
+                TileGreen: "#2A4032", TileOrange: "#45352A", TilePurple: "#3C3049", SuccessText: "#9BD9B4",
+                WarningText: "#F0C994", WarningBanner: "#45351F", Danger: "#F1A5AD", Divider: "#365B4D",
+                ButtonBackground: "#193F35", ButtonHoverBackground: "#365B4D", ButtonForeground: "#F5F7FB"),
+            [(SkinCoral, false)] = new Palette(
+                Accent: "#AE4A3D", AccentHover: "#8D382E", Glow: "#E9BCAE", GlowSoft: "#F3D7CF",
+                Panel: "#FFF7F3", Side: "#F7E7DF", Border: "#E1C2B5", BorderHover: "#B67A68",
+                TextPrimary: "#182332", TextSecondary: "#4B5869", TileBlue: "#E2ECF6", TileIndigo: "#E7E3F3",
+                TileGreen: "#E2EEE5", TileOrange: "#F4E6D7", TilePurple: "#EEE4F2", SuccessText: "#237342",
+                WarningText: "#84521D", WarningBanner: "#FFF2DC", Danger: "#AE3747", Divider: "#E1C2B5",
+                ButtonBackground: "#F3D7CF", ButtonHoverBackground: "#E9BCAE", ButtonForeground: "#632C24"),
+            [(SkinCoral, true)] = new Palette(
+                Accent: "#F3AD9B", AccentHover: "#FAC6B8", Glow: "#FAC6B8", GlowSoft: "#522B25",
+                Panel: "#30211E", Side: "#211613", Border: "#69463B", BorderHover: "#936251",
+                TextPrimary: "#F3F5FA", TextSecondary: "#BEC9D7", TileBlue: "#26394D", TileIndigo: "#33304B",
+                TileGreen: "#2A4032", TileOrange: "#45352A", TilePurple: "#3C3049", SuccessText: "#9BD9B4",
+                WarningText: "#F0C994", WarningBanner: "#45351F", Danger: "#F1A5AD", Divider: "#69463B",
+                ButtonBackground: "#522B25", ButtonHoverBackground: "#69463B", ButtonForeground: "#F5F7FB"),
+            [(SkinOcean, false)] = new Palette(
+                Accent: "#236B98", AccentHover: "#185579", Glow: "#B3D5E9", GlowSoft: "#D4E8F4",
+                Panel: "#F4F9FD", Side: "#E4EEF7", Border: "#B9CCDF", BorderHover: "#7096B5",
+                TextPrimary: "#182332", TextSecondary: "#4B5869", TileBlue: "#E2ECF6", TileIndigo: "#E7E3F3",
+                TileGreen: "#E2EEE5", TileOrange: "#F4E6D7", TilePurple: "#EEE4F2", SuccessText: "#237342",
+                WarningText: "#84521D", WarningBanner: "#FFF2DC", Danger: "#AE3747", Divider: "#B9CCDF",
+                ButtonBackground: "#D4E8F4", ButtonHoverBackground: "#B3D5E9", ButtonForeground: "#1C425D"),
+            [(SkinOcean, true)] = new Palette(
+                Accent: "#92C9EE", AccentHover: "#B6DCF6", Glow: "#B6DCF6", GlowSoft: "#203E58",
+                Panel: "#192837", Side: "#101C29", Border: "#37546D", BorderHover: "#547D9C",
+                TextPrimary: "#F3F5FA", TextSecondary: "#BEC9D7", TileBlue: "#26394D", TileIndigo: "#33304B",
+                TileGreen: "#2A4032", TileOrange: "#45352A", TilePurple: "#3C3049", SuccessText: "#9BD9B4",
+                WarningText: "#F0C994", WarningBanner: "#45351F", Danger: "#F1A5AD", Divider: "#37546D",
+                ButtonBackground: "#203E58", ButtonHoverBackground: "#37546D", ButtonForeground: "#F5F7FB"),
+            [(SkinLavender, false)] = new Palette(
+                Accent: "#6C55A0", AccentHover: "#51407D", Glow: "#CCBCE6", GlowSoft: "#E2D9F1",
+                Panel: "#F9F7FD", Side: "#EEEAF6", Border: "#CBC0DF", BorderHover: "#9982B8",
+                TextPrimary: "#182332", TextSecondary: "#4B5869", TileBlue: "#E2ECF6", TileIndigo: "#E7E3F3",
+                TileGreen: "#E2EEE5", TileOrange: "#F4E6D7", TilePurple: "#EEE4F2", SuccessText: "#237342",
+                WarningText: "#84521D", WarningBanner: "#FFF2DC", Danger: "#AE3747", Divider: "#CBC0DF",
+                ButtonBackground: "#E2D9F1", ButtonHoverBackground: "#CCBCE6", ButtonForeground: "#40305B"),
+            [(SkinLavender, true)] = new Palette(
+                Accent: "#C1ADEB", AccentHover: "#D7C8F6", Glow: "#D7C8F6", GlowSoft: "#3D3156",
+                Panel: "#282133", Side: "#1B1624", Border: "#554467", BorderHover: "#77618D",
+                TextPrimary: "#F3F5FA", TextSecondary: "#BEC9D7", TileBlue: "#26394D", TileIndigo: "#33304B",
+                TileGreen: "#2A4032", TileOrange: "#45352A", TilePurple: "#3C3049", SuccessText: "#9BD9B4",
+                WarningText: "#F0C994", WarningBanner: "#45351F", Danger: "#F1A5AD", Divider: "#554467",
+                ButtonBackground: "#3D3156", ButtonHoverBackground: "#554467", ButtonForeground: "#F5F7FB"),
+            [(SkinSlate, false)] = new Palette(
+                Accent: "#526571", AccentHover: "#3F505C", Glow: "#C3D2DA", GlowSoft: "#DCE5E9",
+                Panel: "#F6F8FA", Side: "#E9EEF1", Border: "#C0CDD5", BorderHover: "#8A9FAB",
+                TextPrimary: "#182332", TextSecondary: "#4B5869", TileBlue: "#E2ECF6", TileIndigo: "#E7E3F3",
+                TileGreen: "#E2EEE5", TileOrange: "#F4E6D7", TilePurple: "#EEE4F2", SuccessText: "#237342",
+                WarningText: "#84521D", WarningBanner: "#FFF2DC", Danger: "#AE3747", Divider: "#C0CDD5",
+                ButtonBackground: "#DCE5E9", ButtonHoverBackground: "#C3D2DA", ButtonForeground: "#2B414E"),
+            [(SkinSlate, true)] = new Palette(
+                Accent: "#B7CDD9", AccentHover: "#D1E1E9", Glow: "#D1E1E9", GlowSoft: "#31434E",
+                Panel: "#232B31", Side: "#171E23", Border: "#465963", BorderHover: "#68808D",
+                TextPrimary: "#F3F5FA", TextSecondary: "#BEC9D7", TileBlue: "#26394D", TileIndigo: "#33304B",
+                TileGreen: "#2A4032", TileOrange: "#45352A", TilePurple: "#3C3049", SuccessText: "#9BD9B4",
+                WarningText: "#F0C994", WarningBanner: "#45351F", Danger: "#F1A5AD", Divider: "#465963",
+                ButtonBackground: "#31434E", ButtonHoverBackground: "#465963", ButtonForeground: "#F5F7FB"),
+            [(SkinSunflower, false)] = new Palette(
+                Accent: "#886713", AccentHover: "#6C500D", Glow: "#E3D18F", GlowSoft: "#F1E5BA",
+                Panel: "#FFFCF1", Side: "#F6EFD9", Border: "#DFD1A2", BorderHover: "#B89C49",
+                TextPrimary: "#182332", TextSecondary: "#4B5869", TileBlue: "#E2ECF6", TileIndigo: "#E7E3F3",
+                TileGreen: "#E2EEE5", TileOrange: "#F4E6D7", TilePurple: "#EEE4F2", SuccessText: "#237342",
+                WarningText: "#84521D", WarningBanner: "#FFF2DC", Danger: "#AE3747", Divider: "#DFD1A2",
+                ButtonBackground: "#F1E5BA", ButtonHoverBackground: "#E3D18F", ButtonForeground: "#54400D"),
+            [(SkinSunflower, true)] = new Palette(
+                Accent: "#E4CB7A", AccentHover: "#F2DE9D", Glow: "#F2DE9D", GlowSoft: "#4E4020",
+                Panel: "#302A1B", Side: "#201C12", Border: "#625437", BorderHover: "#8D794B",
+                TextPrimary: "#F3F5FA", TextSecondary: "#BEC9D7", TileBlue: "#26394D", TileIndigo: "#33304B",
+                TileGreen: "#2A4032", TileOrange: "#45352A", TilePurple: "#3C3049", SuccessText: "#9BD9B4",
+                WarningText: "#F0C994", WarningBanner: "#45351F", Danger: "#F1A5AD", Divider: "#625437",
+                ButtonBackground: "#4E4020", ButtonHoverBackground: "#625437", ButtonForeground: "#F5F7FB"),
         };
 }

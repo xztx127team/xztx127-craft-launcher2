@@ -11,6 +11,8 @@
     <Compile Include="../../Services/JavaDownloadSource.cs" Link="JavaDownloadSource.cs" />
     <Compile Include="../../Services/JavaDownloadQueueService.cs" Link="JavaDownloadQueueService.cs" />
     <Compile Include="../../Services/DownloadTransferPolicy.cs" Link="DownloadTransferPolicy.cs" />
+    <Compile Include="../../Services/DownloadDisplayFormatting.cs" Link="DownloadDisplayFormatting.cs" />
+    <Compile Include="../../Models/DownloadDisplayUnit.cs" Link="DownloadDisplayUnit.cs" />
     <Compile Include="../../Services/DownloadRateLimiter.cs" Link="DownloadRateLimiter.cs" />
       <Compile Include="../../Services/DownloadTargetLock.cs" Link="DownloadTargetLock.cs" />
   </ItemGroup>

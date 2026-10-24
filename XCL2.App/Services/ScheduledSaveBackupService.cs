@@ -42,7 +42,7 @@ public sealed class ScheduledSaveBackupService : IDisposable
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    await _owner.Dispatcher.InvokeAsync(() => WorldCatalog.RequireKnown(profile.WorldPath));
+                    await _owner.Dispatcher.InvokeAsync(() => WorldCatalog.RequireBackupKnown(profile.WorldPath, _owner.ServerInstanceService.Instances.Select(s => s.Directory)));
                     var running = await _owner.Dispatcher.InvokeAsync(async () => { await _owner.ProcessManager.RefreshAsync(); return IsWorldRunning(_owner, profile.WorldPath); });
                     if (await running) continue;
                     var directory = string.IsNullOrWhiteSpace(profile.DestinationDirectory) ? Path.Combine(App.DataDir, "save_backups") : profile.DestinationDirectory;
@@ -74,6 +74,16 @@ public sealed class ScheduledSaveBackupService : IDisposable
     public static bool IsWorldRunning(MainWindow owner, string worldPath)
     {
         var full = Path.GetFullPath(worldPath);
+        if (owner.ServerInstanceService.Instances.Any(server =>
+        {
+            if (!owner.ServerProcessManager.IsRunning(server.Id)) return false;
+            try
+            {
+                var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(server.Directory));
+                return full.Equals(root, StringComparison.OrdinalIgnoreCase) || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return true; }
+        })) return true;
         return owner.ProcessManager.Running.Any(game =>
         {
             try

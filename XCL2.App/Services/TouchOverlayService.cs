@@ -158,12 +158,17 @@ public class TouchOverlayService
                     lock (Gate)
                         if (!Entries.TryGetValue(info.Pid, out var current) || !ReferenceEquals(current, entry)) return;
                     bool CanTakeOver() => info.TouchModeEnabled && !ct.IsCancellationRequested && !info.HasExited;
-                    var originalInput = info.UseOriginalTouchInput ?? TouchVersionPolicy.FromVersion(info.VersionId)
-                        ?? (TouchGameWindow.Detect(hwnd) == TouchGameBackend.Sdl);
-                    info.TouchInputRoute = originalInput ? "触控路径：26.3 T4+" : "触控路径：26.3 T4 前兼容";
+                    var versionRoute = info.UseOriginalTouchInput ?? TouchVersionPolicy.FromVersion(info.VersionId);
+                    var backend = TouchGameWindow.Detect(hwnd);
+                    var originalInput = TouchRoutePolicy.UseModern(versionRoute, backend);
+                    if (versionRoute.HasValue && originalInput != versionRoute.Value)
+                        LauncherLogService.AppendLine($"[触屏模式] 版本元数据与窗口后端 {backend} 不符，按实际后端选择输入路径。");
+                    info.TouchInputRoute = originalInput ? "触控路径：SDL3" : "触控路径：GLFW/LWJGL";
+                    var rawInputAdvice = TouchRoutePolicy.NeedsRuntimeRawInputAdvice(backend,
+                        info.TouchModeRequestedAtLaunch, info.UseOriginalTouchInput);
                     ITouchOverlayWindow overlay = originalInput
                         ? new OriginalTouchOverlayWindow(hwnd, cfg.TouchOverlayButtonScale,
-                            cfg.TouchOverlayOpacityPercent, cfg.TouchOverlayLookSensitivity, info.Pid, CanTakeOver)
+                            cfg.TouchOverlayOpacityPercent, cfg.TouchOverlayLookSensitivity, info.Pid, CanTakeOver, info.TouchWorldEvidence)
                         : new TouchOverlayWindow(hwnd, cfg.TouchOverlayButtonScale,
                             cfg.TouchOverlayOpacityPercent, cfg.TouchOverlayLookSensitivity, info.Pid, CanTakeOver,
                             info.TouchWorldEvidence);
@@ -204,6 +209,12 @@ public class TouchOverlayService
                     {
                         if (!Entries.TryGetValue(info.Pid, out var cur) || !ReferenceEquals(cur, entry)) return;
                         entry.State = TouchOverlayState.Enabled;
+                        if (rawInputAdvice) entry.Error = TouchRoutePolicy.RuntimeRawInputAdvice;
+                    }
+                    if (rawInputAdvice)
+                    {
+                        ToastService.ShowWarning("旧版运行中开启触屏：如视角不动，请在游戏鼠标设置中关闭原始输入。完整说明已显示在触摸板管理中。");
+                        LauncherLogService.AppendLine("[触屏模式] " + TouchRoutePolicy.RuntimeRawInputAdvice);
                     }
                     LauncherLogService.AppendLine($"[触屏模式] 已为版本 {info.VersionId} 加载触屏悬浮层。");
                     RaiseChanged();
@@ -219,12 +230,13 @@ public class TouchOverlayService
 
     /// <summary>当前是否有至少一个触屏悬浮层正在运行——关闭启动器前用来判断要不要弹出
     /// 触屏模式专属的关闭确认，见 MainWindow.MainWindow_Closing。</summary>
-    public static bool HasActive { get { lock (Gate) return Entries.Values.Any(e =>
+    public static bool HasActive { get { if (WindowTouchOverlayService.HasActive) return true; lock (Gate) return Entries.Values.Any(e =>
         e.State is TouchOverlayState.Starting or TouchOverlayState.Enabled); } }
 
     /// <summary>关闭当前所有悬浮层（启动器退出时调用，避免留下孤儿置顶窗口）。</summary>
     public static void CloseAll()
     {
+        WindowTouchOverlayService.CloseAll();
         List<ITouchOverlayWindow> list;
         List<Entry> entries;
         lock (Gate)

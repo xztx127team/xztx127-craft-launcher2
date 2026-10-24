@@ -26,6 +26,8 @@ public static partial class UpdateCheckService
     private const string RepoOwner = "adorable0127";
     private const string RepoName = "xztx127-craft-launcher2";
     private static readonly string LatestReleaseApi = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases/latest";
+    private static readonly string ReleaseListApi = $"https://api.github.com/repos/{RepoOwner}/{RepoName}/releases?per_page=100";
+    private static int _startupCheckScheduled;
 
     /// <summary>up-log 目录：xcl2/up-log，每次真正触发一次更新流程（用户点了"现在更新"）
     /// 就会在这里生成一个以时间戳命名的日志文件，记录从检测到（若走完流程）重启的全过程。
@@ -56,25 +58,39 @@ public static partial class UpdateCheckService
     private sealed record GithubRelease(
         [property: JsonPropertyName("tag_name")] string TagName,
         [property: JsonPropertyName("body")] string? Body,
-        [property: JsonPropertyName("assets")] List<GithubAsset>? Assets);
+        [property: JsonPropertyName("assets")] List<GithubAsset>? Assets,
+        [property: JsonPropertyName("prerelease")] bool Prerelease = false,
+        [property: JsonPropertyName("draft")] bool Draft = false);
 
-    /// <summary>供 App.xaml.cs 在主窗口显示之后调用：整个检查过程完全跑在后台线程，
-    /// 任何环节出错都只记日志、绝不弹错误打扰用户，也绝不影响主流程。</summary>
+    /// <summary>主窗口与协议流程就绪后启动：网络失败只记日志；正式版沿用提醒角标，
+    /// 用户明确加入预览计划时，新的 RC 才展示带三个选择的预览提示。</summary>
     public static void CheckForUpdateInBackground(Func<AppConfig> getConfig)
     {
-        if (App.StartupArgs.SkipUpdateCheck || !LauncherUpdatePolicy.ShouldCheckOnStartup(getConfig().CheckLauncherUpdatesOnStartup)) return;
+        bool ShouldCheck() => LauncherUpdatePolicy.ShouldCheckOnStartup(getConfig().CheckLauncherUpdatesOnStartup,
+            getConfig().EnableUserExperiencePreviewProgram, App.StartupArgs.SkipUpdateCheck);
+        if (!ShouldCheck() || Interlocked.Exchange(ref _startupCheckScheduled, 1) != 0) return;
         _ = Task.Run(async () =>
         {
             try
             {
-                // 让最耗资源的启动阶段（首帧渲染、账户刷新等）先跑完，更新检查不抢这个时间段。
                 await Task.Delay(TimeSpan.FromSeconds(5));
-                // 延迟期间用户可能已经关闭启动检查，或导入了另一份配置。
-                if (App.StartupArgs.SkipUpdateCheck || !LauncherUpdatePolicy.ShouldCheckOnStartup(getConfig().CheckLauncherUpdatesOnStartup)) return;
-                var result = await CheckForUpdateAsync(() => getConfig().EnableLauncherUpdates,
-                    () => getConfig().CheckLauncherUpdatesOnStartup, backgroundReminder: true);
-                if (result.Status is CheckStatus.Failed or CheckStatus.UpdatesDisabled)
-                    LauncherLogService.AppendLine("[自动更新] " + result.Message);
+                if (!ShouldCheck()) return;
+                // Stable reminders retain their existing preference. The explicit preview opt-in is independent.
+                if (getConfig().CheckLauncherUpdatesOnStartup)
+                {
+                    var stable = await CheckForUpdateAsync(() => getConfig().EnableLauncherUpdates,
+                        () => !App.StartupArgs.SkipUpdateCheck && getConfig().CheckLauncherUpdatesOnStartup,
+                        backgroundReminder: true, includePreviews: false);
+                    if (stable.Status == CheckStatus.Updating) return;
+                    if (stable.Status is CheckStatus.Failed or CheckStatus.UpdatesDisabled)
+                        LauncherLogService.AppendLine("[自动更新] " + stable.Message);
+                }
+                if (!App.StartupArgs.SkipUpdateCheck && getConfig().EnableUserExperiencePreviewProgram)
+                {
+                    var preview = await CheckPreviewForUpdateAsync(() => getConfig().EnableLauncherUpdates,
+                        () => !App.StartupArgs.SkipUpdateCheck && getConfig().EnableUserExperiencePreviewProgram);
+                    if (preview.Status == CheckStatus.Failed) LauncherLogService.AppendLine("[预览版更新] " + preview.Message);
+                }
             }
             catch (Exception ex)
             {
@@ -86,13 +102,13 @@ public static partial class UpdateCheckService
     /// <summary>手动与启动检查共用同一 API 和安装流程；失败与“已是最新”返回不同状态。
     /// 安装前会再次读取开关，检查期间关闭更新也不会继续下载。</summary>
     public static async Task<CheckResult> CheckForUpdateAsync(Func<bool> updatesEnabled, Func<bool>? checkStillEnabled = null,
-        bool backgroundReminder = false)
+        bool backgroundReminder = false, bool includePreviews = true)
     {
         if (!await CheckGate.WaitAsync(0))
             return new(CheckStatus.Busy, "已有更新检查或下载正在进行，请稍后再试。");
         try
         {
-            return await RunCheckAsync(updatesEnabled, checkStillEnabled, backgroundReminder);
+            return await RunCheckAsync(updatesEnabled, checkStillEnabled, backgroundReminder, includePreviews);
         }
         catch (TaskCanceledException)
         {
@@ -106,31 +122,48 @@ public static partial class UpdateCheckService
         finally { CheckGate.Release(); }
     }
 
-    private static async Task<CheckResult> RunCheckAsync(Func<bool> updatesEnabled, Func<bool>? checkStillEnabled, bool backgroundReminder)
+    private static async Task<CheckResult> RunCheckAsync(Func<bool> updatesEnabled, Func<bool>? checkStillEnabled, bool backgroundReminder,
+        bool includePreviews, bool previewOnly = false)
     {
         if (checkStillEnabled?.Invoke() == false)
             return new(CheckStatus.Skipped, "启动时检查更新已关闭。");
-        var release = await FetchLatestReleaseAsync();
-        var remoteVersion = LauncherUpdatePolicy.ExtractVersion(release.TagName);
-        var localVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
-        if (remoteVersion == null)
+        var release = await FetchLatestReleaseAsync(includePreviews, previewOnly);
+        var localVersion = await GetCurrentReleaseVersionWithChannelAsync();
+        if (release == null)
+            return new(CheckStatus.UpToDate, previewOnly ? "未发现可用的快照或预览版本。" : "未发现可用的启动器发布版本。");
+        var parsed = LauncherUpdatePolicy.ParseReleaseVersion(release.TagName, release.Prerelease);
+        if (!parsed.HasValue)
             return new(CheckStatus.Failed, $"无法识别 API 返回的版本号：{release.TagName}");
+        var remoteVersion = parsed.Value;
         if (!LauncherUpdatePolicy.IsNewer(remoteVersion, localVersion))
             return new(CheckStatus.UpToDate, $"当前 v{FormatVersion(localVersion)} 已是最新版本（API 最新 v{FormatVersion(remoteVersion)}）。");
         if (checkStillEnabled?.Invoke() == false)
-            return new(CheckStatus.Skipped, "启动时检查更新已关闭。");
+            return new(CheckStatus.Skipped, "本次启动检查已关闭。");
+        var instructionResult = await FetchReleaseInstructionsAsync(release);
+        var instructions = instructionResult.Instructions;
+        RememberRequiredRelease(release, instructions, instructionResult.Verified);
+        var asset = PickAssetForCurrentArch(release.Assets);
+        if (instructions.IsRequired(DateOnly.FromDateTime(DateTime.Now)))
+            return await OfferRequiredUpdateAsync(release, remoteVersion, localVersion, asset, instructions);
+        if ((backgroundReminder || previewOnly) && instructions.Minor)
+        {
+            if (remoteVersion.IsPreview) PublishMinorPreviewReminder(release, localVersion, updatesEnabled, instructions);
+            else PublishUpdateReminder(remoteVersion.Core, localVersion.Core, updatesEnabled, instructions);
+            return new(CheckStatus.UpdateAvailable, $"发现次要更新 {release.TagName}，仅显示提醒。");
+        }
+        if (instructions.Deadline is { } due)
+            release = release with { Body = $"请在 {due:yyyy/MM/dd} 当日结束前安装，逾期将无法跳过。\n\n" + release.Body };
+        if (remoteVersion.IsPreview)
+            return await OfferPreviewUpdateAsync(release, remoteVersion, localVersion, asset, updatesEnabled,
+                checkStillEnabled, honorSuppression: previewOnly);
         if (!updatesEnabled())
             return new(CheckStatus.UpdatesDisabled, $"发现新版本 v{FormatVersion(remoteVersion)}（当前 v{FormatVersion(localVersion)}）。启动器更新已关闭；启用并保存设置后才能下载安装。");
-
-        var asset = PickAssetForCurrentArch(release.Assets);
         if (asset == null)
-        {
             return new(CheckStatus.Failed, $"发现新版本 v{FormatVersion(remoteVersion)}，但发布中没有当前系统架构（{(Environment.Is64BitOperatingSystem ? "x64" : "x86")}）的 exe 更新包。");
-        }
 
         if (backgroundReminder)
         {
-            PublishUpdateReminder(remoteVersion, localVersion, updatesEnabled);
+            PublishUpdateReminder(remoteVersion.Core, localVersion.Core, updatesEnabled, instructions);
             return new(CheckStatus.UpdateAvailable, $"发现新版本 v{FormatVersion(remoteVersion)}，已放入提醒角标。");
         }
 
@@ -175,18 +208,65 @@ public static partial class UpdateCheckService
             updatesEnabled, checkStillEnabled);
     }
 
-    private static async Task<GithubRelease> FetchLatestReleaseAsync()
+    private static LauncherReleaseVersion GetCurrentReleaseVersion()
     {
-        using var resp = await Http.GetAsync(LatestReleaseApi);
-        if (!resp.IsSuccessStatusCode)
-        {
-            var detail = (int)resp.StatusCode is 403 or 429 ? "，GitHub API 访问受限或请求过于频繁，请稍后重试" : "";
-            throw new HttpRequestException($"更新 API 返回 HTTP {(int)resp.StatusCode}（{resp.ReasonPhrase}）{detail}。", null, resp.StatusCode);
-        }
-        var json = await resp.Content.ReadAsStringAsync();
-        return JsonSerializer.Deserialize<GithubRelease>(json)
-            ?? throw new InvalidDataException("更新 API 返回了空的版本信息。");
+        var assembly = Assembly.GetExecutingAssembly();
+        var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        return LauncherUpdatePolicy.ParseReleaseVersion(informational)
+            ?? LauncherUpdatePolicy.ParseReleaseVersion(BuildInfo.Version)
+            ?? new LauncherReleaseVersion(LauncherUpdatePolicy.ExtractVersion(assembly.GetName().Version?.ToString()) ?? new Version(0, 0, 0, 0), null);
     }
+
+    private static LauncherReleaseVersion? _currentVersionWithChannel;
+
+    private static async Task<LauncherReleaseVersion> GetCurrentReleaseVersionWithChannelAsync()
+    {
+        if (_currentVersionWithChannel.HasValue) return _currentVersionWithChannel.Value;
+        var local = GetCurrentReleaseVersion();
+        if (local.IsPreview) { _currentVersionWithChannel = local; return local; }
+        // A numeric tag may still be marked prerelease by the publisher. Resolve its channel via GitHub.
+        try
+        {
+            var releases = JsonSerializer.Deserialize<List<GithubRelease>>(await FetchReleaseJsonAsync(ReleaseListApi));
+            var ownRelease = releases?.FirstOrDefault(item => !item.Draft &&
+                (item.TagName.Equals(BuildInfo.Version, StringComparison.OrdinalIgnoreCase) ||
+                 item.TagName.Equals("v" + BuildInfo.Version, StringComparison.OrdinalIgnoreCase)));
+            if (ownRelease != null)
+                local = LauncherUpdatePolicy.ParseReleaseVersion(ownRelease.TagName, ownRelease.Prerelease) ?? local;
+            _currentVersionWithChannel = local;
+        }
+        catch (Exception ex) { LauncherLogService.AppendLine("[更新检查] 当前版本发布通道获取失败，沿用版本号判断：" + ex.Message); }
+        return local;
+    }
+
+    private static async Task<string> FetchReleaseJsonAsync(string url)
+    {
+        using var response = await Http.GetAsync(url);
+        if (!response.IsSuccessStatusCode)
+        {
+            var detail = (int)response.StatusCode is 403 or 429 ? "，GitHub API 访问受限或请求过于频繁，请稍后重试" : "";
+            throw new HttpRequestException($"更新 API 返回 HTTP {(int)response.StatusCode}（{response.ReasonPhrase}）{detail}。", null, response.StatusCode);
+        }
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    private static async Task<GithubRelease?> FetchLatestReleaseAsync(bool includePreviews, bool previewOnly)
+    {
+        if (!includePreviews)
+        {
+            var latest = JsonSerializer.Deserialize<GithubRelease>(await FetchReleaseJsonAsync(LatestReleaseApi));
+            var latestVersion = LauncherUpdatePolicy.ParseReleaseVersion(latest?.TagName, latest?.Prerelease == true);
+            if (latest != null && !latest.Draft && !latest.Prerelease && latestVersion is { IsPreview: false }) return latest;
+            // A publisher may accidentally mark an -rc tag as final. Never install it through stable-only checks.
+        }
+        var releases = JsonSerializer.Deserialize<List<GithubRelease>>(await FetchReleaseJsonAsync(ReleaseListApi))
+            ?? throw new InvalidDataException("更新 API 返回了空的版本列表。");
+        var selectedTag = LauncherUpdatePolicy.PickReleaseTag(
+            releases.Select(release => (release.TagName, release.Prerelease, release.Draft)), includePreviews, previewOnly);
+        return selectedTag == null ? null : releases.First(release => release.TagName == selectedTag);
+    }
+
+    private static string FormatVersion(LauncherReleaseVersion version) => version.ToString();
 
     /// <summary>程序集版本通常是 2.2.13.0，而 Release tag 是 2.2.14。提示里去掉末尾无意义的 .0，
     /// 让当前版本稳定显示为 2.2.13、下一版稳定显示为 2.2.14。</summary>
@@ -211,7 +291,7 @@ public static partial class UpdateCheckService
         return name == null ? null : assets?.FirstOrDefault(asset => asset.Name == name);
     }
 
-    private static async Task<CheckResult> DownloadAndApplyUpdateAsync(Version remoteVersion, Version localVersion,
+    private static async Task<CheckResult> DownloadAndApplyUpdateAsync(LauncherReleaseVersion remoteVersion, LauncherReleaseVersion localVersion,
         GithubAsset asset, string changelog, Func<bool> updatesEnabled, Func<bool>? checkStillEnabled)
     {
         var metadata = LauncherUpdateMetadata.FromAsset(asset.Size, asset.Digest);

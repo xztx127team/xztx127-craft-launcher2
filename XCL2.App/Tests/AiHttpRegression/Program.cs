@@ -44,7 +44,7 @@ foreach (var (baseUrl, expectedUrl) in new[]
     var cfg = Config(); cfg.BaseUrl = baseUrl;
     string? actualUrl = null;
     var handler = new Handler((r, n, ct) => { actualUrl = r.RequestUri!.AbsoluteUri; return Task.FromResult(Success()); });
-    var result = await Service(cfg, handler).TestModelAsync("alpha");
+    var result = await Service(cfg, handler).TestModelAsync("alpha", exactTarget: false);
     Assert(result.Ok && actualUrl == expectedUrl && handler.Requests.Count == 1, "full endpoint URL is normalized before HTTP");
 }
 // Local unauthenticated endpoints are usable for both common and named API configurations.
@@ -76,28 +76,69 @@ foreach (var named in new[] { false, true })
     Assert(session.UsageRequests.Count == 3 && session.UsageRequests[0].TotalTokens == 0, "each attempt tracked; rejection not billed");
     Assert(AiUsageAccounting.Settings(cfg, session.UsageRequests[1].ModelKey).UsedTokens == 22, "successful usage accumulated");
 }
+// A floating/manual choice must reach the selected provider/model, not either default.
+{
+    var cfg = Config(true);
+    cfg.CustomModels.Add(new() { Id = "beta", DisplayName = "Chosen model", ProviderId = "second", Tier = AiModelTier.Normal });
+    var handler = new Handler((r, n, ct) => Task.FromResult(Success()));
+    var service = Service(cfg, handler);
+    cfg.SelectedModel = AiModelIds.BuildModelKey("second", "beta");
+    cfg.RoutingMode = AiRoutingMode.SpecificModel;
+    cfg.AutoModelRouting = false;
+    service.UpdateConfig(cfg);
+    await service.SendMessageAsync(service.CreateNewSession(), "use my selected model");
+    Assert(handler.Requests.Count == 1 && handler.Requests[0].Host == "two.example"
+        && handler.Requests[0].Model == "beta", "manual selection overrides normal/expert defaults and endpoint priority");
+}
+// Opting into automatic routing failover must not silently change an explicitly pinned turn.
+{
+    var cfg = Config(true);
+    cfg.SelectedModel = AiModelIds.BuildModelKey("custom", "alpha");
+    var handler = new Handler((r, n, ct) => Task.FromResult(r.RequestUri!.Host == "one.example"
+        ? Error(404, "model_not_found") : Success()));
+    var service = Service(cfg, handler);
+    await RejectsAsync<Exception>(() => service.SendMessageAsync(service.CreateNewSession(), "manual model failure"),
+        "unavailable manual choice reports an error rather than sending to another provider");
+    Assert(handler.Requests.Count == 1 && handler.Requests[0].Host == "one.example", "pinned request does not fall back");
+}
+// The new run budget must preserve user cancellation as cancellation, not mislabel it as timeout.
+{
+    var cfg = Config();
+    Assert(cfg.MaxRunMinutes == 15, "new AI configuration starts with a fifteen-minute total run budget");
+    using var cancellation = new CancellationTokenSource();
+    var handler = new Handler(async (r, n, ct) =>
+    {
+        cancellation.Cancel();
+        await Task.Delay(Timeout.Infinite, ct);
+        return Success();
+    });
+    var service = Service(cfg, handler);
+    await RejectsAsync<OperationCanceledException>(() => service.SendMessageAsync(service.CreateNewSession(), "cancel me", ct: cancellation.Token),
+        "user cancellation is not converted to a run-limit error");
+    Assert(handler.Requests.Count == 1, "cancelled run stops before retry or endpoint fallback");
+}
 // Replacing configured credentials invalidates an old working-key preference immediately.
 {
     var cfg = Config();
     var handler = new Handler((r, n, ct) => Task.FromResult(n == 1 ? Error(401, "invalid_api_key") : Success()));
     var service = Service(cfg, handler);
-    await service.TestModelAsync("alpha");
+    await service.TestModelAsync("alpha", exactTarget: false);
     cfg.ApiKey = "replacement-key"; cfg.ApiKeys.Clear(); service.UpdateConfig(cfg);
-    await service.TestModelAsync("alpha");
+    await service.TestModelAsync("alpha", exactTarget: false);
     Assert(handler.Requests.Select(r => r.Key).SequenceEqual(new[] { "key-one", "key-two", "replacement-key" }), "removed cached key is never reused");
 }
 // Explicit key failures may rotate; unrelated forbidden responses cannot exhaust credentials.
 foreach (var credentialError in new[] { false, true })
 {
     var handler = new Handler((r, n, ct) => Task.FromResult(n == 1 ? Error(403, credentialError ? "invalid_api_key" : "model access forbidden") : Success()));
-    var result = await Service(Config(true), handler).TestModelAsync("alpha");
+    var result = await Service(Config(true), handler).TestModelAsync("alpha", exactTarget: false);
     Assert(result.Ok == credentialError && handler.Requests.Count == (credentialError ? 2 : 1), "403 rotation requires a credential-specific error");
     Assert(handler.Requests.All(r => r.Host == "one.example"), "403 key retry remains scoped to its endpoint");
 }
 // A 5xx gateway error mentioning quota retries the current key, rather than discarding it.
 {
     var handler = new Handler((r, n, ct) => Task.FromResult(n == 1 ? Error(503, "upstream insufficient_quota") : Success()));
-    var result = await Service(Config(true), handler).TestModelAsync("alpha");
+    var result = await Service(Config(true), handler).TestModelAsync("alpha", exactTarget: false);
     Assert(result.Ok && handler.Requests.Select(r => r.Key).SequenceEqual(new[] { "key-one", "key-one" }), "gateway errors are transient before key classification");
 }
 // A deleted/disabled provider-scoped choice must never fall back to the first other API.
@@ -124,7 +165,7 @@ foreach (var deleted in new[] { false, true })
 // Parameter mistakes must not rotate keys or endpoints, even when the message names a model.
 {
     var handler = new Handler((r,n,ct) => Task.FromResult(Error(400, "temperature must be between 0 and 2")));
-    var result = await Service(Config(true), handler).TestModelAsync("alpha");
+    var result = await Service(Config(true), handler).TestModelAsync("alpha", exactTarget: false);
     Assert(!result.Ok && handler.Requests.Count == 1, "ordinary 400 never retries");
 }
 // Cross-interface fallback is disabled by default, then uses same model on the second endpoint when enabled.
@@ -132,7 +173,7 @@ foreach (var enabled in new[] { false, true })
 {
     var cfg = Config(enabled);
     var handler = new Handler((r,n,ct) => Task.FromResult(r.RequestUri!.Host == "one.example" ? Error(404,"model_not_found") : Success()));
-    var result = await Service(cfg, handler).TestModelAsync("alpha");
+    var result = await Service(cfg, handler).TestModelAsync("alpha", exactTarget: false);
     Assert(result.Ok == enabled && handler.Requests.Count == (enabled ? 2 : 1), "endpoint failover opt-in");
     if (enabled) Assert(handler.Requests[1].Key == "key-second" && handler.Requests[1].Model == "alpha", "fallback endpoint credentials");
 }
@@ -143,9 +184,9 @@ foreach (var enabled in new[] { false, true })
     var session = service.CreateNewSession();
     await service.SendMessageAsync(session,"hello",reasoningLevel:AiReasoningLevel.VeryHigh);
     await service.SendMessageAsync(session,"more",reasoningLevel:AiReasoningLevel.Max);
-    Assert(handler.Requests.Select(r=>r.Reasoning).SequenceEqual(new string?[] { "xhigh", null, null }), "reasoning off fallback and capability cache");
+    Assert(handler.Requests.Select(r=>r.Reasoning).SequenceEqual(new string?[] { "xhigh", null, "max" }), "reasoning omission is scoped to the requested mode");
     Assert(handler.Requests.All(r=>r.Key=="key-one"),"reasoning fallback stays on same key");
-    Assert(ToastService.Warnings.Any(w=>w.Contains("off")),"reasoning toast");
+    Assert(!ToastService.Warnings.Any(w=>w.Contains("已改为 off")),"omitting effort is not disabling provider thinking");
 }
 // Authentication errors must rotate keys without erasing the requested reasoning effort.
 {
@@ -166,14 +207,14 @@ foreach (var supports in new[] { false, true })
 {
     var cfg=Config(); cfg.StreamResponses=true;
     var handler=new Handler((r,n,ct)=>Task.FromResult(n==1?Sse("data: {\"error\":{\"code\":429,\"message\":\"insufficient_quota\"}}\n\n"):Success()));
-    var result=await Service(cfg,handler).TestModelAsync("alpha");
+    var result=await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(result.Ok && handler.Requests.Count==2,"SSE pre-output quota rotation");
 }
 foreach (var delta in new[] { "\"content\":\"<<XCL2_\"", "\"reasoning\":\"thinking\"", "\"content\":\"partial\"" })
 {
     var cfg=Config(true); cfg.StreamResponses=true;
     var handler=new Handler((r,n,ct)=>Task.FromResult(Sse("data: {\"choices\":[{\"delta\":{"+delta+"}}]}\n\ndata: {\"error\":{\"code\":503,\"message\":\"server_error\"}}\n\n")));
-    var result=await Service(cfg,handler).TestModelAsync("alpha");
+    var result=await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(!result.Ok&&handler.Requests.Count==1,"no retry after visible/reasoning/control output");
 }
 // Tool continuation and subtask calls share accounting and routing; separate purposes remain visible.
@@ -192,10 +233,10 @@ foreach (var delta in new[] { "\"content\":\"<<XCL2_\"", "\"reasoning\":\"thinki
     var key=AiModelIds.GetCatalog(cfg)[0].ModelKey;
     cfg.ModelAccounting[key]=new(){TokenQuota=300};
     var handler=new Handler((r,n,ct)=>Task.FromResult(Success()));
-    var result=await Service(cfg,handler).TestModelAsync("alpha");
+    var result=await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(result.Ok&&handler.Requests[0].MaxTokens is >0 and <=300,"quota bounds unlimited output");
     cfg.ModelAccounting[key].TokenQuota=0;
-    var blocked=await Service(cfg,handler).TestModelAsync("alpha");
+    var blocked=await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(!blocked.Ok&&handler.Requests.Count==1,"quota blocks HTTP before sending");
 }
 // Cancelling a pending request never triggers fallback.
@@ -209,14 +250,14 @@ foreach (var delta in new[] { "\"content\":\"<<XCL2_\"", "\"reasoning\":\"thinki
 {
     var cfg=Config(true);
     var handler=new Handler((r,n,ct)=>Task.FromResult(r.RequestUri!.Host=="one.example"?Error(402,"insufficient balance"):Success()));
-    var result=await Service(cfg,handler).TestModelAsync("alpha");
+    var result=await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(result.Ok&&handler.Requests.Select(r=>r.Key).SequenceEqual(new[]{"key-one","key-two","key-second"}),"exhausted endpoint fallback");
 }
 // Provider diagnostics cannot expose a key echoed in an error response.
 {
     var cfg=Config();
     var handler=new Handler((r,n,ct)=>Task.FromResult(Error(400,"Invalid parameter; auth key-one or key-two")));
-    var result=await Service(cfg,handler).TestModelAsync("alpha");
+    var result=await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(!result.Message.Contains("key-one")&&!result.Message.Contains("key-two"),"error redaction");
 }
 // Per-model output overrides the global default and is actually sent, not just checked locally.
@@ -224,7 +265,7 @@ foreach (var delta in new[] { "\"content\":\"<<XCL2_\"", "\"reasoning\":\"thinki
     var cfg=Config(); var key=AiModelIds.GetCatalog(cfg)[0].ModelKey;
     cfg.ModelAccounting[key]=new(){MaxOutputTokens=100000};
     var handler=new Handler((r,n,ct)=>Task.FromResult(Success()));
-    await Service(cfg,handler).TestModelAsync("alpha");
+    await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(handler.Requests[0].MaxTokens==100000,"per-model output override without hidden 32K cap");
 }
 // In-flight settings replacement preserves the new config and uses the request's captured prices.
@@ -234,10 +275,39 @@ foreach (var delta in new[] { "\"content\":\"<<XCL2_\"", "\"reasoning\":\"thinki
     var active=new ConfigService(); active.Config.AiAssistant=cfg; ConfigService.Active=active;
     var changed=Config(); changed.ModelAccounting[key]=new(){InputPricePerMillion=100m,OutputPricePerMillion=200m};
     var handler=new Handler((r,n,ct)=>{ active.Config.AiAssistant=changed; return Task.FromResult(Success()); });
-    await Service(cfg,handler).TestModelAsync("alpha");
+    await Service(cfg,handler).TestModelAsync("alpha", exactTarget: false);
     Assert(ReferenceEquals(active.Config.AiAssistant,changed)&&changed.ModelAccounting[key].UsedTokens==11,"current config receives usage");
     Assert(changed.ModelAccounting[key].SpentUsd==0.000014m&&changed.ModelAccounting[key].InputPricePerMillion==100m,"request price snapshot preserved");
     ConfigService.Active=null;
+}
+// A floating conversation keeps its own mode but must use the current shared quota ledger.
+// Replacing settings during its request cannot write the floating snapshot over the main config.
+{
+    var main = Config(); main.WorkMode = AiWorkMode.Plan;
+    var key = AiModelIds.GetCatalog(main)[0].ModelKey;
+    main.ModelAccounting[key] = new() { TokenQuota = 100000, InputPricePerMillion = 1m, OutputPricePerMillion = 2m };
+    var local = Config(); local.WorkMode = AiWorkMode.Build;
+    local.ModelAccounting[key] = new() { TokenQuota = 0, UsedTokens = 999 };
+    var active = new ConfigService(); active.Config.AiAssistant = main; ConfigService.Active = active;
+    var changed = Config(); changed.WorkMode = AiWorkMode.Plan;
+    changed.ModelAccounting[key] = new() { TokenQuota = 100000, InputPricePerMillion = 100m, OutputPricePerMillion = 200m };
+    var handler = new Handler((r, n, ct) => { active.Config.AiAssistant = changed; return Task.FromResult(Success()); });
+    using var service = Service(local, handler);
+    service.SharedAccountingConfigProvider = () => active.Config.AiAssistant;
+    service.SaveSharedAccounting = active.Save;
+    Assert(service.SystemPrompt.Contains(AiWorkModePolicy.BuildPrompt(AiWorkMode.Build)), "shared accounting does not replace floating Build with main Plan");
+    var result = await service.TestModelAsync("alpha", exactTarget: false);
+    Assert(result.Ok && handler.Requests.Count == 1, "floating request checks shared limits instead of its stale local ledger");
+    Assert(ReferenceEquals(active.Config.AiAssistant, changed) && changed.WorkMode == AiWorkMode.Plan && local.WorkMode == AiWorkMode.Build,
+        "floating usage preserves the latest main config and independent work modes");
+    Assert(changed.ModelAccounting[key].UsedTokens == 11 && main.ModelAccounting[key].UsedTokens == 0
+        && local.ModelAccounting[key].UsedTokens == 999 && active.Saves == 1, "floating usage updates and saves only the live shared ledger");
+    Assert(changed.ModelAccounting[key].SpentUsd == 0.000014m && changed.ModelAccounting[key].InputPricePerMillion == 100m,
+        "floating usage retains request prices without overwriting newly saved prices");
+    changed.ModelAccounting[key].TokenQuota = 11;
+    var blocked = await service.TestModelAsync("alpha", exactTarget: false);
+    Assert(!blocked.Ok && handler.Requests.Count == 1, "shared quota exhaustion blocks another floating request before HTTP");
+    ConfigService.Active = null;
 }
 // SSE usage accompanying an error is real usage and must survive a failover.
 {
@@ -1318,7 +1388,7 @@ foreach (var json in new[] { "{\"choices\":[]}}", "{\"choices\":[]}{\"choices\":
 {
     var handler = new Handler((r,n,ct) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
     { Content = new StringContent(json, Encoding.UTF8, "application/json") }));
-    var result = await Service(Config(true), handler).TestModelAsync("alpha");
+    var result = await Service(Config(true), handler).TestModelAsync("alpha", exactTarget: false);
     Assert(!result.Ok && handler.Requests.Count == 1, "invalid provider envelope does not rotate credentials or replay");
     Assert(result.Message.Contains("AI") && !result.Message.Contains("key-one"), "provider format diagnostic without credential exposure");
 }
@@ -1349,7 +1419,7 @@ foreach (var malformed in new[] { "{\"choices\":\"wrong type\"}", "{\"choices\":
 {
     var cfg = Config(true); cfg.StreamResponses = true;
     var handler = new Handler((r,n,ct) => Task.FromResult(Sse("data: " + malformed + "\n\ndata: [DONE]\n\n")));
-    var result = await Service(cfg, handler).TestModelAsync("alpha");
+    var result = await Service(cfg, handler).TestModelAsync("alpha", exactTarget: false);
     Assert(!result.Ok && handler.Requests.Count == 1 && result.Message.Contains("必须是"), "typed SSE shape failures have explicit diagnostics");
 }
 // Terminal control parsing handles braces and marker text inside JSON strings without rewriting arguments.
@@ -1947,9 +2017,11 @@ foreach (var damagedShape in new[] { "empty object", "null steps", "mismatched i
 }
 
 assertions += await BackgroundSessionCases.RunAsync();
+assertions += await ModelRequestCompatibilityCases.RunAsync();
 assertions += UnsupportedParameterPolicyCases.Run();
 assertions += ProviderParameterMemoryCases.Run();
 assertions += await UnsupportedParameterHttpCases.RunAsync();
+assertions += await AnthropicProtocolCases.RunAsync();
 
 Console.WriteLine($"PASS: {assertions} HTTP routing/accounting assertions");
 

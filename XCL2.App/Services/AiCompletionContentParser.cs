@@ -14,6 +14,10 @@ internal static class AiCompletionContentParser
         var content = message.TryGetProperty("content", out var value) ? ReadText(value) : "";
         var summary = new List<string>();
         var reasoning = new List<string>();
+        if (value.ValueKind == JsonValueKind.Array)
+            foreach (var block in value.EnumerateArray())
+                if (block.ValueKind == JsonValueKind.Object && block.TryGetProperty("type", out var blockType)
+                    && blockType.ValueKind == JsonValueKind.String && blockType.GetString() == "thinking") AddField(block, "thinking", reasoning, preserveWhitespace);
         AddField(message, "reasoning_summary", summary, preserveWhitespace);
         AddField(message, "reasoning_content", reasoning, preserveWhitespace);
         AddField(message, "reasoning", reasoning, preserveWhitespace);

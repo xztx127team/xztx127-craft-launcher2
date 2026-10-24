@@ -295,12 +295,16 @@ public partial class DownloadCenterPage : UserControl
         MapPanel.Visibility = Visibility.Collapsed;
         MapKeyMissingPanel.Visibility = Visibility.Collapsed;
         FavoritesPanel.Visibility = Visibility.Collapsed;
+        BedrockDownloadHost.Visibility = Visibility.Collapsed;
 
         switch (tag)
         {
             case "version":
                 VersionPanel.Visibility = Visibility.Visible;
                 if (_autoLoadedCategories.Add("version")) _ = FetchOnlineAsync();
+                break;
+            case "bedrock":
+                OpenBedrockDownloads();
                 break;
             case "mod":
                 ModPanel.Visibility = Visibility.Visible;
@@ -552,6 +556,7 @@ public partial class DownloadCenterPage : UserControl
         FavoriteModsHeader.Visibility = _favoriteMods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FavoriteResourcesHeader.Visibility = _favoriteResources.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         FavoriteMapsHeader.Visibility = _favoriteMaps.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        RefreshBedrockFavorites();
     }
 
     /// <summary>把一条 FavoriteItem(Mod) 还原成 UnifiedModItem 展示用（用收藏时存的快照字段，

@@ -10,6 +10,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using XCL2.App.Services;
+using XCL2.App.Models;
 
 namespace XCL2.App.Views;
 
@@ -32,7 +33,9 @@ public partial class MainWindow
     /// <summary>管理工具只放在用户主动打开的现有下载列表中。</summary>
     private void InitializeDownloadUx()
     {
-        DownloadTransferPolicy.CapacityFormatter = bytes => PresentationPreferencesService.FormatCapacity(bytes);
+        DownloadTransferPolicy.CapacityFormatter = bytes => DownloadDisplayFormatting.FormatCapacity(bytes,
+            ConfigService.Config.DownloadDisplayUnit, value => PresentationPreferencesService.FormatCapacity(value),
+            ConfigService.Config.Ux50UniformNumberSpacing);
         if (DownloadQueuePopupBorder.Child is not Grid grid) return;
         DownloadQueuePopupBorder.Width = 380;
         DownloadQueuePopupBorder.MinWidth = 320;
@@ -87,6 +90,7 @@ public partial class MainWindow
         DownloadQueuePopup.Closed += (_, _) => { _downloadActivityTimer.Stop(); ResetDownloadSpeed(); };
         ProcessManager.Changed += UpdateGameDownloadLimit;
         ConfigService.Saved += UpdateGameDownloadLimit;
+        ConfigService.Saved += RefreshDownloadDisplayUnits;
         _downloadGameMonitor = new DownloadGameActivityMonitor(
             () => BedrockLaunchService.GetRunningClientProcesses().Any(), DownloadTransferPolicy.SetGameRunning);
         UpdateGameDownloadLimit();
@@ -94,6 +98,7 @@ public partial class MainWindow
         {
             _downloadActivityTimer.Stop(); ProcessManager.Changed -= UpdateGameDownloadLimit;
             ConfigService.Saved -= UpdateGameDownloadLimit;
+            ConfigService.Saved -= RefreshDownloadDisplayUnits;
             _downloadGameMonitor?.Dispose();
             DownloadQueueService.Instance.Items.CollectionChanged -= DownloadItemsUxChanged;
             foreach (var item in DownloadQueueService.Instance.Items) item.PropertyChanged -= DownloadItemUxChanged;
@@ -105,6 +110,15 @@ public partial class MainWindow
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(UpdateGameDownloadLimit)); return; }
         _downloadGameMonitor?.Update(ConfigService.Config.ReduceDownloadSpeedWhileGaming,
             DownloadQueueService.Instance.Items.Any(item => item.IsRunning), ProcessManager.Running.Count > 0);
+    }
+    private void RefreshDownloadDisplayUnits()
+    {
+        if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
+        if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(RefreshDownloadDisplayUnits)); return; }
+        foreach (var item in DownloadQueueService.Instance.Items.Concat(DownloadQueueService.Instance.RecentCompleted).Distinct())
+            item.RefreshDisplayUnits();
+        if (_downloadSpeedText != null && _downloadSpeedSamples.Count > 0)
+            _downloadSpeedText.Text = "已观测传输 " + DownloadTransferPolicy.FormatCapacity((long)_downloadSpeedSamples.Last()) + "/秒 · 最近 60 秒";
     }
     private void DownloadItemsUxChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
     {
@@ -126,10 +140,10 @@ public partial class MainWindow
         {
             1 => item.Status == DownloadQueueItemStatus.Waiting,
             2 => item.IsRunning,
-            3 => item.Status == DownloadQueueItemStatus.Paused,
+            3 => item.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Pausing,
             4 => item.Status == DownloadQueueItemStatus.Failed,
             5 => item.Status == DownloadQueueItemStatus.Completed,
-            6 => item.Status == DownloadQueueItemStatus.Canceled,
+            6 => item.Status is DownloadQueueItemStatus.Canceled or DownloadQueueItemStatus.Canceling,
             _ => true
         };
     }
@@ -164,19 +178,37 @@ public partial class MainWindow
         var clearFilters = new MenuItem { Header = "清除搜索与筛选" };
         clearFilters.Click += (_, _) => { _downloadSearch!.Clear(); _downloadStatusFilter!.SelectedIndex = 0; _downloadTypeFilter!.SelectedIndex = 0; RefreshDownloadFilter(); };
         menu.Items.Add(clearFilters); menu.Items.Add(new Separator());
+        var selectedDisplayUnit = Enum.IsDefined(ConfigService.Config.DownloadDisplayUnit)
+            ? ConfigService.Config.DownloadDisplayUnit : DownloadDisplayUnit.Automatic;
+        var displayUnit = new MenuItem { Header = "显示单位（" + DownloadUnitLabel(selectedDisplayUnit) + "）",
+            ToolTip = "容量与速度使用相同单位；KB、MB、GB 按 1024 换算。自动沿用启动器的容量显示偏好。" };
+        foreach (var unit in Enum.GetValues<DownloadDisplayUnit>())
+        {
+            var choice = new MenuItem { Header = DownloadUnitLabel(unit), IsCheckable = true,
+                IsChecked = selectedDisplayUnit == unit };
+            choice.Click += (_, _) =>
+            {
+                ConfigService.Config.DownloadDisplayUnit = unit;
+                CheckDownloadMenuChoice(displayUnit, choice);
+                displayUnit.Header = "显示单位（" + DownloadUnitLabel(unit) + "）";
+                ConfigService.Save();
+            };
+            displayUnit.Items.Add(choice);
+        }
+        menu.Items.Add(displayUnit);
         var concurrency = new MenuItem { Header = "同时执行的任务数" };
         foreach (var limit in new[] { 0, 1, 2, 3, 4, 8 })
         {
             var choice = new MenuItem { Header = limit == 0 ? "不限制（原有行为）" : $"{limit} 个", IsCheckable = true, IsChecked = ConfigService.Config.DownloadTaskConcurrency == limit };
-            choice.Click += (_, _) => { ConfigService.Config.DownloadTaskConcurrency = limit; ConfigService.Save(); DownloadQueueService.Instance.RefreshScheduling(); };
+            choice.Click += (_, _) => { ConfigService.Config.DownloadTaskConcurrency = limit; CheckDownloadMenuChoice(concurrency, choice); ConfigService.Save(); DownloadQueueService.Instance.RefreshScheduling(); };
             concurrency.Items.Add(choice);
         }
         menu.Items.Add(concurrency);
         var speed = new MenuItem { Header = "总下载速度上限" };
         foreach (var limit in new[] { 0, 128, 512, 1024, 2048, 5120, 10240 })
         {
-            var choice = new MenuItem { Header = limit == 0 ? "不限速" : $"{limit} KiB/秒", IsCheckable = true, IsChecked = ConfigService.Config.DownloadSpeedLimitKBps == limit };
-            choice.Click += (_, _) => { ConfigService.Config.DownloadSpeedLimitKBps = limit; ConfigService.Save(); };
+            var choice = new MenuItem { Header = limit == 0 ? "不限速" : DownloadSpeedLimitLabel(limit), IsCheckable = true, IsChecked = ConfigService.Config.DownloadSpeedLimitKBps == limit };
+            choice.Click += (_, _) => { ConfigService.Config.DownloadSpeedLimitKBps = limit; CheckDownloadMenuChoice(speed, choice); ConfigService.Save(); };
             speed.Items.Add(choice);
         }
         menu.Items.Add(speed);
@@ -186,8 +218,8 @@ public partial class MainWindow
         var gamingSpeed = new MenuItem { Header = "游戏运行时的速度上限" };
         foreach (var limit in new[] { 128, 512, 1024, 2048, 5120 })
         {
-            var choice = new MenuItem { Header = $"{limit} KiB/秒", IsCheckable = true, IsChecked = ConfigService.Config.GamingDownloadSpeedLimitKBps == limit };
-            choice.Click += (_, _) => { ConfigService.Config.GamingDownloadSpeedLimitKBps = limit; ConfigService.Save(); };
+            var choice = new MenuItem { Header = DownloadSpeedLimitLabel(limit), IsCheckable = true, IsChecked = ConfigService.Config.GamingDownloadSpeedLimitKBps == limit };
+            choice.Click += (_, _) => { ConfigService.Config.GamingDownloadSpeedLimitKBps = limit; CheckDownloadMenuChoice(gamingSpeed, choice); ConfigService.Save(); };
             gamingSpeed.Items.Add(choice);
         }
         menu.Items.Add(gamingSpeed);
@@ -195,6 +227,15 @@ public partial class MainWindow
         var help = new MenuItem { Header = "下载管理帮助" };
         help.Click += (_, _) => OfflineHelpService.Show("downloads"); menu.Items.Add(help);
         owner.ContextMenu = menu; menu.PlacementTarget = owner; menu.IsOpen = true;
+    }
+    private static string DownloadUnitLabel(DownloadDisplayUnit unit)
+        => Enum.IsDefined(unit) && unit != DownloadDisplayUnit.Automatic ? unit.ToString() : "自动";
+    private string DownloadSpeedLimitLabel(int kibibytes)
+        => ConfigService.Config.DownloadDisplayUnit == DownloadDisplayUnit.Automatic
+            ? $"{kibibytes} KiB/秒" : DownloadTransferPolicy.FormatCapacity((long)kibibytes * 1024) + "/秒";
+    private static void CheckDownloadMenuChoice(MenuItem group, MenuItem selected)
+    {
+        foreach (var item in group.Items.OfType<MenuItem>()) item.IsChecked = ReferenceEquals(item, selected);
     }
     private void DownloadTaskContextMenuOpening(object sender, ContextMenuEventArgs args)
     {
@@ -215,13 +256,13 @@ public partial class MainWindow
         var explanation = new MenuItem { Header = "任务详情、备注与文件…" };
         explanation.Click += (_, _) => OpenDownloadTaskDetails(selected);
         menu.Items.Add(explanation);
-        var cleanup = new MenuItem { Header = "清理本任务的续传临时文件…", IsEnabled = !DownloadQueueService.Instance.HasActive && item.TransferObservation.HasRecordedResumableFiles };
+        var cleanup = new MenuItem { Header = "清理本任务临时缓存…", IsEnabled = !item.IsRunning && !item.IsCleaningUp };
         cleanup.Click += async (_, _) =>
         {
-            if (DownloadQueueService.Instance.HasActive) { ToastService.ShowInfo("请先等待或取消其他下载任务，再清理临时文件。"); return; }
-            if (!MessageBoxDialog.ShowConfirm("仅删除本任务记录的 .part 续传文件，下次需重新下载这些片段。已完成的文件、实例和存档均会保留。是否继续？", "清理续传文件")) return;
-            if (DownloadQueueService.Instance.HasActive) return;
-            try { var count = await DownloadQueueService.Instance.CleanupRecordedPartsAsync(selected); selected.TaskExplanation = await Task.Run(selected.TransferObservation.Summary); ToastService.ShowSuccess($"已清理 {count} 个续传临时文件"); }
+            if (selected.IsRunning || selected.IsCleaningUp) return;
+            if (!MessageBoxDialog.ShowConfirm("清理本任务记录的下载临时缓存，下次继续时重新下载未完成部分。是否继续？", "清理任务缓存")) return;
+            if (selected.IsRunning || selected.IsCleaningUp) return;
+            try { await DownloadQueueService.Instance.CleanupRecordedPartsAsync(selected); }
             catch (Exception ex) { ToastService.ShowWarning("未完成清理：" + ex.Message); }
         };
         menu.Items.Add(cleanup);
@@ -314,6 +355,8 @@ public partial class MainWindow
         {
             var stage = item.TransferStageText;
             progress.Text = item.StatusText + "\n" + item.ActivityText + (stage.Length == 0 ? "" : "\n" + stage)
+                + (string.IsNullOrWhiteSpace(item.StateReason) ? "" : "\n" + item.StateReason)
+                + (string.IsNullOrWhiteSpace(item.DetailText) ? "" : "\n" + item.DetailText)
                 + "\n" + (string.IsNullOrWhiteSpace(item.TaskExplanation) ? "完整文件会保留；临时文件能否续传由下载方式决定。" : item.TaskExplanation);
         }
         RefreshProgress();

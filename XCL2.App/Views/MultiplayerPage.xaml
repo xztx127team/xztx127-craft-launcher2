@@ -1,38 +1,167 @@
 <UserControl x:Class="XCL2.App.Views.MultiplayerPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:services="clr-namespace:XCL2.App.Services">
-    <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="24">
-        <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
-            <StackPanel MaxWidth="720" HorizontalAlignment="Left">
-                <TextBlock Text="{DynamicResource Str_Nav_Multiplayer}" FontSize="20" FontWeight="Bold" Margin="0,0,0,4"/>
-                <!-- ===== 陶瓦联机(Terracotta) ===== -->
-                <Border Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource BorderBrush2}"
-                        BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16">
+             xmlns:services="clr-namespace:XCL2.App.Services">
+    <UserControl.Resources>
+        <Style x:Key="RoomCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource SideBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="20"/>
+        </Style>
+        <Style x:Key="RoomHint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="LineHeight" Value="19"/>
+        </Style>
+        <Style x:Key="RoomAction" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="Padding" Value="13,8"/>
+            <Setter Property="Margin" Value="0,0,8,8"/>
+        </Style>
+    </UserControl.Resources>
+    <Border Background="{DynamicResource PanelBrush}" CornerRadius="12" Padding="24">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                      services:ScrollWheelBehavior.EnableFastWheel="True">
+            <StackPanel>
+                <TextBlock Text="陶瓦联机" FontSize="26" FontWeight="Bold"/>
+                <TextBlock Text="邀请朋友，进入同一个世界。" Style="{StaticResource RoomHint}" Margin="0,5,0,18"/>
+
+                <Border Style="{StaticResource RoomCard}">
                     <StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBlock Text="🧱" FontFamily="Segoe UI Emoji" FontSize="18" VerticalAlignment="Center"/>
-                            <TextBlock Text="{DynamicResource Str_Ui_Terracotta_Lan}" FontSize="16" FontWeight="Bold" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Terracotta" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="VersionText" Text="内置联机服务 · 0.4.2" Style="{StaticResource RoomHint}" Margin="0,3,12,0"/>
+                            </StackPanel>
+                            <Border Grid.Column="1" Background="{DynamicResource PanelBrush}" CornerRadius="16" Padding="12,6" VerticalAlignment="Top">
+                                <TextBlock x:Name="ServiceStatusText" Text="尚未启动" FontSize="12" FontWeight="SemiBold"/>
+                            </Border>
+                        </Grid>
+                        <TextBlock x:Name="ExecutableStatusText" Style="{StaticResource RoomHint}" Margin="0,0,0,12"/>
+                        <WrapPanel>
+                            <Button x:Name="StartServiceButton" Content="启动联机" Style="{StaticResource PrimaryButton}" Padding="18,9" Margin="0,0,8,8" Click="StartService_Click"/>
+                            <Button x:Name="RefreshStateButton" Content="刷新状态" Style="{StaticResource RoomAction}" Click="RefreshState_Click" IsEnabled="False"/>
+                            <Button x:Name="OpenProgramButton" Content="打开程序" Style="{StaticResource RoomAction}" Click="OpenProgram_Click" ToolTip="单独运行陶瓦官方程序"/>
+                            <Button x:Name="CancelOperationButton" Content="取消等待" Style="{StaticResource RoomAction}" Click="CancelOperation_Click" Visibility="Collapsed"/>
+                            <Button x:Name="ExecutableOptionsButton" Content="程序选项 ▾" Style="{StaticResource RoomAction}" Click="ExecutableOptions_Click">
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="选择其他版本…" Click="BrowseExecutable_Click"/>
+                                        <MenuItem Header="恢复内置版本" Click="ResetExecutable_Click"/>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </WrapPanel>
+                        <Border x:Name="NoticeBorder" Background="{DynamicResource PanelBrush}" CornerRadius="8" Padding="12" Margin="0,4,0,0">
+                            <TextBlock x:Name="NoticeText" Text="先启动联机，再创建房间或输入朋友分享的房间码。" Style="{StaticResource RoomHint}"/>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Grid x:Name="RoomForms" Margin="0,16,0,0" IsEnabled="False">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource RoomCard}">
+                        <StackPanel>
+                            <TextBlock Text="创建房间" FontSize="17" FontWeight="SemiBold"/>
+                            <TextBlock Text="先启动游戏并在暂停菜单选择“对局域网开放”，陶瓦会自动找到你的世界。" Style="{StaticResource RoomHint}" Margin="0,7,0,14"/>
+                            <TextBlock Text="自定义房间码（可选）" FontSize="12" Margin="0,0,0,6"/>
+                            <TextBox x:Name="CreateCodeBox" MaxLength="4096" Padding="10,8" MinHeight="36" ToolTip="留空由陶瓦生成；也可填入兼容的陶瓦房间码"/>
+                            <TextBlock Text="留空即可自动生成新的房间码。" Style="{StaticResource RoomHint}" Margin="0,6,0,14"/>
+                            <Button x:Name="CreateRoomButton" Content="创建并扫描世界" Style="{StaticResource PrimaryButton}" Padding="14,9" HorizontalAlignment="Left" Click="CreateRoom_Click"/>
                         </StackPanel>
-                        <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10">
-                            开源 P2P 联机工具，基于 EasyTier 开发，HMCL / PCL-CE / FMCL 等启动器已互通支持。
-                            已内置在本启动器中，不需要另外下载——建房、加入房间、输入房间码等操作都在
-                            陶瓦联机自己的窗口里完成，点击下方按钮即可直接启动。
-                        </TextBlock>
+                    </Border>
+                    <Border Grid.Column="2" Style="{StaticResource RoomCard}">
+                        <StackPanel>
+                            <TextBlock Text="加入朋友" FontSize="17" FontWeight="SemiBold"/>
+                            <TextBlock Text="让房主把房间码发给你，连接成功后返回游戏的多人游戏列表。" Style="{StaticResource RoomHint}" Margin="0,7,0,14"/>
+                            <DockPanel Margin="0,0,0,6">
+                                <Button DockPanel.Dock="Right" Content="粘贴" Padding="8,2" HorizontalAlignment="Right" Click="PasteRoomCode_Click"/>
+                                <TextBlock Text="房间码" FontSize="12" VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <TextBox x:Name="JoinCodeBox" MaxLength="4096" Padding="10,8" MinHeight="36" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="110"/>
+                            <TextBlock Text="游戏版本、模组与加载器需要和房主保持兼容。" Style="{StaticResource RoomHint}" Margin="0,6,0,14"/>
+                            <Button x:Name="JoinRoomButton" Content="加入房间" Style="{StaticResource PrimaryButton}" Padding="14,9" HorizontalAlignment="Left" Click="JoinRoom_Click"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
 
-                        <TextBlock x:Name="TerracottaStatusText" FontSize="12" Margin="0,0,0,10" TextWrapping="Wrap"/>
-
-                        <StackPanel Orientation="Horizontal">
-                            <Button x:Name="TerracottaLaunchBtn" Content="{DynamicResource Str_Ui_Start_Terracotta_Lan}" Style="{StaticResource PrimaryButton}"
-                                    Padding="16,8" Click="TerracottaLaunch_Click"/>
-                            <Button Content="{DynamicResource Str_Ui_Use_Another_Version}" Style="{StaticResource SecondaryButton}" Padding="12,8" Margin="10,0,0,0"
-                                    Click="TerracottaBrowse_Click" ToolTip="{DynamicResource Str_Ui_Optional_If_A_Newer_Official_Build_Is_Ou}"/>
-                            <Button x:Name="TerracottaResetBtn" Content="{DynamicResource Str_Ui_Restore_Bundled_Version}" Style="{StaticResource SecondaryButton}" Padding="12,8" Margin="10,0,0,0"
-                                    Click="TerracottaResetToBuiltin_Click" ToolTip="{DynamicResource Str_Ui_Clear_The_Manual_Path_And_Go_Back_To_The}"/>
+                <Border x:Name="CurrentRoomPanel" Style="{StaticResource RoomCard}" Margin="0,16,0,0" Visibility="Collapsed">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="RoomStateTitle" Text="联机状态" FontSize="18" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="RoomStateDescription" Style="{StaticResource RoomHint}" Margin="0,6,12,0"/>
+                            </StackPanel>
+                            <Button x:Name="LeaveRoomButton" Grid.Column="1" Content="断开联机" Style="{StaticResource RoomAction}" VerticalAlignment="Top" Click="LeaveRoom_Click"/>
+                        </Grid>
+                        <StackPanel x:Name="ShareCodePanel" Margin="0,16,0,0" Visibility="Collapsed">
+                            <TextBlock Text="房间码" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <TextBox x:Name="ShareCodeBox" IsReadOnly="True" Padding="10" TextWrapping="Wrap" MinHeight="40" MaxHeight="100" VerticalScrollBarVisibility="Auto"/>
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button Content="复制房间码" Style="{StaticResource RoomAction}" Click="CopyRoomCode_Click"/>
+                                <Button Content="复制邀请信息" Style="{StaticResource RoomAction}" Click="CopyInvitation_Click"/>
+                            </WrapPanel>
+                        </StackPanel>
+                        <StackPanel x:Name="ConnectAddressPanel" Margin="0,14,0,0" Visibility="Collapsed">
+                            <TextBlock Text="游戏连接地址" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="复制地址" Padding="12,8" Margin="8,0,0,0" Click="CopyAddress_Click"/>
+                                <TextBox x:Name="ConnectAddressBox" IsReadOnly="True" Padding="10,8"/>
+                            </DockPanel>
+                        </StackPanel>
+                        <TextBlock x:Name="LastUpdatedText" Style="{StaticResource RoomHint}" Margin="0,12,0,0"/>
+                        <StackPanel x:Name="MembersSection" Margin="0,18,0,0" Visibility="Collapsed">
+                            <TextBlock x:Name="MembersTitle" Text="房间成员" FontWeight="SemiBold" FontSize="14" Margin="0,0,0,8"/>
+                            <ItemsControl x:Name="MembersList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource PanelBrush}" CornerRadius="8" Padding="12" Margin="0,0,0,6">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    <TextBlock Text="{Binding Details}" Style="{StaticResource RoomHint}" Margin="0,4,12,0"/>
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1" Text="{Binding Status}" FontSize="12" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="180"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
                         </StackPanel>
                     </StackPanel>
                 </Border>
 
+                <Border Style="{StaticResource RoomCard}" Margin="0,16,0,0">
+                    <StackPanel>
+                        <Expander Header="高级设置" FontSize="14">
+                            <StackPanel Margin="0,14,0,0">
+                                <TextBlock Text="玩家显示名称（可选）" FontSize="12" Margin="0,0,0,6"/>
+                                <TextBox x:Name="PlayerNameBox" Padding="10,8" MaxLength="128" LostFocus="AdvancedOptions_LostFocus"/>
+                                <TextBlock Text="留空使用陶瓦默认匿名名称。修改后在下一次创建或加入时生效。" Style="{StaticResource RoomHint}" Margin="0,6,0,14"/>
+                                <TextBlock Text="附加公共节点（每行一个）" FontSize="12" Margin="0,0,0,6"/>
+                                <TextBox x:Name="PublicNodesBox" LostFocus="AdvancedOptions_LostFocus" Padding="10" AcceptsReturn="True" MinHeight="88" MaxHeight="180" MaxLength="16384" VerticalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                                <TextBlock Text="留空使用陶瓦默认节点；填写的节点将追加到默认列表。仅填写兼容的 EasyTier 地址，下次创建或加入时生效。" Style="{StaticResource RoomHint}" Margin="0,6,0,10"/>
+                                <Button Content="恢复默认节点" Style="{StaticResource RoomAction}" HorizontalAlignment="Left" Click="ResetPublicNodes_Click"/>
+                            </StackPanel>
+                        </Expander>
+                        <Border Height="1" Background="{DynamicResource BorderBrush2}" Margin="0,16"/>
+                        <Expander x:Name="LogPanel" Header="联机日志" FontSize="14">
+                            <StackPanel Margin="0,12,0,0">
+                                <WrapPanel>
+                                    <Button x:Name="ReadLogButton" Content="读取最新日志" Style="{StaticResource RoomAction}" IsEnabled="False" Click="ReadLog_Click"/>
+                                    <Button Content="复制当前日志" Style="{StaticResource RoomAction}" Click="CopyLog_Click"/>
+                                </WrapPanel>
+                                <TextBox x:Name="LogTextBox" Height="230" Padding="10" IsReadOnly="True" AcceptsReturn="True" FontFamily="Consolas" TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
+                </Border>
+                <TextBlock Text="Terracotta 0.4.2 · © burningtnt 与贡献者 · AGPL-3.0-or-later（含上游分发与 IPC 例外）" Style="{StaticResource RoomHint}" Margin="2,16,0,4"/>
             </StackPanel>
         </ScrollViewer>
     </Border>

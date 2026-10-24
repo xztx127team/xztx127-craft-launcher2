@@ -118,8 +118,13 @@ public partial class ModDetailPage : UserControl
         TitleText.Text = title;
         NameText.Text = title;
         DescriptionText.Text = string.IsNullOrWhiteSpace(description) ? "（暂无简介）" : description;
-        MetaText.Text = $"作者: {author}    下载量: {downloads}    来源: {sourceLabel}";
-        IconImage.Source = string.IsNullOrEmpty(iconUrl) ? null : new System.Windows.Media.Imaging.BitmapImage(new Uri(iconUrl));
+        MetaText.Text = $"作者 · {author}    下载 · {downloads:N0}";
+        SourceLabelText.Text = sourceLabel;
+        if (ExternalLinkService.TryGetWebUri(iconUrl, out var iconUri))
+        {
+            try { IconImage.Source = new System.Windows.Media.Imaging.BitmapImage(iconUri!); }
+            catch (Exception ex) { ErrorPresenter.LogFallback("资源图标加载失败", ex); }
+        }
         _sourceUrl = sourceUrl;
         OpenSourceButton.Visibility = string.IsNullOrEmpty(sourceUrl) ? Visibility.Collapsed : Visibility.Visible;
         UpdateFavoriteButtonText();
@@ -277,6 +282,9 @@ public partial class ModDetailPage : UserControl
         var animate = GroupsList.IsLoaded && !UiAnimationHelper.HasActivePageAncestor(GroupsList);
         if (animate) UiAnimationHelper.PrepareEntrance(GroupsList);
         GroupsList.ItemsSource = filtered;
+        VersionSummaryText.Text = filtered.Count == 0
+            ? "当前条件下没有适用文件，可调整游戏版本或开启预览版。"
+            : $"{filtered.Count} 个版本 / 加载器分组 · {filtered.Sum(group => group.EntryCount)} 个文件";
         NoResultText.Visibility = filtered.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (animate) UiAnimationHelper.StartPreparedEntrance(GroupsList);
     }
@@ -300,22 +308,13 @@ public partial class ModDetailPage : UserControl
     private void UpdateFavoriteButtonText()
     {
         FavoriteButton.Content = _isFavorite ? "★ 已收藏" : "☆ 收藏";
+        FavoriteButton.Visibility = _onFavoriteToggle == null ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) => _onBack();
 
     private void OpenSource_Click(object sender, RoutedEventArgs e)
-    {
-        if (string.IsNullOrEmpty(_sourceUrl)) return;
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_sourceUrl) { UseShellExecute = true });
-        }
-        catch (Exception ex)
-        {
-            MessageBoxDialog.ShowError(Loc.T("Str_Cs_Couldn_T_Open_Your_Browser_N", "无法打开浏览器：\n") + ex.Message, Loc.T("Str_Cs_Error", "错误"));
-        }
-    }
+        => ExternalLinkService.Open(_sourceUrl);
 
     private void CopyName_Click(object sender, RoutedEventArgs e)
     {
@@ -358,6 +357,10 @@ public partial class ModDetailPage : UserControl
             {
                 btn.IsEnabled = false;
                 try { await _onDownload(entry); }
+                catch (Exception ex)
+                {
+                    ErrorPresenter.ShowFriendlyError("无法开始下载，请查看详细信息后重试。", ex.ToString(), "下载失败");
+                }
                 finally { btn.IsEnabled = true; }
             }
         }

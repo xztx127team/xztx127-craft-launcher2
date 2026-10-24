@@ -21,7 +21,8 @@ try
     Check(!Directory.EnumerateFiles(primary, "*.tmp").Any(), "No temporary files remain after atomic writes");
 }
 finally { try { Directory.Delete(root, recursive: true); } catch { } }
-Check(LauncherExitPolicy.ShouldCloseGames(LauncherExitMode.Normal, false), "Explicit normal exit keeps existing cleanup");
+Check(!LauncherExitPolicy.ShouldCloseGames(LauncherExitMode.Normal, false), "Ordinary launcher close never implicitly kills games");
+Check(LauncherExitPolicy.ShouldCloseGames(LauncherExitMode.Normal, false, true), "Explicit close choice authorizes cleanup");
 Check(!LauncherExitPolicy.ShouldCloseGames(LauncherExitMode.Normal, true), "Explicit keep-game choice wins");
 Check(!LauncherExitPolicy.ShouldCloseGames(LauncherExitMode.PreserveGamesAfterLaunch, false), "Post-launch close preserves games without requiring touch mode");
 Check(!LauncherExitPolicy.ShouldCloseGames(LauncherExitMode.PreserveGamesForUpdate, false), "Updater exit preserves games and servers");

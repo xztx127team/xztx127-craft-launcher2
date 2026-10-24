@@ -83,4 +83,48 @@ config.PerformanceOverlayWindowWidth = 520;
 config.PerformanceOverlayStyle = "Compact";
 Require(PerformanceOverlaySettings.WindowWidth(config) == 520, "Explicit width survives style change");
 
-Console.WriteLine("Performance math, instance filtering, sort order and layout settings regression checks passed.");
+// Device settings preserve old global memory preferences until a per-device value is explicit.
+var hardwareConfig = new AppConfig { PerformanceOverlayMemoryUnit = "GB", PerformanceOverlayShowDeviceMemory = false };
+var gpuDisplay = PerformanceOverlaySettings.HardwareDisplay(hardwareConfig, "GPU");
+var npuDisplay = PerformanceOverlaySettings.HardwareDisplay(hardwareConfig, "NPU");
+Require(!gpuDisplay.ShowDedicatedMemory && !gpuDisplay.ShowSharedMemory && !npuDisplay.ShowSharedMemory,
+    "Old device-memory=false remains effective for both GPU and NPU");
+Require(gpuDisplay.DedicatedMemoryUnit == "GiB" && npuDisplay.SharedMemoryUnit == "GiB", "Old global GB hardware preference remains numerically compatible");
+hardwareConfig.PerformanceOverlayGpuShowDedicatedMemory = true;
+hardwareConfig.PerformanceOverlayGpuShowSharedMemory = false;
+hardwareConfig.PerformanceOverlayGpuDedicatedMemoryUnit = "MiB";
+hardwareConfig.PerformanceOverlayGpuUtilizationFormat = "Ratio";
+hardwareConfig.PerformanceOverlayNpuUtilizationFormat = "PercentInteger";
+hardwareConfig.PerformanceOverlayShowNpu = false;
+gpuDisplay = PerformanceOverlaySettings.HardwareDisplay(hardwareConfig, "GPU"); npuDisplay = PerformanceOverlaySettings.HardwareDisplay(hardwareConfig, "NPU");
+Require(gpuDisplay is { Show: true, ShowDedicatedMemory: true, ShowSharedMemory: false, DedicatedMemoryUnit: "MiB", UtilizationFormat: "Ratio" }
+    && npuDisplay is { Show: false, ShowDedicatedMemory: false, UtilizationFormat: "PercentInteger" }, "GPU and NPU controls do not overwrite each other");
+hardwareConfig.PerformanceOverlayNpuShowSharedMemory = true; hardwareConfig.PerformanceOverlayNpuSharedMemoryUnit = "KiB";
+Require(PerformanceOverlaySettings.HardwareDisplay(hardwareConfig, "NPU").SharedMemoryUnit == "KiB" &&
+    PerformanceOverlaySettings.HardwareDisplay(hardwareConfig, "GPU").DedicatedMemoryUnit == "MiB", "Each device and memory metric owns its unit");
+Require(PerformanceOverlaySettings.HardwareUtilizationFormat("unknown") == "Percent" &&
+    PerformanceOverlaySettings.HardwareMemoryUnit("unknown", hardwareConfig) == "Auto", "Invalid configuration formats have deterministic safe fallbacks");
+var currentCulture = System.Globalization.CultureInfo.CurrentCulture;
+System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+try
+{
+    Require(PerformanceOverlaySettings.FormatHardwareUtilization(25, "Percent") == "25.0%", "Fractional percent is labelled as a percent");
+    Require(PerformanceOverlaySettings.FormatHardwareUtilization(25.4, "PercentInteger") == "25%", "Integer percent format");
+    Require(PerformanceOverlaySettings.FormatHardwareUtilization(25, "Ratio") == "0.250（0–1）", "Ratio has explicit 0-1 scale");
+    Require(PerformanceOverlaySettings.FormatHardwareUtilization(0) == "0.0%" && PerformanceOverlaySettings.FormatHardwareMemory(0, "B") == "0 B", "True idle and zero memory remain valid");
+    foreach (var invalid in new double?[] { null, double.NaN, double.PositiveInfinity, -1, 100.01 })
+        Require(PerformanceOverlaySettings.FormatHardwareUtilization(invalid) == "暂不可用", "Unknown or invalid device usage is never a synthetic zero");
+    Require(PerformanceOverlaySettings.FormatHardwareMemory(null) == "暂不可用" && PerformanceOverlaySettings.FormatHardwareMemory(-1) == "暂不可用", "Unknown device memory is never zero");
+    Require(PerformanceOverlaySettings.FormatHardwareMemory(1, "B") == "1 B" && PerformanceOverlaySettings.FormatHardwareMemory(1024, "KiB") == "1.00 KiB"
+        && PerformanceOverlaySettings.FormatHardwareMemory(1048576, "MiB") == "1.00 MiB" && PerformanceOverlaySettings.FormatHardwareMemory(1073741824, "GiB") == "1.00 GiB", "Binary units use exact 1024 divisors and correct labels");
+    Require(PerformanceOverlaySettings.FormatHardwareMemory(1023) == "1023 B" && PerformanceOverlaySettings.FormatHardwareMemory(1024) == "1.00 KiB"
+        && PerformanceOverlaySettings.FormatHardwareMemory(1073741824) == "1.00 GiB", "Automatic units cover bytes through GiB");
+    var json = System.Text.Json.JsonSerializer.Serialize(hardwareConfig);
+    var restored = System.Text.Json.JsonSerializer.Deserialize<AppConfig>(json)!;
+    Require(PerformanceOverlaySettings.HardwareDisplay(restored, "GPU") == gpuDisplay
+        && restored.PerformanceOverlayNpuSharedMemoryUnit == "KiB", "Independent device preferences survive configuration serialization");
+}
+finally { System.Globalization.CultureInfo.CurrentCulture = currentCulture; }
+
+TemplateCases.Run();
+Console.WriteLine("Performance math, instance filtering, hardware formatting and field-template/layout regression checks passed.");

@@ -51,6 +51,9 @@ public partial class MainWindow
         return _pageNavigationGeneration != generation;
     }
 
+    /// <summary>常规插件管理入口，不依赖实验功能解锁、界面语言或简洁模式。</summary>
+    public void OpenPluginManager() => OverlayDialogService.ShowModal(new PluginManagerDialog(this));
+
     public void NavigateToApiDocumentation() => NavigateLazy(() => new PluginApiDocumentationPage());
     internal bool PluginLaunchInProgress => _isCancelLaunchState || !LaunchGameBtn.IsEnabled;
     internal PluginWindowSnapshot CopyPluginWindowSnapshot() => new(Title, WindowState.ToString(),

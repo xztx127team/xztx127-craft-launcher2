@@ -4,9 +4,8 @@
                             xmlns:local="clr-namespace:XCL2.App.Views"
                             xmlns:services="clr-namespace:XCL2.App.Services"
                             MinWidth="640" MaxWidth="640" MinHeight="560" MaxHeight="620">
- <!-- 布局跟 ExperimentalFeaturesWindow 是同一套模式：Auto 头部 + * 内容 + Auto 底部按钮条，
-      挂在 Overlay 卡片里，MinHeight 不能省（原因见 ExperimentalFeaturesWindow.xaml 顶部注释：
-      Overlay 是按内容自适应测量，没有 MinHeight 时空列表会直接塌成 0 高度）。
+ <!-- 常规插件管理弹窗：内容滚动区 + Auto 底部按钮条。
+      Overlay 是按内容自适应测量，没有 MinHeight 时空列表会直接塌成 0 高度。
       修复：原来只有"插件列表"那一块单独套了 ScrollViewer，标题/说明文字/开发命令按钮条
       （WrapPanel）不在滚动范围内——按钮一多、WrapPanel 换行变多时，这几块加起来的高度
       超过 MaxHeight 后照样会把下面的列表和底部"关闭"按钮条挤出可视区、显示不全。现在把
@@ -33,7 +32,7 @@
      <Button x:Name="RescanButton" Content="🔄 重新扫描 / 重新加载插件" Padding="10,6" Margin="0,0,8,8" Click="Rescan_Click"/>
      <Button Content="导入插件" ToolTip="支持 XCL、DLL、EXE 和 .xclplugin" Padding="10,6" Margin="0,0,8,8" Click="Import_Click"/>
      <Button x:Name="OpenDirButton" Content="📂 打开插件目录" Padding="10,6" Margin="0,0,8,8" Click="OpenDir_Click"/>
-     <Button x:Name="GenerateTemplateButton" Content="🧪 生成插件项目模板" Padding="10,6" Margin="0,0,8,8" Click="GenerateTemplate_Click"/>
+     <Button x:Name="GenerateTemplateButton" Content="生成插件项目模板" Padding="10,6" Margin="0,0,8,8" Click="GenerateTemplate_Click"/>
      <Button Content="API 设置" Padding="10,6" Margin="0,0,8,8" Click="ApiSettings_Click"/>
      <Button Content="打开升级备份" Padding="10,6" Margin="0,0,8,8" Click="OpenBackups_Click"/>
      <Button Content="恢复升级备份" Padding="10,6" Margin="0,0,8,8" Click="RestoreBackup_Click"/>

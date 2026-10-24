@@ -214,16 +214,6 @@
     "TargetText": "未完成的安装..."
   },
   {
-    "Id": "versions.ToggleInstanceFilter_Click",
-    "PageKey": "versions",
-    "Title": "筛选",
-    "Keywords": "按名称、备注、标签或收藏筛选实例 已安装版本 版本管理 加载器 选择游戏 version",
-    "PageTitle": "版本选择",
-    "TargetText": "筛选",
-    "SectionTitle": "已安装版本",
-    "SectionResourceKey": "Str_Ui_Installed_Versions"
-  },
-  {
     "Id": "versions.InstallNewVersion_Click",
     "PageKey": "versions",
     "Title": "➕ 安装新版本",
@@ -235,11 +225,12 @@
     "SectionResourceKey": "Str_Ui_Installed_Versions"
   },
   {
-    "Id": "versions.ClearInstanceFilter_Click",
+    "Id": "versions.ClearInstanceFilterButton",
     "PageKey": "versions",
     "Title": "清除",
-    "Keywords": "清除筛选条件 已安装版本 版本管理 加载器 选择游戏 version",
+    "Keywords": "清除搜索词和筛选条件 Clear Instance Filter Button 已安装版本 版本管理 加载器 选择游戏 version",
     "PageTitle": "版本选择",
+    "TargetName": "ClearInstanceFilterButton",
     "TargetText": "清除",
     "SectionTitle": "已安装版本",
     "SectionResourceKey": "Str_Ui_Installed_Versions"
@@ -280,6 +271,16 @@
     "TargetName": "CatVersion",
     "TargetText": "游戏版本",
     "ResourceKey": "Str_Ui_Game_Version",
+    "SectionResourceKey": "Str_Common_Download"
+  },
+  {
+    "Id": "downloads.CatBedrock",
+    "PageKey": "downloads",
+    "Title": "基岩版",
+    "Keywords": "Cat Bedrock 下载中心 download install",
+    "PageTitle": "下载",
+    "TargetName": "CatBedrock",
+    "TargetText": "基岩版",
     "SectionResourceKey": "Str_Common_Download"
   },
   {
@@ -771,39 +772,227 @@
     "PageTitle": "联机"
   },
   {
-    "Id": "multiplayer.TerracottaLaunchBtn",
+    "Id": "multiplayer.StartServiceButton",
     "PageKey": "multiplayer",
-    "Title": "启动陶瓦联机",
-    "Keywords": "Terracotta Launch Btn 陶瓦联机 (Terracotta) 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "Title": "启动联机",
+    "Keywords": "Start Service Button 尚未启动 多人 局域网 陶瓦 联机大厅 multiplayer",
     "PageTitle": "联机",
-    "TargetName": "TerracottaLaunchBtn",
-    "TargetText": "启动陶瓦联机",
-    "ResourceKey": "Str_Ui_Start_Terracotta_Lan",
-    "SectionTitle": "陶瓦联机 (Terracotta)",
-    "SectionResourceKey": "Str_Ui_Terracotta_Lan"
+    "TargetName": "StartServiceButton",
+    "TargetText": "启动联机",
+    "SectionTitle": "尚未启动"
   },
   {
-    "Id": "multiplayer.TerracottaBrowse_Click",
+    "Id": "multiplayer.RefreshStateButton",
     "PageKey": "multiplayer",
-    "Title": "使用其他版本...",
-    "Keywords": "非必需：如果官方出了新版本、内置版本还没来得及更新，可以手动选择自己下载的 exe 文件临时覆盖内置版本 陶瓦联机 (Terracotta) 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "Title": "刷新状态",
+    "Keywords": "Refresh State Button 尚未启动 多人 局域网 陶瓦 联机大厅 multiplayer",
     "PageTitle": "联机",
-    "TargetText": "使用其他版本...",
-    "ResourceKey": "Str_Ui_Use_Another_Version",
-    "SectionTitle": "陶瓦联机 (Terracotta)",
-    "SectionResourceKey": "Str_Ui_Terracotta_Lan"
+    "TargetName": "RefreshStateButton",
+    "TargetText": "刷新状态",
+    "SectionTitle": "尚未启动"
   },
   {
-    "Id": "multiplayer.TerracottaResetBtn",
+    "Id": "multiplayer.OpenProgramButton",
     "PageKey": "multiplayer",
-    "Title": "恢复使用内置版本",
-    "Keywords": "清除手动指定的路径，改回使用启动器自带的陶瓦联机版本 Terracotta Reset Btn 陶瓦联机 (Terracotta) 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "Title": "打开程序",
+    "Keywords": "单独运行陶瓦官方程序 Open Program Button 尚未启动 多人 局域网 陶瓦 联机大厅 multiplayer",
     "PageTitle": "联机",
-    "TargetName": "TerracottaResetBtn",
-    "TargetText": "恢复使用内置版本",
-    "ResourceKey": "Str_Ui_Restore_Bundled_Version",
-    "SectionTitle": "陶瓦联机 (Terracotta)",
-    "SectionResourceKey": "Str_Ui_Terracotta_Lan"
+    "TargetName": "OpenProgramButton",
+    "TargetText": "打开程序",
+    "SectionTitle": "尚未启动"
+  },
+  {
+    "Id": "multiplayer.CancelOperationButton",
+    "PageKey": "multiplayer",
+    "Title": "取消等待",
+    "Keywords": "Cancel Operation Button 尚未启动 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "CancelOperationButton",
+    "TargetText": "取消等待",
+    "SectionTitle": "尚未启动"
+  },
+  {
+    "Id": "multiplayer.ExecutableOptionsButton",
+    "PageKey": "multiplayer",
+    "Title": "程序选项 ▾",
+    "Keywords": "Executable Options Button 尚未启动 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "ExecutableOptionsButton",
+    "TargetText": "程序选项 ▾",
+    "SectionTitle": "尚未启动"
+  },
+  {
+    "Id": "multiplayer.CreateCodeBox",
+    "PageKey": "multiplayer",
+    "Title": "自定义房间码（可选）",
+    "Keywords": "留空由陶瓦生成；也可填入兼容的陶瓦房间码 Create Code Box 创建房间 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "CreateCodeBox",
+    "TargetText": "自定义房间码（可选）",
+    "SectionTitle": "创建房间"
+  },
+  {
+    "Id": "multiplayer.CreateRoomButton",
+    "PageKey": "multiplayer",
+    "Title": "创建并扫描世界",
+    "Keywords": "Create Room Button 创建房间 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "CreateRoomButton",
+    "TargetText": "创建并扫描世界",
+    "SectionTitle": "创建房间"
+  },
+  {
+    "Id": "multiplayer.PasteRoomCode_Click",
+    "PageKey": "multiplayer",
+    "Title": "粘贴",
+    "Keywords": "加入朋友 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetText": "粘贴",
+    "SectionTitle": "加入朋友"
+  },
+  {
+    "Id": "multiplayer.JoinCodeBox",
+    "PageKey": "multiplayer",
+    "Title": "让房主把房间码发给你，连接成功后返回游戏的多人游戏列表。",
+    "Keywords": "Join Code Box 加入朋友 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "JoinCodeBox",
+    "TargetText": "让房主把房间码发给你，连接成功后返回游戏的多人游戏列表。",
+    "SectionTitle": "加入朋友"
+  },
+  {
+    "Id": "multiplayer.JoinRoomButton",
+    "PageKey": "multiplayer",
+    "Title": "加入房间",
+    "Keywords": "Join Room Button 加入朋友 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "JoinRoomButton",
+    "TargetText": "加入房间",
+    "SectionTitle": "加入朋友"
+  },
+  {
+    "Id": "multiplayer.LeaveRoomButton",
+    "PageKey": "multiplayer",
+    "Title": "断开联机",
+    "Keywords": "Leave Room Button 联机状态 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "LeaveRoomButton",
+    "TargetText": "断开联机",
+    "SectionTitle": "联机状态"
+  },
+  {
+    "Id": "multiplayer.ShareCodeBox",
+    "PageKey": "multiplayer",
+    "Title": "房间码",
+    "Keywords": "Share Code Box 房间码 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "ShareCodeBox",
+    "TargetText": "房间码",
+    "SectionTitle": "房间码"
+  },
+  {
+    "Id": "multiplayer.CopyRoomCode_Click",
+    "PageKey": "multiplayer",
+    "Title": "复制房间码",
+    "Keywords": "房间码 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetText": "复制房间码",
+    "SectionTitle": "房间码"
+  },
+  {
+    "Id": "multiplayer.CopyInvitation_Click",
+    "PageKey": "multiplayer",
+    "Title": "复制邀请信息",
+    "Keywords": "房间码 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetText": "复制邀请信息",
+    "SectionTitle": "房间码"
+  },
+  {
+    "Id": "multiplayer.CopyAddress_Click",
+    "PageKey": "multiplayer",
+    "Title": "复制地址",
+    "Keywords": "游戏连接地址 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetText": "复制地址",
+    "SectionTitle": "游戏连接地址"
+  },
+  {
+    "Id": "multiplayer.ConnectAddressBox",
+    "PageKey": "multiplayer",
+    "Title": "游戏连接地址",
+    "Keywords": "Connect Address Box 游戏连接地址 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "ConnectAddressBox",
+    "TargetText": "游戏连接地址",
+    "SectionTitle": "游戏连接地址"
+  },
+  {
+    "Id": "multiplayer.control86",
+    "PageKey": "multiplayer",
+    "Title": "高级设置",
+    "Keywords": "房间成员 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetText": "高级设置",
+    "SectionTitle": "房间成员"
+  },
+  {
+    "Id": "multiplayer.PlayerNameBox",
+    "PageKey": "multiplayer",
+    "Title": "玩家显示名称（可选）",
+    "Keywords": "Player Name Box 房间成员 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "PlayerNameBox",
+    "TargetText": "玩家显示名称（可选）",
+    "SectionTitle": "房间成员"
+  },
+  {
+    "Id": "multiplayer.PublicNodesBox",
+    "PageKey": "multiplayer",
+    "Title": "附加公共节点（每行一个）",
+    "Keywords": "Public Nodes Box 房间成员 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "PublicNodesBox",
+    "TargetText": "附加公共节点（每行一个）",
+    "SectionTitle": "房间成员"
+  },
+  {
+    "Id": "multiplayer.ResetPublicNodes_Click",
+    "PageKey": "multiplayer",
+    "Title": "恢复默认节点",
+    "Keywords": "房间成员 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetText": "恢复默认节点",
+    "SectionTitle": "房间成员"
+  },
+  {
+    "Id": "multiplayer.LogPanel",
+    "PageKey": "multiplayer",
+    "Title": "联机日志",
+    "Keywords": "Log Panel 房间成员 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "LogPanel",
+    "TargetText": "联机日志",
+    "SectionTitle": "房间成员"
+  },
+  {
+    "Id": "multiplayer.ReadLogButton",
+    "PageKey": "multiplayer",
+    "Title": "读取最新日志",
+    "Keywords": "Read Log Button 房间成员 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetName": "ReadLogButton",
+    "TargetText": "读取最新日志",
+    "SectionTitle": "房间成员"
+  },
+  {
+    "Id": "multiplayer.CopyLog_Click",
+    "PageKey": "multiplayer",
+    "Title": "复制当前日志",
+    "Keywords": "房间成员 多人 局域网 陶瓦 联机大厅 multiplayer",
+    "PageTitle": "联机",
+    "TargetText": "复制当前日志",
+    "SectionTitle": "房间成员"
   },
   {
     "Id": "mods.page",
@@ -1227,12 +1416,11 @@
   {
     "Id": "servers.SrvResMod",
     "PageKey": "servers",
-    "Title": "Mod(需 Fabric/Forge/NeoForge 服务端)",
+    "Title": "Mod / 模组",
     "Keywords": "Srv Res Mod 服务端插件下载 开服 服务器 server",
     "PageTitle": "服务端管理",
     "TargetName": "SrvResMod",
-    "TargetText": "Mod(需 Fabric/Forge/NeoForge 服务端)",
-    "ResourceKey": "Str_Ui_Mods_Needs_A_Fabric_Forge_Neoforge_Serve",
+    "TargetText": "Mod / 模组",
     "SectionTitle": "服务端插件下载",
     "SectionResourceKey": "Str_Ui_Server_Plugin_Downloads"
   },
@@ -1439,7 +1627,7 @@
     "SectionResourceKey": "Str_Nav_Accounts"
   },
   {
-    "Id": "accounts.control131",
+    "Id": "accounts.control151",
     "PageKey": "accounts",
     "Title": "第三方认证服务器登录",
     "Keywords": "账户管理 帐号 登录 正版 离线 account login",
@@ -1589,21 +1777,21 @@
   {
     "Id": "settings.UxRecentHistoryCheck",
     "PageKey": "settings",
-    "Title": "记录最近启动的实例（默认关闭）",
+    "Title": "记录最近启动的实例",
     "Keywords": "Ux Recent History Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "UxRecentHistoryCheck",
-    "TargetText": "记录最近启动的实例（默认关闭）",
+    "TargetText": "记录最近启动的实例",
     "SectionTitle": "窗口与托盘"
   },
   {
     "Id": "settings.UxRecentToolsCheck",
     "PageKey": "settings",
-    "Title": "记录最近使用的工具（默认关闭）",
+    "Title": "记录最近使用的工具",
     "Keywords": "Ux Recent Tools Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "UxRecentToolsCheck",
-    "TargetText": "记录最近使用的工具（默认关闭）",
+    "TargetText": "记录最近使用的工具",
     "SectionTitle": "窗口与托盘"
   },
   {
@@ -1647,11 +1835,11 @@
   {
     "Id": "settings.UxHideServerAddressesCheck",
     "PageKey": "settings",
-    "Title": "隐藏服务器地址（默认关闭）",
+    "Title": "隐藏服务器地址",
     "Keywords": "Ux Hide Server Addresses Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "UxHideServerAddressesCheck",
-    "TargetText": "隐藏服务器地址（默认关闭）",
+    "TargetText": "隐藏服务器地址",
     "SectionTitle": "窗口与托盘"
   },
   {
@@ -1726,21 +1914,21 @@
   {
     "Id": "settings.ReminderBadgeCheck",
     "PageKey": "settings",
-    "Title": "显示右下角提醒角标（默认开启）",
+    "Title": "显示右下角提醒角标",
     "Keywords": "Reminder Badge Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "ReminderBadgeCheck",
-    "TargetText": "显示右下角提醒角标（默认开启）",
+    "TargetText": "显示右下角提醒角标",
     "SectionTitle": "窗口与托盘"
   },
   {
     "Id": "settings.LaunchHealthCheck",
     "PageKey": "settings",
-    "Title": "启动前检查实例完整性（默认开启）",
+    "Title": "启动前检查实例完整性",
     "Keywords": "Launch Health Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "LaunchHealthCheck",
-    "TargetText": "启动前检查实例完整性（默认开启）",
+    "TargetText": "启动前检查实例完整性",
     "SectionTitle": "窗口与托盘"
   },
   {
@@ -1756,21 +1944,21 @@
   {
     "Id": "settings.RememberDownloadsCheck",
     "PageKey": "settings",
-    "Title": "保存可恢复的下载任务（默认开启）",
+    "Title": "保存可恢复的下载任务",
     "Keywords": "Remember Downloads Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "RememberDownloadsCheck",
-    "TargetText": "保存可恢复的下载任务（默认开启）",
+    "TargetText": "保存可恢复的下载任务",
     "SectionTitle": "窗口与托盘"
   },
   {
     "Id": "settings.ModSnapshotCheck",
     "PageKey": "settings",
-    "Title": "更新模组 / 资源包前保存原文件快照（默认开启）",
+    "Title": "更新模组 / 资源包前保存原文件快照",
     "Keywords": "Mod Snapshot Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "ModSnapshotCheck",
-    "TargetText": "更新模组 / 资源包前保存原文件快照（默认开启）",
+    "TargetText": "更新模组 / 资源包前保存原文件快照",
     "SectionTitle": "窗口与托盘"
   },
   {
@@ -1824,11 +2012,11 @@
   {
     "Id": "settings.PerformanceOverlayEnabledCheck",
     "PageKey": "settings",
-    "Title": "显示性能悬浮窗（默认关闭）",
+    "Title": "显示性能悬浮窗",
     "Keywords": "Performance Overlay Enabled Check 窗口与托盘 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayEnabledCheck",
-    "TargetText": "显示性能悬浮窗（默认关闭）",
+    "TargetText": "显示性能悬浮窗",
     "SectionTitle": "窗口与托盘"
   },
   {
@@ -1922,134 +2110,320 @@
     "SectionTitle": "窗口与托盘"
   },
   {
+    "Id": "settings.PerformanceOverlayGpuCheck",
+    "PageKey": "settings",
+    "Title": "显示 GPU · 图形处理器",
+    "Keywords": "Performance Overlay Gpu Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGpuCheck",
+    "TargetText": "显示 GPU · 图形处理器",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayGpuUtilizationCheck",
+    "PageKey": "settings",
+    "Title": "显示使用率",
+    "Keywords": "Performance Overlay Gpu Utilization Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGpuUtilizationCheck",
+    "TargetText": "显示使用率",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayGpuDedicatedMemoryCheck",
+    "PageKey": "settings",
+    "Title": "显示专用显存",
+    "Keywords": "Performance Overlay Gpu Dedicated Memory Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGpuDedicatedMemoryCheck",
+    "TargetText": "显示专用显存",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayGpuSharedMemoryCheck",
+    "PageKey": "settings",
+    "Title": "显示共享内存",
+    "Keywords": "Performance Overlay Gpu Shared Memory Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayGpuSharedMemoryCheck",
+    "TargetText": "显示共享内存",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayNpuCheck",
+    "PageKey": "settings",
+    "Title": "显示 NPU · 神经网络处理器",
+    "Keywords": "Performance Overlay Npu Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayNpuCheck",
+    "TargetText": "显示 NPU · 神经网络处理器",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayNpuUtilizationCheck",
+    "PageKey": "settings",
+    "Title": "显示使用率",
+    "Keywords": "Performance Overlay Npu Utilization Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayNpuUtilizationCheck",
+    "TargetText": "显示使用率",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayNpuDedicatedMemoryCheck",
+    "PageKey": "settings",
+    "Title": "显示专用内存",
+    "Keywords": "Performance Overlay Npu Dedicated Memory Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayNpuDedicatedMemoryCheck",
+    "TargetText": "显示专用内存",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayNpuSharedMemoryCheck",
+    "PageKey": "settings",
+    "Title": "显示共享内存",
+    "Keywords": "Performance Overlay Npu Shared Memory Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayNpuSharedMemoryCheck",
+    "TargetText": "显示共享内存",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayDiskCheck",
+    "PageKey": "settings",
+    "Title": "磁盘读写速率",
+    "Keywords": "Performance Overlay Disk Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayDiskCheck",
+    "TargetText": "磁盘读写速率",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayNetworkCheck",
+    "PageKey": "settings",
+    "Title": "网卡收发速率",
+    "Keywords": "Performance Overlay Network Check GPU / NPU 硬件监视 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayNetworkCheck",
+    "TargetText": "网卡收发速率",
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
     "Id": "settings.PerformanceOverlayScopeCombo",
     "PageKey": "settings",
     "Title": "显示游戏范围",
-    "Keywords": "Performance Overlay Scope Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Scope Combo GPU / NPU 硬件监视 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayScopeCombo",
     "TargetText": "显示游戏范围",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "GPU / NPU 硬件监视"
   },
   {
     "Id": "settings.PerformanceOverlayInstanceCombo",
     "PageKey": "settings",
     "Title": "显示游戏范围",
-    "Keywords": "Performance Overlay Instance Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Instance Combo GPU / NPU 硬件监视 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayInstanceCombo",
     "TargetText": "显示游戏范围",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "GPU / NPU 硬件监视"
   },
   {
     "Id": "settings.PerformanceOverlayRefreshGamesButton",
     "PageKey": "settings",
     "Title": "刷新运行实例",
-    "Keywords": "Performance Overlay Refresh Games Button 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Refresh Games Button GPU / NPU 硬件监视 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayRefreshGamesButton",
     "TargetText": "刷新运行实例",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "GPU / NPU 硬件监视"
+  },
+  {
+    "Id": "settings.PerformanceOverlayLayoutModeCombo",
+    "PageKey": "settings",
+    "Title": "内容布局",
+    "Keywords": "Performance Overlay Layout Mode Combo 布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayLayoutModeCombo",
+    "TargetText": "内容布局",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.PerformanceOverlayLineBreakCombo",
+    "PageKey": "settings",
+    "Title": "统一换行方式",
+    "Keywords": "Performance Overlay Line Break Combo 布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayLineBreakCombo",
+    "TargetText": "统一换行方式",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.PerformanceSingleLine_Click",
+    "PageKey": "settings",
+    "Title": "全部取消换行",
+    "Keywords": "布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "全部取消换行",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.PerformancePreserveLines_Click",
+    "PageKey": "settings",
+    "Title": "全部保留换行",
+    "Keywords": "布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "全部保留换行",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.PerformanceOverlayAutoWrapCheck",
+    "PageKey": "settings",
+    "Title": "超出窗口宽度时自动换行",
+    "Keywords": "Performance Overlay Auto Wrap Check 布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayAutoWrapCheck",
+    "TargetText": "超出窗口宽度时自动换行",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.PerformanceOverlayTemplateBox",
+    "PageKey": "settings",
+    "Title": "字段模板（按 Enter 插入换行，最多 4096 字符）",
+    "Keywords": "Performance Overlay Template Box 布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceOverlayTemplateBox",
+    "TargetText": "字段模板（按 Enter 插入换行，最多 4096 字符）",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.PerformanceTemplateFieldCombo",
+    "PageKey": "settings",
+    "Title": "选择插入的性能字段",
+    "Keywords": "Performance Template Field Combo 布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PerformanceTemplateFieldCombo",
+    "TargetText": "选择插入的性能字段",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.InsertPerformanceField_Click",
+    "PageKey": "settings",
+    "Title": "插入字段",
+    "Keywords": "布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "插入字段",
+    "SectionTitle": "布局、字段模板与换行"
+  },
+  {
+    "Id": "settings.ResetPerformanceTemplate_Click",
+    "PageKey": "settings",
+    "Title": "恢复默认模板",
+    "Keywords": "布局、字段模板与换行 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetText": "恢复默认模板",
+    "SectionTitle": "布局、字段模板与换行"
   },
   {
     "Id": "settings.PerformanceOverlayStyleCombo",
     "PageKey": "settings",
     "Title": "样式",
-    "Keywords": "Performance Overlay Style Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Style Combo 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayStyleCombo",
     "TargetText": "样式",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayColorCombo",
     "PageKey": "settings",
     "Title": "配色",
-    "Keywords": "Performance Overlay Color Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Color Combo 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayColorCombo",
     "TargetText": "配色",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayWidthCombo",
     "PageKey": "settings",
     "Title": "窗口宽度",
-    "Keywords": "Performance Overlay Width Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Width Combo 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayWidthCombo",
     "TargetText": "窗口宽度",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlaySortCombo",
     "PageKey": "settings",
     "Title": "游戏排序",
-    "Keywords": "Performance Overlay Sort Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Sort Combo 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlaySortCombo",
     "TargetText": "游戏排序",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayRefreshCombo",
     "PageKey": "settings",
     "Title": "刷新间隔",
-    "Keywords": "Performance Overlay Refresh Combo 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Refresh Combo 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayRefreshCombo",
     "TargetText": "刷新间隔",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayMemoryUnitCombo",
     "PageKey": "settings",
-    "Title": "内存单位",
-    "Keywords": "Performance Overlay Memory Unit Combo 窗口与托盘 选项 配置 settings preferences",
+    "Title": "系统 / 进程内存单位",
+    "Keywords": "Performance Overlay Memory Unit Combo 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayMemoryUnitCombo",
-    "TargetText": "内存单位",
-    "SectionTitle": "窗口与托盘"
+    "TargetText": "系统 / 进程内存单位",
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayFontSlider",
     "PageKey": "settings",
     "Title": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
-    "Keywords": "Performance Overlay Font Slider 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Font Slider 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayFontSlider",
     "TargetText": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayOpacitySlider",
     "PageKey": "settings",
     "Title": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
-    "Keywords": "Performance Overlay Opacity Slider 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Opacity Slider 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayOpacitySlider",
     "TargetText": "实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayTopmostCheck",
     "PageKey": "settings",
     "Title": "固定在最上层",
-    "Keywords": "Performance Overlay Topmost Check 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Topmost Check 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayTopmostCheck",
     "TargetText": "固定在最上层",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.PerformanceOverlayLockCheck",
     "PageKey": "settings",
     "Title": "锁定位置",
-    "Keywords": "Performance Overlay Lock Check 窗口与托盘 选项 配置 settings preferences",
+    "Keywords": "Performance Overlay Lock Check 当前字段预览 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "PerformanceOverlayLockCheck",
     "TargetText": "锁定位置",
-    "SectionTitle": "窗口与托盘"
+    "SectionTitle": "当前字段预览"
   },
   {
     "Id": "settings.CheckLauncherUpdatesOnStartupCheck",
@@ -2450,11 +2824,11 @@
   {
     "Id": "settings.AskInputModeCheck",
     "PageKey": "settings",
-    "Title": "每次启动游戏前询问使用「键鼠模式」还是「触屏模式」（默认开启）",
+    "Title": "每次启动游戏前询问使用「键鼠模式」还是「触屏模式」",
     "Keywords": "Ask Input Mode Check 触屏模式（平板虚拟按键） 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "AskInputModeCheck",
-    "TargetText": "每次启动游戏前询问使用「键鼠模式」还是「触屏模式」（默认开启）",
+    "TargetText": "每次启动游戏前询问使用「键鼠模式」还是「触屏模式」",
     "SectionTitle": "触屏模式（平板虚拟按键）"
   },
   {
@@ -2490,22 +2864,22 @@
   {
     "Id": "settings.ShowModIconsCheck",
     "PageKey": "settings",
-    "Title": "下载中心 Mod 搜索结果显示模组图标（从 Modrinth/CurseForge 抓取，默认开启）",
+    "Title": "下载中心 Mod 搜索结果显示模组图标（从 Modrinth/CurseForge 抓取）",
     "Keywords": "Show Mod Icons Check 触屏模式（平板虚拟按键） 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "ShowModIconsCheck",
-    "TargetText": "下载中心 Mod 搜索结果显示模组图标（从 Modrinth/CurseForge 抓取，默认开启）",
+    "TargetText": "下载中心 Mod 搜索结果显示模组图标（从 Modrinth/CurseForge 抓取）",
     "ResourceKey": "Str_Ui_Show_Mod_Icons_In_Search_Results_Fetched",
     "SectionTitle": "触屏模式（平板虚拟按键）"
   },
   {
     "Id": "settings.ShowServerNetworkGuideCheck",
     "PageKey": "settings",
-    "Title": "服务器启动成功后自动弹出「如何开放外网访问」教程（默认开启）",
+    "Title": "服务器启动成功后自动弹出「如何开放外网访问」教程",
     "Keywords": "Show Server Network Guide Check 触屏模式（平板虚拟按键） 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "ShowServerNetworkGuideCheck",
-    "TargetText": "服务器启动成功后自动弹出「如何开放外网访问」教程（默认开启）",
+    "TargetText": "服务器启动成功后自动弹出「如何开放外网访问」教程",
     "ResourceKey": "Str_Ui_Show_The_Opening_Your_Server_To_The_Inte",
     "SectionTitle": "触屏模式（平板虚拟按键）"
   },
@@ -2581,11 +2955,11 @@
   {
     "Id": "settings.IsolateResourcePacksCheck",
     "PageKey": "settings",
-    "Title": "资源包/数据包/光影包按版本隔离，互不共用（默认开启；取消勾选=全局共用一份，避免重复下载；可在「版本选择」页为单个版本单独覆盖）",
+    "Title": "资源包/数据包/光影包按版本隔离，互不共用（取消勾选=全局共用一份，避免重复下载；可在「版本选择」页为单个版本单独覆盖）",
     "Keywords": "Isolate Resource Packs Check 拖拽安装 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "IsolateResourcePacksCheck",
-    "TargetText": "资源包/数据包/光影包按版本隔离，互不共用（默认开启；取消勾选=全局共用一份，避免重复下载；可在「版本选择」页为单个版本单独覆盖）",
+    "TargetText": "资源包/数据包/光影包按版本隔离，互不共用（取消勾选=全局共用一份，避免重复下载；可在「版本选择」页为单个版本单独覆盖）",
     "ResourceKey": "Str_Ui_Keep_Resource_Data_And_Shader_Packs_Sepa",
     "SectionTitle": "拖拽安装",
     "SectionResourceKey": "Str_Drop_SectionTitle"
@@ -2605,11 +2979,11 @@
   {
     "Id": "settings.SettingsAutoSaveCheck",
     "PageKey": "settings",
-    "Title": "修改设置后自动保存，无需点击下方的“保存设置”按钮（默认关闭）",
+    "Title": "修改设置后自动保存，无需点击下方的“保存设置”按钮",
     "Keywords": "开启后每次改动会在短暂延迟后自动保存，并在左下角保留可点击“回退”的操作提示；关闭时改动只会先留在界面上，需要手动保存或在提示里点“保存”。 Settings Auto Save Check 保存行为 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "SettingsAutoSaveCheck",
-    "TargetText": "修改设置后自动保存，无需点击下方的“保存设置”按钮（默认关闭）",
+    "TargetText": "修改设置后自动保存，无需点击下方的“保存设置”按钮",
     "SectionTitle": "保存行为"
   },
   {
@@ -2702,13 +3076,23 @@
     "SectionTitle": "外观与视觉效果"
   },
   {
+    "Id": "settings.NativeApprovalsCheck",
+    "PageKey": "settings",
+    "Title": "后台审批使用 Windows 原生消息框",
+    "Keywords": "启动器在后台或最小化时，安装和权限确认可直接在 Windows 消息框中选择，无需恢复主界面。 Native Approvals Check 外观与视觉效果 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "NativeApprovalsCheck",
+    "TargetText": "后台审批使用 Windows 原生消息框",
+    "SectionTitle": "外观与视觉效果"
+  },
+  {
     "Id": "settings.Win11EffectsCheck",
     "PageKey": "settings",
-    "Title": "启用 Windows 11 新光效设计（云母材质背景 / 窗口圆角 / 沉浸光感过渡，仅 Windows 11 生效，默认关闭）",
+    "Title": "启用 Windows 11 新光效设计（云母材质背景 / 沉浸光感过渡，仅 Windows 11 生效）",
     "Keywords": "依赖 Windows 11 才有的 DWM 特性；在 10 或更早系统上会被自动忽略，不影响正常使用。 Win11Effects Check 外观与视觉效果 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Win11EffectsCheck",
-    "TargetText": "启用 Windows 11 新光效设计（云母材质背景 / 窗口圆角 / 沉浸光感过渡，仅 Windows 11 生效，默认关闭）",
+    "TargetText": "启用 Windows 11 新光效设计（云母材质背景 / 沉浸光感过渡，仅 Windows 11 生效）",
     "SectionTitle": "外观与视觉效果"
   },
   {
@@ -2784,11 +3168,11 @@
   {
     "Id": "settings.WindowTransparencyCheck",
     "PageKey": "settings",
-    "Title": "启用窗口透明度（侧栏 / 卡片等面板呈现半透明玻璃质感，默认关闭）",
+    "Title": "启用窗口透明度（侧栏 / 卡片等面板呈现半透明玻璃质感）",
     "Keywords": "Window Transparency Check 字体分层设置 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "WindowTransparencyCheck",
-    "TargetText": "启用窗口透明度（侧栏 / 卡片等面板呈现半透明玻璃质感，默认关闭）",
+    "TargetText": "启用窗口透明度（侧栏 / 卡片等面板呈现半透明玻璃质感）",
     "SectionTitle": "字体分层设置"
   },
   {
@@ -2918,11 +3302,11 @@
   {
     "Id": "settings.GlobalWindowTransparencyCheck",
     "PageKey": "settings",
-    "Title": "启用整窗全局透明（连标题栏/边框一起透明，能透出后方桌面，默认关闭）",
+    "Title": "启用整窗全局透明（连标题栏/边框一起透明，能透出后方桌面）",
     "Keywords": "Global Window Transparency Check 字体分层设置 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "GlobalWindowTransparencyCheck",
-    "TargetText": "启用整窗全局透明（连标题栏/边框一起透明，能透出后方桌面，默认关闭）",
+    "TargetText": "启用整窗全局透明（连标题栏/边框一起透明，能透出后方桌面）",
     "SectionTitle": "字体分层设置"
   },
   {
@@ -3407,11 +3791,11 @@
   {
     "Id": "settings.ThreadCountBox",
     "PageKey": "settings",
-    "Title": "并发线程数：",
+    "Title": "下载并发上限：",
     "Keywords": "Thread Count Box 下载性能 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "ThreadCountBox",
-    "TargetText": "并发线程数：",
+    "TargetText": "下载并发上限：",
     "ResourceKey": "Str_Ui_Threads",
     "SectionTitle": "下载性能",
     "SectionResourceKey": "Str_Ui_Download_Performance"
@@ -3999,7 +4383,7 @@
     "Id": "ai.ModelCombo",
     "PageKey": "ai",
     "Title": "模型",
-    "Keywords": "Model Combo 模型 人工智能 聊天 对话 assistant",
+    "Keywords": "展开后可搜索模型名称、ID 或供应商；也可以滚动鼠标滚轮切换模型。 Model Combo 模型 人工智能 聊天 对话 assistant",
     "PageTitle": "AI 助手",
     "TargetName": "ModelCombo",
     "TargetText": "模型",
@@ -4074,7 +4458,7 @@
     "SectionTitle": "模型"
   },
   {
-    "Id": "ai.control390",
+    "Id": "ai.control430",
     "PageKey": "ai",
     "Title": "任务步骤与断点",
     "Keywords": "模型 人工智能 聊天 对话 assistant",
@@ -4160,6 +4544,16 @@
     "TargetName": "UsageIndicatorButton",
     "TargetText": "上下文占用及 Token 用量详情",
     "SectionTitle": "模型"
+  },
+  {
+    "Id": "ai.CompactTermsButton",
+    "PageKey": "ai",
+    "Title": "拒绝 AI 助手的用户协议与条款 · 关闭 AI 助手",
+    "Keywords": "Compact Terms Button 下一步 人工智能 聊天 对话 assistant",
+    "PageTitle": "AI 助手",
+    "TargetName": "CompactTermsButton",
+    "TargetText": "拒绝 AI 助手的用户协议与条款 · 关闭 AI 助手",
+    "SectionTitle": "下一步"
   },
   {
     "Id": "toolbox.page",
@@ -4498,6 +4892,15 @@
     "PageTitle": "百宝箱",
     "TargetText": "下载正版账户皮肤",
     "TabIndex": 35
+  },
+  {
+    "Id": "toolbox.tab.36",
+    "PageKey": "toolbox",
+    "Title": "服务器端口探测",
+    "Keywords": "服务器 端口扫描 端口探测 TCP IP 单IP 多IP 起始端口 结束端口 每IP最大数量 port scan 工具箱 小工具 toolbox tools",
+    "PageTitle": "百宝箱",
+    "TargetText": "服务器端口探测",
+    "TabIndex": 36
   },
   {
     "Id": "toolbox.ToolboxMoreButton",
@@ -5703,6 +6106,38 @@
     "PageTitle": "基岩版"
   },
   {
+    "Id": "bedrock.BedrockClientTab",
+    "PageKey": "bedrock",
+    "Title": "客户端",
+    "Keywords": "Bedrock Client Tab 基岩版 基岩版启动",
+    "PageTitle": "基岩版",
+    "TargetName": "BedrockClientTab",
+    "TargetText": "客户端",
+    "SectionTitle": "基岩版",
+    "SectionResourceKey": "Str_Nav_Bedrock"
+  },
+  {
+    "Id": "bedrock.BedrockServerTab",
+    "PageKey": "bedrock",
+    "Title": "服务端",
+    "Keywords": "Bedrock Server Tab 基岩版 基岩版启动",
+    "PageTitle": "基岩版",
+    "TargetName": "BedrockServerTab",
+    "TargetText": "服务端",
+    "SectionTitle": "基岩版",
+    "SectionResourceKey": "Str_Nav_Bedrock"
+  },
+  {
+    "Id": "bedrock.BedrockClientMarketplace_Click",
+    "PageKey": "bedrock",
+    "Title": "资源市场",
+    "Keywords": "浏览并下载基岩版行为包、资源包和附加包 基岩版 基岩版启动 Bedrock",
+    "PageTitle": "基岩版",
+    "TargetText": "资源市场",
+    "SectionTitle": "基岩版",
+    "SectionResourceKey": "Str_Nav_Bedrock"
+  },
+  {
     "Id": "bedrock.BedrockLaunchBtn",
     "PageKey": "bedrock",
     "Title": "启动基岩版",
@@ -5894,6 +6329,38 @@
     "SectionResourceKey": "Str_Ui_Bedrock_Client_Download"
   },
   {
+    "Id": "bedrock.ClientFavoriteButton",
+    "PageKey": "bedrock",
+    "Title": "☆ 收藏选中版本",
+    "Keywords": "Client Favorite Button 基岩版客户端下载 基岩版启动 Bedrock",
+    "PageTitle": "基岩版",
+    "TargetName": "ClientFavoriteButton",
+    "TargetText": "☆ 收藏选中版本",
+    "SectionTitle": "基岩版客户端下载",
+    "SectionResourceKey": "Str_Ui_Bedrock_Client_Download"
+  },
+  {
+    "Id": "bedrock.OpenBedrockWiki_Click",
+    "PageKey": "bedrock",
+    "Title": "版本 Wiki ↗",
+    "Keywords": "基岩版客户端下载 基岩版启动 Bedrock",
+    "PageTitle": "基岩版",
+    "TargetText": "版本 Wiki ↗",
+    "SectionTitle": "基岩版客户端下载",
+    "SectionResourceKey": "Str_Ui_Bedrock_Client_Download"
+  },
+  {
+    "Id": "bedrock.ClientFavoriteCombo",
+    "PageKey": "bedrock",
+    "Title": "已收藏版本",
+    "Keywords": "Client Favorite Combo 基岩版客户端下载 基岩版启动 Bedrock",
+    "PageTitle": "基岩版",
+    "TargetName": "ClientFavoriteCombo",
+    "TargetText": "已收藏版本",
+    "SectionTitle": "基岩版客户端下载",
+    "SectionResourceKey": "Str_Ui_Bedrock_Client_Download"
+  },
+  {
     "Id": "bedrock.BedrockImport_Click",
     "PageKey": "bedrock",
     "Title": "选择文件导入...",
@@ -5973,6 +6440,28 @@
     "TargetName": "BedrockServerLaunchBtn",
     "TargetText": "启动服务端",
     "ResourceKey": "Str_Ui_Launch_Server",
+    "SectionTitle": "基岩版服务端（BDS）",
+    "SectionResourceKey": "Str_Ui_Bedrock_Dedicated_Server"
+  },
+  {
+    "Id": "bedrock.ServerFavoriteButton",
+    "PageKey": "bedrock",
+    "Title": "☆ 收藏选中版本",
+    "Keywords": "Server Favorite Button 基岩版服务端（BDS） 基岩版启动 Bedrock",
+    "PageTitle": "基岩版",
+    "TargetName": "ServerFavoriteButton",
+    "TargetText": "☆ 收藏选中版本",
+    "SectionTitle": "基岩版服务端（BDS）",
+    "SectionResourceKey": "Str_Ui_Bedrock_Dedicated_Server"
+  },
+  {
+    "Id": "bedrock.ServerFavoriteCombo",
+    "PageKey": "bedrock",
+    "Title": "已收藏版本",
+    "Keywords": "Server Favorite Combo 基岩版服务端（BDS） 基岩版启动 Bedrock",
+    "PageTitle": "基岩版",
+    "TargetName": "ServerFavoriteCombo",
+    "TargetText": "已收藏版本",
     "SectionTitle": "基岩版服务端（BDS）",
     "SectionResourceKey": "Str_Ui_Bedrock_Dedicated_Server"
   },
@@ -6280,7 +6769,7 @@
     "Id": "settings.Experience_Ux50DownloadSpeedGraph",
     "PageKey": "settings",
     "Title": "下载面板速度曲线",
-    "Keywords": "默认关闭；仅在下载列表打开时按真实传输字节采样，不在后台积累历史。 下载细节 Ux50DownloadSpeedGraph 体验细节 选项 配置 settings preferences",
+    "Keywords": "仅在下载列表打开时按真实传输字节采样，不在后台积累历史。 下载细节 Ux50DownloadSpeedGraph 体验细节 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Experience_Ux50DownloadSpeedGraph",
     "TargetText": "下载面板速度曲线",
@@ -6384,6 +6873,17 @@
     "TargetName": "Experience_Ux50ShowSharedGameDirectory",
     "TargetText": "共享游戏目录标记",
     "SectionTitle": "体验细节 › 实例与模组细节",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_EnableMiniWorldExperimental",
+    "PageKey": "settings",
+    "Title": "显示迷你世界下载与启动入口",
+    "Keywords": "关闭后隐藏实验性功能中的迷你世界入口。作者保持中立，不评判任何游戏；重新开启后仍须阅读声明并答题。 实验性功能 EnableMiniWorldExperimental 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_EnableMiniWorldExperimental",
+    "TargetText": "显示迷你世界下载与启动入口",
+    "SectionTitle": "体验细节 › 实验性功能",
     "SectionKey": "ExperienceDetailsGroup"
   },
   {
@@ -6574,6 +7074,28 @@
     "SectionKey": "ExperienceDetailsGroup"
   },
   {
+    "Id": "settings.Experience_EnableUserExperiencePreviewProgram",
+    "PageKey": "settings",
+    "Title": "用户体验改进计划（接收预览版更新提醒）",
+    "Keywords": "开启后，每次启动会检查比当前版本更高的快照或预览版（同时参考 GitHub 发布标记与版本号），由您选择是否安装；与正式版启动检查独立。不采集或上传使用数据。 更新与预览 EnableUserExperiencePreviewProgram 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_EnableUserExperiencePreviewProgram",
+    "TargetText": "用户体验改进计划（接收预览版更新提醒）",
+    "SectionTitle": "体验细节 › 更新与预览",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.Experience_NetworkDebugEnabled",
+    "PageKey": "settings",
+    "Title": "网络请求调试消息",
+    "Keywords": "在左下角显示启动器 HTTP 请求、响应状态和耗时；不显示密钥、查询参数或请求正文。 诊断与日志 NetworkDebugEnabled 体验细节 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "Experience_NetworkDebugEnabled",
+    "TargetText": "网络请求调试消息",
+    "SectionTitle": "体验细节 › 诊断与日志",
+    "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
     "Id": "settings.Experience_AprilFoolsButtonDodge",
     "PageKey": "settings",
     "Title": "允许启动按钮躲避",
@@ -6588,7 +7110,7 @@
     "Id": "settings.Experience_AprilFoolsExternalVideos",
     "PageKey": "settings",
     "Title": "允许彩蛋打开外部视频",
-    "Keywords": "默认关闭；只有自行允许才会打开浏览器。 趣味与彩蛋 AprilFoolsExternalVideos 体验细节 选项 配置 settings preferences",
+    "Keywords": "只有自行允许才会打开浏览器。 趣味与彩蛋 AprilFoolsExternalVideos 体验细节 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Experience_AprilFoolsExternalVideos",
     "TargetText": "允许彩蛋打开外部视频",
@@ -6599,7 +7121,7 @@
     "Id": "settings.Experience_AprilFoolsFakeErrors",
     "PageKey": "settings",
     "Title": "允许模拟报错",
-    "Keywords": "默认关闭，模拟消息会标明彩蛋。 趣味与彩蛋 AprilFoolsFakeErrors 体验细节 选项 配置 settings preferences",
+    "Keywords": "模拟消息会标明彩蛋。 趣味与彩蛋 AprilFoolsFakeErrors 体验细节 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Experience_AprilFoolsFakeErrors",
     "TargetText": "允许模拟报错",
@@ -6610,7 +7132,7 @@
     "Id": "settings.Experience_AprilFoolsLaunchRefusal",
     "PageKey": "settings",
     "Title": "允许拒绝启动台词",
-    "Keywords": "默认关闭；视觉整蛊中成功触发启动时始终结束整蛊。 趣味与彩蛋 AprilFoolsLaunchRefusal 体验细节 选项 配置 settings preferences",
+    "Keywords": "视觉整蛊中成功触发启动时始终结束整蛊。 趣味与彩蛋 AprilFoolsLaunchRefusal 体验细节 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Experience_AprilFoolsLaunchRefusal",
     "TargetText": "允许拒绝启动台词",
@@ -6665,7 +7187,7 @@
     "Id": "settings.Experience_EnableAprilFoolsEasterEggs",
     "PageKey": "settings",
     "Title": "允许愚人节彩蛋",
-    "Keywords": "关闭时会打开确认挑战，输入彩蛋码可跳过；点击小白旗或按 F1 可立即结束当天整蛊。 趣味与彩蛋 EnableAprilFoolsEasterEggs 体验细节 选项 配置 settings preferences",
+    "Keywords": "关闭时直接进入闯关；窗口中可查看本次启动专用密码并验证关闭。点击小白旗或按 F1 可立即结束当天整蛊。 趣味与彩蛋 EnableAprilFoolsEasterEggs 体验细节 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Experience_EnableAprilFoolsEasterEggs",
     "TargetText": "允许愚人节彩蛋",
@@ -6753,7 +7275,7 @@
     "Id": "settings.Experience_Ux50InputRememberPickerDirectory",
     "PageKey": "settings",
     "Title": "记住文件选择目录",
-    "Keywords": "默认关闭；按用途单独记住目录，不保存选中文件。可在下方清除。 输入与编辑 Ux50InputRememberPickerDirectory 体验细节 选项 配置 settings preferences",
+    "Keywords": "按用途单独记住目录，不保存选中文件。可在下方清除。 输入与编辑 Ux50InputRememberPickerDirectory 体验细节 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Experience_Ux50InputRememberPickerDirectory",
     "TargetText": "记住文件选择目录",
@@ -6775,7 +7297,7 @@
     "Id": "settings.Experience_Ux50InputHoldRevealSecret",
     "PageKey": "settings",
     "Title": "允许按住查看密码或密钥",
-    "Keywords": "默认关闭；按住密码框的眼睛按钮临时显示，松开或失去焦点立即隐藏。 隐私与输入 Ux50InputHoldRevealSecret 体验细节 选项 配置 settings preferences",
+    "Keywords": "按住密码框的眼睛按钮临时显示，松开或失去焦点立即隐藏。 隐私与输入 Ux50InputHoldRevealSecret 体验细节 选项 配置 settings preferences",
     "PageTitle": "设置",
     "TargetName": "Experience_Ux50InputHoldRevealSecret",
     "TargetText": "允许按住查看密码或密钥",
@@ -6792,6 +7314,15 @@
     "TargetText": "输入彩蛋码",
     "SectionTitle": "体验细节 › 趣味与彩蛋",
     "SectionKey": "ExperienceDetailsGroup"
+  },
+  {
+    "Id": "settings.PluginSettingsHost",
+    "PageKey": "settings",
+    "Title": "插件管理",
+    "Keywords": "第三方插件 扩展 DLL EXE XCL xclplugin 授权 权限 导入 重新加载 启动策略 回调超时 API 开发 选项 配置 settings preferences",
+    "PageTitle": "设置",
+    "TargetName": "PluginSettingsHost",
+    "SectionTitle": "插件与扩展"
   },
   {
     "Id": "worlds.page",

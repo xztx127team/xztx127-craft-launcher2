@@ -19,7 +19,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     public event EventHandler? Cancelled;
     public event EventHandler<bool?>? RequestClose;
 
-    private readonly AiAssistantConfig _currentConfig;
+    private AiAssistantConfig _currentConfig;
     private readonly ObservableCollection<AiModelDefinition> _customModels = new();
 
     /// <summary>用户对内置模型分组（普通/专家）的手动调整，Key=模型 ID。保存时写回 AiAssistantConfig.ModelTierOverrides。</summary>
@@ -28,6 +28,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     private readonly Dictionary<string, AiModelAccountingConfig> _accounting = new(StringComparer.OrdinalIgnoreCase);
     private string? _accountingModel;
     private bool _refreshingAccounting;
+    private CancellationTokenSource _modelTestCancellation = new();
     private string? _lastNormalId;
     private string? _lastExpertId;
     private string? _lastManualId;
@@ -36,11 +37,20 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     {
         InitializeComponent();
         _currentConfig = currentConfig;
+        InitializeRequestExperience();
         CustomModelsList.ItemsSource = _customModels;
         ExtraDirectoriesList.ItemsSource = _extraDirs;
         PersonaPresetList.ItemsSource = AiPersonas.Presets;
         LoadConfig(currentConfig);
         _savedDraftFingerprint = CreateDraftFingerprint();
+        InitializeAutoSave();
+        Unloaded += (_, _) => _modelTestCancellation.Cancel();
+        Loaded += (_, _) =>
+        {
+            if (!_modelTestCancellation.IsCancellationRequested) return;
+            _modelTestCancellation.Dispose();
+            _modelTestCancellation = new CancellationTokenSource();
+        };
     }
 
     private readonly ObservableCollection<string> _extraDirs = new();
@@ -50,6 +60,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
         _loading = true;
         try
         {
+            LoadRequestExperience(config);
             CustomModelIdBox.Clear();
             CustomModelNameBox.Clear();
             CustomModelProviderBaseUrlBox.Clear();
@@ -60,6 +71,8 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             _accounting.Clear();
             foreach (var pair in config.ModelAccounting ?? new Dictionary<string, AiModelAccountingConfig>())
                 if (pair.Value != null && !string.IsNullOrWhiteSpace(pair.Key)) _accounting[pair.Key] = pair.Value.Clone();
+            AutoSaveSettingsCheck.IsChecked = config.AutoSaveSettings;
+            ApiProtocolCombo.SelectedValue = config.ApiProtocol.ToString();
             EnabledCheck.IsChecked = config.Enabled;
             FloatingButtonCheck.IsChecked = config.ShowFloatingButton;
             SelectWorkMode(config.WorkMode);
@@ -118,6 +131,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             RequestUsageMetadataCheck.IsChecked = config.RequestUsageMetadata;
             SendTemperatureCheck.IsChecked = config.SendTemperature;
             RequestTimeoutBox.Text = config.RequestTimeoutSeconds.ToString();
+            MaxRunMinutesBox.Text = Math.Clamp(config.MaxRunMinutes, 1, 1440).ToString();
             LongWaitHintSecondsBox.Text = config.LongWaitHintSeconds.ToString();
             LongWaitDescriptionBox.Text = config.LongWaitDescription;
             TemperatureBox.Text = config.Temperature.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -266,6 +280,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     {
         bool custom = UseCustomKeyCheck.IsChecked == true || MixBuiltInApiCheck.IsChecked == true;
         BaseUrlBox.IsEnabled = custom;
+        ApiProtocolCombo.IsEnabled = custom;
         ApiKeyBox.IsEnabled = custom;
         CustomModelsEditor.Visibility = custom ? Visibility.Visible : Visibility.Collapsed;
         BuiltInModelsHintPanel.Visibility = !custom || MixBuiltInApiCheck.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
@@ -712,6 +727,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     private void FullAccessCheck_Checked(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
+        using var pause = SuspendAutoSave();
 
         var first = MessageBoxDialog.ShowConfirm(
             "你正在开启【完全访问】。\n\n开启后，AI 助手可以请求读取、列出甚至写入这台电脑上任意位置的文件，" +
@@ -746,6 +762,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     private void AbsoluteAccessCheck_Checked(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
+        using var pause = SuspendAutoSave();
 
         var first = MessageBoxDialog.ShowConfirm(
             "你正在开启【绝对访问】。\n\n开启后，AI 助手对电脑文件的列出、读取和写入将【不再弹出任何确认】，直接静默执行。\n\n" +
@@ -777,6 +794,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     private void UnrestrictedAccessCheck_Checked(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
+        using var pause = SuspendAutoSave();
 
         var first = MessageBoxDialog.ShowDangerConfirm(
             "你正在开启【完全绝对访问】——这是最高风险级别。\n\n若已允许 Shell 命令，也不再逐次弹出 Shell 确认窗口；仍记录执行日志并可停止。\n\n开启后，AI 助手可以不经任何确认，直接读取、修改、覆盖这台电脑上的【所有文件】，" +
@@ -808,6 +826,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
     private void SystemControlAccessCheck_Checked(object sender, RoutedEventArgs e)
     {
         if (_loading) return;
+        using var pause = SuspendAutoSave();
 
         var first = MessageBoxDialog.ShowDangerConfirm(
             "你正在开启【彻底完全访问】——这是最高危的级别。\n\n开启后，AI 助手可以：\n· 直接修改 Windows 注册表（包括开机启动项、系统与软件配置）；\n" +
@@ -910,7 +929,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
 
     private void Save_Click(object sender, RoutedEventArgs e) => TrySaveChanges();
 
-    private bool TrySaveChanges()
+    private bool TrySaveChanges(bool closeAfterSave = true)
     {
         if (_closeApproved) return true;
         if (!TryCommitPendingCustomModel()) return false;
@@ -970,6 +989,8 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
         var mode = GetRoutingMode();
         var result = new AiAssistantConfig
         {
+            AutoSaveSettings = AutoSaveSettingsCheck.IsChecked == true,
+            ApiProtocol = SelectedApiProtocol,
             Enabled = EnabledCheck.IsChecked == true,
             WorkMode = GetWorkMode(),
             UseCustomApiKey = custom,
@@ -1012,9 +1033,13 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             RequestUsageMetadata = RequestUsageMetadataCheck.IsChecked == true,
             SendTemperature = SendTemperatureCheck.IsChecked == true,
             RequestTimeoutSeconds = ReadTimeout(RequestTimeoutBox.Text),
+            MaxRunMinutes = int.TryParse(MaxRunMinutesBox.Text, out var runMinutes) ? Math.Clamp(runMinutes, 1, 1440) : 15,
             LongWaitHintSeconds = ReadInteger(LongWaitHintSecondsBox.Text, 45, 0, 86400),
             LongWaitDescription = LongWaitDescriptionBox.Text ?? "",
             ModelAccounting = SnapshotAccounting(),
+            ModelRequestProfiles = _requestProfiles.ToDictionary(p => p.Key, p => p.Value.Clone()),
+            DiagnosticModelKey = _diagnosticModelKey,
+            DisableSettingsSearchHint = _disableSearchHint,
             Temperature = double.TryParse(TemperatureBox.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var temperature) && double.IsFinite(temperature) ? Math.Clamp(temperature, 0, 2) : 0.6,
             MaxOutputTokens = ReadInteger(MaxOutputTokensBox.Text, 0, 0, 32768),
             MaxToolActionsPerTurn = ReadInteger(MaxToolActionsBox.Text, 0, 0, int.MaxValue),
@@ -1027,7 +1052,9 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             EnableDeepThinking = GetReasoningLevel() is not (AiReasoningLevel.Off or AiReasoningLevel.Fast),
             EnableWebSearch = EnableWebSearchCheck.IsChecked == true,
             TokenSaverMode = TokenSaverCheck.IsEnabled && TokenSaverCheck.IsChecked == true,
-            AcceptedTermsVersion = _currentConfig.AcceptedTermsVersion,
+            // Consent is managed by the launcher, not by this settings draft. Another settings
+            // window may have revoked it since this editor was opened.
+            AcceptedTermsVersion = ConfigService.Active?.Config.AiAssistant.AcceptedTermsVersion ?? _currentConfig.AcceptedTermsVersion,
             PanelWidth = _currentConfig.PanelWidth,
             PanelWasOpen = _currentConfig.PanelWasOpen,
             LastSessionId = _currentConfig.LastSessionId
@@ -1048,8 +1075,16 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             ShowSettingsWarning("保存 AI 助手设置失败，请检查配置目录是否可写后重试。当前编辑内容仍保留。", "AI 设置");
             return false;
         }
-        _closeApproved = true;
-        RequestClose?.Invoke(this, true);
+        _currentConfig = result;
+        _resetUsageModelKeys.Clear();
+        _savedDraftFingerprint = CreateDraftFingerprint();
+        AutoSaveStatusText.Text = "已保存 " + DateTime.Now.ToString("HH:mm:ss");
+        if (closeAfterSave)
+        {
+            _closeApproved = true;
+            _autoSaveTimer.Stop();
+            RequestClose?.Invoke(this, true);
+        }
         return true;
     }
 
@@ -1089,18 +1124,18 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
         try
         {
             var draftConfig = BuildDraftConfigForTest();
-            var testService = new AiAssistantService(draftConfig, App.DataDir);
-            var (ok, message) = await testService.TestModelAsync(modelId);
+            using var testService = new AiAssistantService(draftConfig, App.DataDir);
+            var token = _modelTestCancellation.Token;
+            var (ok, message) = await testService.TestModelAsync(modelId, token);
+            if (token.IsCancellationRequested || !IsLoaded) return;
 
             var displayName = AiModelIds.GetDisplayName(draftConfig, modelId);
-            if (ok)
-                await MessageBoxDialog.ShowSuccessAsync(message, $"“{displayName}” 测试通过");
-            else
-                await MessageBoxDialog.ShowErrorAsync(message, $"“{displayName}” 测试失败");
+            await ShowModelTestResultAsync(message, $"“{displayName}” 测试{(ok ? "通过" : "失败")}", ok);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            await MessageBoxDialog.ShowErrorAsync(ex.Message, "测试模型");
+            if (IsLoaded) await ShowModelTestResultAsync(ex.Message, "测试模型", false);
         }
         finally
         {
@@ -1117,6 +1152,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
         CommitPendingKeys();
         return new AiAssistantConfig
         {
+            ApiProtocol = SelectedApiProtocol,
             Enabled = true,
             WorkMode = GetWorkMode(),
             UseCustomApiKey = UseCustomKeyCheck.IsChecked == true,
@@ -1140,9 +1176,13 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             RequestUsageMetadata = RequestUsageMetadataCheck.IsChecked == true,
             SendTemperature = SendTemperatureCheck.IsChecked == true,
             RequestTimeoutSeconds = ReadTimeout(RequestTimeoutBox.Text),
+            MaxRunMinutes = int.TryParse(MaxRunMinutesBox.Text, out var runMinutes) ? Math.Clamp(runMinutes, 1, 1440) : 15,
             LongWaitHintSeconds = ReadInteger(LongWaitHintSecondsBox.Text, 45, 0, 86400),
             LongWaitDescription = LongWaitDescriptionBox.Text ?? "",
             ModelAccounting = SnapshotAccounting(),
+            ModelRequestProfiles = _requestProfiles.ToDictionary(p => p.Key, p => p.Value.Clone()),
+            DiagnosticModelKey = _diagnosticModelKey,
+            DisableSettingsSearchHint = _disableSearchHint,
             Temperature = double.TryParse(TemperatureBox.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var temperature) && double.IsFinite(temperature) ? Math.Clamp(temperature, 0, 2) : 0.6,
             MaxOutputTokens = ReadInteger(MaxOutputTokensBox.Text, 0, 0, 32768),
             MaxToolActionsPerTurn = ReadInteger(MaxToolActionsBox.Text, 0, 0, int.MaxValue),
@@ -1166,6 +1206,8 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
         int.TryParse(ThresholdBox.Text, out var threshold);
         return new AiAssistantConfig
         {
+            AutoSaveSettings = AutoSaveSettingsCheck.IsChecked == true,
+            ApiProtocol = SelectedApiProtocol,
             Enabled = EnabledCheck.IsChecked == true,
             WorkMode = GetWorkMode(),
             ShowFloatingButton = FloatingButtonCheck.IsChecked == true,
@@ -1208,9 +1250,13 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             RequestUsageMetadata = RequestUsageMetadataCheck.IsChecked == true,
             SendTemperature = SendTemperatureCheck.IsChecked == true,
             RequestTimeoutSeconds = ReadTimeout(RequestTimeoutBox.Text),
+            MaxRunMinutes = int.TryParse(MaxRunMinutesBox.Text, out var runMinutes) ? Math.Clamp(runMinutes, 1, 1440) : 15,
             LongWaitHintSeconds = ReadInteger(LongWaitHintSecondsBox.Text, 45, 0, 86400),
             LongWaitDescription = LongWaitDescriptionBox.Text ?? "",
             ModelAccounting = SnapshotAccounting(),
+            ModelRequestProfiles = _requestProfiles.ToDictionary(p => p.Key, p => p.Value.Clone()),
+            DiagnosticModelKey = _diagnosticModelKey,
+            DisableSettingsSearchHint = _disableSearchHint,
             Temperature = double.TryParse(TemperatureBox.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var temperature) && double.IsFinite(temperature) ? Math.Clamp(temperature, 0, 2) : 0.6,
             MaxOutputTokens = ReadInteger(MaxOutputTokensBox.Text, 0, 0, 32768),
             MaxToolActionsPerTurn = ReadInteger(MaxToolActionsBox.Text, 0, 0, int.MaxValue),
@@ -1223,7 +1269,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             EnableDeepThinking = GetReasoningLevel() is not (AiReasoningLevel.Off or AiReasoningLevel.Fast),
             EnableWebSearch = EnableWebSearchCheck.IsChecked == true,
             TokenSaverMode = TokenSaverCheck.IsEnabled && TokenSaverCheck.IsChecked == true,
-            AcceptedTermsVersion = _currentConfig.AcceptedTermsVersion,
+            AcceptedTermsVersion = ConfigService.Active?.Config.AiAssistant.AcceptedTermsVersion ?? _currentConfig.AcceptedTermsVersion,
             PanelWidth = _currentConfig.PanelWidth,
             PanelWasOpen = _currentConfig.PanelWasOpen,
             LastSessionId = _currentConfig.LastSessionId
@@ -1262,6 +1308,8 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             int? GetInt(string key) =>
                 root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : null;
 
+            if (GetBool("自动保存配置") is bool autoSave) config.AutoSaveSettings = autoSave;
+            if (GetStr("接口格式") is string protocolText && Enum.TryParse<AiApiProtocol>(protocolText, true, out var protocol) && Enum.IsDefined(protocol)) config.ApiProtocol = protocol;
             if (GetBool("启用AI助手") is bool enabled) config.Enabled = enabled;
             if (GetBool("显示悬浮按钮") is bool floating) config.ShowFloatingButton = floating;
             // Missing mode keeps the current selection; malformed values choose the read-only mode.
@@ -1286,6 +1334,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             if (GetBool("流式输出") is bool stream) config.StreamResponses = stream;
             if (GetBool("发送温度") is bool sendTemperature) config.SendTemperature = sendTemperature;
             if (GetBool("请求流式用量") is bool requestUsage) config.RequestUsageMetadata = requestUsage;
+            if (GetStr("每轮运行分钟") is string runLimit && int.TryParse(runLimit, out var minutes)) config.MaxRunMinutes = Math.Clamp(minutes, 1, 1440);
             if (GetStr("请求超时") is string timeout) config.RequestTimeoutSeconds = ReadTimeout(timeout);
             if (GetStr("等待提示时间") is string hintSeconds) config.LongWaitHintSeconds = ReadInteger(hintSeconds, 45, 0, 86400);
             if (GetStr("等待提示描述") is string hint) config.LongWaitDescription = hint.Length <= 2000 ? hint : hint[..2000];
@@ -1328,6 +1377,15 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
                 config.ModelTierOverrides = importedTiers;
             }
 
+            if (GetBool("关闭设置搜索提醒") is bool noHint) config.DisableSettingsSearchHint = noHint;
+            if (root.TryGetProperty("诊断模型", out var diagModel) && diagModel.ValueKind == JsonValueKind.String) config.DiagnosticModelKey = diagModel.GetString() ?? "";
+            if (root.TryGetProperty("模型请求规则", out var requestRules))
+            {
+                var imported = requestRules.Deserialize<Dictionary<string, AiModelRequestProfile>>() ?? new();
+                foreach (var entry in imported.Values)
+                    if (AiModelParameterPolicy.Validate(entry) is { } invalid) throw new InvalidOperationException(invalid);
+                config.ModelRequestProfiles = imported;
+            }
             // 密钥/接口地址/模型表这几项只有导出时选了"保留"才会出现在文件里；出现才覆盖，
             // 没出现（"可分发"版本）就保留编辑框里已经填好的那份，不做任何改动。
             if (GetBool("使用自定义API") is bool useCustom) { config.UseCustomApiKey = useCustom; hadCredentials = true; }
@@ -1445,6 +1503,8 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             ["_说明"] = includeCredentials
                 ? "此文件包含明文 API 密钥/接口地址，请勿分发给他人或上传到公开渠道。"
                 : "此文件已去除密钥/接口地址/自定义模型表，可安全分享给他人用于排查设置问题。",
+            ["自动保存配置"] = AutoSaveSettingsCheck.IsChecked == true,
+            ["接口格式"] = SelectedApiProtocol.ToString(),
             ["启用AI助手"] = EnabledCheck.IsChecked == true,
             ["显示悬浮按钮"] = FloatingButtonCheck.IsChecked == true,
             ["默认工作模式"] = GetWorkMode().ToString(),
@@ -1462,6 +1522,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             ["请求流式用量"] = RequestUsageMetadataCheck.IsChecked == true,
             ["发送温度"] = SendTemperatureCheck.IsChecked == true,
             ["请求超时"] = RequestTimeoutBox.Text,
+            ["每轮运行分钟"] = MaxRunMinutesBox.Text,
             ["等待提示时间"] = LongWaitHintSecondsBox.Text,
             ["等待提示描述"] = LongWaitDescriptionBox.Text,
             ["模型用量设置"] = SnapshotAccounting(),
@@ -1478,6 +1539,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
             ["混合内置接口"] = MixBuiltInApiCheck.IsChecked == true,
             ["密钥自动切换"] = ApiKeyFailoverCheck.IsChecked == true,
             ["跨接口自动切换"] = EndpointFailoverCheck.IsChecked == true,
+            ["关闭设置搜索提醒"] = _disableSearchHint,
             ["默认联网搜索"] = EnableWebSearchCheck.IsChecked == true,
             ["允许崩溃日志分析"] = AllowCrashLogCheck.IsChecked == true,
             ["访客会话结束清空历史"] = ClearGuestHistoryCheck.IsChecked == true,
@@ -1490,6 +1552,8 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
 
         if (includeCredentials)
         {
+            payload["模型请求规则"] = _requestProfiles;
+            payload["诊断模型"] = _diagnosticModelKey;
             payload["接口地址BaseUrl"] = BaseUrlBox.Text?.Trim() ?? "";
             payload["API密钥"] = ApiKeyBox.Password ?? "";
             payload["备用API密钥"] = _defaultExtraKeys.ToList();

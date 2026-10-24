@@ -95,14 +95,40 @@ public partial class HomePage : UserControl
 
     /// <summary>窗口最大化/还原/缩放后刷新首页布局：磁贴区高度按当前可用高度匹配（全屏时不再是
     /// 一小块漂在大片空白中间），胶囊条重新排列，并按当前搜索框样式重新让位。</summary>
+    private bool _compactHomeLayout;
+
     public void RefreshForSizeChange()
     {
         ApplyCapsuleBarMargin();
-        var h = HomeScroll.ActualHeight;
-        if (h > 0) TileGrid.MinHeight = Math.Clamp(h * 0.5, 0, 560);
-        CapsuleBar.InvalidateMeasure();
-        InvalidateMeasure();
-        UpdateLayout();
+        var compact = ActualWidth > 0 && (ActualWidth < 640 || ActualHeight < 420);
+        if (compact != _compactHomeLayout)
+        {
+            _compactHomeLayout = compact;
+            // 小窗口让整页一起滚动，避免胶囊条占满固定 Auto 行而把首页正文挤成零高度。
+            if (compact)
+            {
+                HomeLayoutGrid.Children.Remove(CapsuleBar);
+                HomeBodyPanel.Children.Insert(0, CapsuleBar);
+                Grid.SetRow(HomeScroll, 0);
+                Grid.SetRowSpan(HomeScroll, 2);
+            }
+            else
+            {
+                HomeBodyPanel.Children.Remove(CapsuleBar);
+                HomeLayoutGrid.Children.Add(CapsuleBar);
+                Grid.SetRow(HomeScroll, 1);
+                Grid.SetRowSpan(HomeScroll, 1);
+            }
+        }
+        HomeSurface.Padding = new Thickness(compact ? 12 : _owner.IsNativePreviewOpen ? 24 : 30);
+        HomeBodyPanel.VerticalAlignment = compact ? VerticalAlignment.Top : VerticalAlignment.Center;
+        var innerWidth = Math.Max(120, ActualWidth - HomeSurface.Padding.Left - HomeSurface.Padding.Right);
+        TileGrid.Columns = compact ? (innerWidth < 380 ? 1 : 2) : 3;
+        TileGrid.Rows = compact ? 0 : 2;
+        TileGrid.MinHeight = compact ? 0 : Math.Clamp(HomeScroll.ActualHeight * .5, 0, 560);
+        LanguageEntryButtonText.MaxWidth = compact ? Math.Max(80, Math.Min(220, innerWidth - 60)) : double.PositiveInfinity;
+        LanguageEntryButtonText.TextTrimming = TextTrimming.CharacterEllipsis;
+        // 让 WPF 合并下一帧的布局；SizeChanged 内不再强制 UpdateLayout。
     }
 
     /// <summary>顶部全局搜索框的悬浮窗紧贴标题栏下沿、盖在内容区最上方一小条。胶囊条不再在左侧留空
@@ -127,6 +153,7 @@ public partial class HomePage : UserControl
             l => l.Code == LocalizationService.CurrentLanguageCode);
         var name = current?.NativeName ?? LocalizationService.CurrentLanguageCode;
         LanguageEntryButtonText.Text = template.Replace("*", name);
+        LanguageEntryButtonText.ToolTip = LanguageEntryButtonText.Text;
     }
 
     /// <summary>基本模式（RestrictedMode=true）下的功能门控。

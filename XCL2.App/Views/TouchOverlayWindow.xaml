@@ -84,5 +84,12 @@
                 Background="#B3000000" Visibility="Collapsed">
             <TextBlock Style="{StaticResource SmallKeyTextStyle}" Text="显示"/>
         </Border>
+        <!-- 旧后端的原生光标可能长期被触摸抑制；保留不依赖自动检测的明确出口。 -->
+        <Border x:Name="ModeKey" Style="{StaticResource SmallKeyStyle}" Width="124"
+                HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,8,0,0"
+                Background="#B3205268"
+                ToolTip="点击切换：自动 → 视角 → 菜单。手动模式持续有效；ESC/E 按菜单动作切换，失焦或退出世界后恢复自动。">
+            <TextBlock x:Name="ModeKeyText" Style="{StaticResource SmallKeyTextStyle}" Text="自动 · 菜单"/>
+        </Border>
     </Grid>
 </Window>

@@ -148,6 +148,12 @@ public static class ThemeService
     public const string SkinBerry = ThemePaletteCatalog.SkinBerry;
     public const string SkinDune = ThemePaletteCatalog.SkinDune;
     public const string SkinMidnight = ThemePaletteCatalog.SkinMidnight;
+    public const string SkinJade = ThemePaletteCatalog.SkinJade;
+    public const string SkinCoral = ThemePaletteCatalog.SkinCoral;
+    public const string SkinOcean = ThemePaletteCatalog.SkinOcean;
+    public const string SkinLavender = ThemePaletteCatalog.SkinLavender;
+    public const string SkinSlate = ThemePaletteCatalog.SkinSlate;
+    public const string SkinSunflower = ThemePaletteCatalog.SkinSunflower;
     /// <summary>历史遗留色系常量：仅用于兼容"旧配置文件里 UiSkin 存的是 Dark"这种数据，
     /// 新增的色系选择 UI（设置页下拉框等）不再把它作为一个可选项列出——现在"要不要深色"
     /// 已经拆到 IsDarkMode 独立控制，不需要再单独占一个"色系"位置。</summary>
@@ -163,7 +169,7 @@ public static class ThemeService
 
     /// <summary>提供给设置页"色系"下拉框遍历用的可选值，不包含 SkinDark（见上面注释，
     /// 深色已经拆成 IsDarkMode 独立维度，不再是一个单独的色系选项）。</summary>
-    public static readonly string[] AllSkins = { SkinWhite, SkinBlue, SkinYellow, SkinPurple, SkinPink, SkinSilver, SkinGold, SkinEmerald, SkinNether, SkinEndStone, SkinWarmYellow, SkinOrange, SkinObsidian, SkinFrostglass, SkinChampagneFrost, SkinPearl, SkinAlabaster, SkinGlacier, SkinCopper, SkinDeepslate, SkinAmethyst, SkinPrismarine, SkinLava, SkinLapis, SkinAquatic, SkinSakura, SkinForest, SkinSeaSalt, SkinCoffee, SkinGrape, SkinBerry, SkinDune, SkinMidnight, SkinCustom };
+    public static readonly string[] AllSkins = { SkinWhite, SkinBlue, SkinYellow, SkinPurple, SkinPink, SkinSilver, SkinGold, SkinEmerald, SkinNether, SkinEndStone, SkinWarmYellow, SkinOrange, SkinObsidian, SkinFrostglass, SkinChampagneFrost, SkinPearl, SkinAlabaster, SkinGlacier, SkinCopper, SkinDeepslate, SkinAmethyst, SkinPrismarine, SkinLava, SkinLapis, SkinAquatic, SkinSakura, SkinForest, SkinSeaSalt, SkinCoffee, SkinGrape, SkinBerry, SkinDune, SkinMidnight, SkinJade, SkinCoral, SkinOcean, SkinLavender, SkinSlate, SkinSunflower, SkinCustom };
 
     /// <summary>当前是否深色模式，Apply 每次调用时同步更新。供 WindowChromeService 在
     /// 新窗口刚创建（SourceInitialized）时查询"现在该用深色标题栏还是浅色标题栏"——
@@ -919,15 +925,16 @@ public static class ThemeService
         var resources = Application.Current?.Resources;
         if (resources == null) return;
 
-        var hover = Mix(color, isDark ? Colors.White : Colors.Black, isDark ? 0.16 : 0.12);
+        // 保留用户选择用于色块/光晕；作为文字和图标的强调色需要在当前面板上可读。
+        var panel = (Color)ColorConverter.ConvertFromString(Palettes[(SkinWhite, isDark)].Panel)!;
+        var accent = EnsureContrast(color, panel, 4.5);
+        var hover = EnsureContrast(Mix(accent, isDark ? Colors.White : Colors.Black, isDark ? 0.16 : 0.12), panel, 4.5);
         var glow = Mix(color, Colors.White, isDark ? 0.10 : 0.18);
         var glowSoft = Mix(color, isDark ? Color.FromRgb(0x20, 0x24, 0x2B) : Colors.White, isDark ? 0.72 : 0.84);
         var borderHover = Mix(color, isDark ? Colors.White : Color.FromRgb(0x4A, 0x55, 0x68), isDark ? 0.32 : 0.42);
-        var buttonBackground = Mix(color, isDark ? Color.FromRgb(0x20, 0x24, 0x2B) : Colors.White, isDark ? 0.58 : 0.76);
-        var buttonHover = Mix(color, isDark ? Color.FromRgb(0x20, 0x24, 0x2B) : Colors.White, isDark ? 0.42 : 0.62);
-        var buttonForeground = isDark ? Colors.White : Mix(color, Colors.Black, 0.62);
+        var (buttonBackground, buttonHover, buttonForeground) = CustomButtonColors(color, isDark);
 
-        SetBrushColor(resources, "AccentBrush", ToHex(color));
+        SetBrushColor(resources, "AccentBrush", ToHex(accent));
         SetBrushColor(resources, "AccentHoverBrush", ToHex(hover));
         SetBrushColor(resources, "GlowBrush", ToHex(glow));
         SetBrushColor(resources, "GlowSoftBrush", ToHex(glowSoft));
@@ -943,6 +950,56 @@ public static class ThemeService
         ReapplyPanelAlpha();
         ReapplyTextAlpha();
         RefreshOpenWindows();
+    }
+
+    private static (Color Background, Color Hover, Color Foreground) CustomButtonColors(Color color, bool isDark)
+    {
+        var baseColor = isDark ? Color.FromRgb(0x20, 0x24, 0x2B) : Colors.White;
+        var background = Mix(color, baseColor, isDark ? 0.58 : 0.76);
+        var hover = Mix(color, baseColor, isDark ? 0.42 : 0.62);
+        var foreground = isDark ? Colors.White : Mix(color, Colors.Black, 0.62);
+        if (Math.Min(ContrastRatio(foreground, background), ContrastRatio(foreground, hover)) < 4.5)
+        {
+            foreground = Math.Min(ContrastRatio(Colors.Black, background), ContrastRatio(Colors.Black, hover))
+                >= Math.Min(ContrastRatio(Colors.White, background), ContrastRatio(Colors.White, hover))
+                ? Colors.Black : Colors.White;
+            // 极亮/极暗的用户色可能跨过黑字/白字的临界点，微调按钮底色保持两种状态都清晰。
+            background = EnsureContrast(background, foreground, 4.5);
+            hover = EnsureContrast(hover, foreground, 4.5);
+        }
+        return (background, hover, foreground);
+    }
+
+    private static double ContrastRatio(Color foreground, Color background)
+    {
+        static double Luminance(Color color)
+        {
+            static double Linear(byte value)
+            {
+                var channel = value / 255.0;
+                return channel <= 0.04045 ? channel / 12.92 : Math.Pow((channel + 0.055) / 1.055, 2.4);
+            }
+            return 0.2126 * Linear(color.R) + 0.7152 * Linear(color.G) + 0.0722 * Linear(color.B);
+        }
+        var a = Luminance(foreground);
+        var b = Luminance(background);
+        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+    }
+
+    private static Color EnsureContrast(Color foreground, Color background, double minimum)
+    {
+        if (ContrastRatio(foreground, background) >= minimum) return foreground;
+        var target = ContrastRatio(Colors.Black, background) >= ContrastRatio(Colors.White, background)
+            ? Colors.Black : Colors.White;
+        var low = 0.0;
+        var high = 1.0;
+        for (var step = 0; step < 12; step++)
+        {
+            var middle = (low + high) / 2;
+            if (ContrastRatio(Mix(foreground, target, middle), background) >= minimum) high = middle;
+            else low = middle;
+        }
+        return Mix(foreground, target, high);
     }
 
     private static Color Mix(Color a, Color b, double amountOfB)
@@ -1455,10 +1512,7 @@ public static class ThemeService
         var buttonBackground = p.ButtonBackground;
         if (_currentHue == SkinCustom)
         {
-            var customButton = Mix(_currentCustomAccent,
-                CurrentIsDarkMode ? Color.FromRgb(0x20, 0x24, 0x2B) : Colors.White,
-                CurrentIsDarkMode ? 0.58 : 0.76);
-            buttonBackground = ToHex(customButton);
+            buttonBackground = ToHex(CustomButtonColors(_currentCustomAccent, CurrentIsDarkMode).Background);
         }
 
         SetBrushColorWithAlpha(res, "PanelBrush", p.Panel, alpha);
@@ -1761,6 +1815,12 @@ public static class ThemeService
         SkinBerry => "莓果",
         SkinDune => "沙丘",
         SkinMidnight => "午夜",
+        SkinJade => "青玉",
+        SkinCoral => "珊瑚",
+        SkinOcean => "远海",
+        SkinLavender => "薰衣草",
+        SkinSlate => "石墨",
+        SkinSunflower => "向日葵",
         SkinDark => "黑色",
         SkinEggNote => "注意：此按钮以及以下的按钮均为彩蛋，均为白色系",
         SkinEggDisco => "(彩蛋)雷霆动物集体蹦迪",

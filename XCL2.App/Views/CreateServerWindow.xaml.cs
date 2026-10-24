@@ -428,7 +428,7 @@ public partial class CreateServerWindow : OverlayDialogControl
 
         var queueName = reinstallTarget != null ? $"覆盖安装核心 {name}" : $"创建服务器 {name}";
         if (DownloadQueueService.Instance.Items.Any(i => i.Name == queueName &&
-                i.Status is DownloadQueueItemStatus.Downloading or DownloadQueueItemStatus.Paused))
+                (i.IsRunning || i.IsCleaningUp || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting)))
         {
             MessageBoxDialog.ShowInfo("这个任务已经在下载列表中了，请等它完成。", Loc.T("Str_Status_Tip", "提示"));
             return;
@@ -437,7 +437,7 @@ public partial class CreateServerWindow : OverlayDialogControl
         DownloadQueueService.Instance.StartNew(queueName, async (item, ct) =>
         {
             var progress = item.CreateProgress();
-            var textProgress = new Progress<string>(line => item.StatusText = line);
+            var textProgress = item.CreateTextProgress();
 
             var result = await coreService.DownloadAsync(req, progress, ct);
 

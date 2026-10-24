@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 
 namespace XCL2.App.Services;
 
@@ -50,6 +51,17 @@ public static class PageTransitionBehavior
     public static void SetIsExpanded(DependencyObject target, bool value) => target.SetValue(IsExpandedProperty, value);
     private static readonly DependencyProperty VisibleCyclePreparedProperty = DependencyProperty.RegisterAttached(
         "VisibleCyclePrepared", typeof(bool), typeof(PageTransitionBehavior), new PropertyMetadata(false));
+    private static readonly DependencyProperty ObservedContentProperty = DependencyProperty.RegisterAttached(
+        "ObservedContent", typeof(object), typeof(PageTransitionBehavior), new PropertyMetadata(null, OnObservedContentChanged));
+
+    private static void OnObservedContentChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
+    {
+        // 三级详情和抽屉一直可见时只是替换 Content，不会再次触发 IsVisibleChanged。
+        // 用自身绑定观察替换，避免全局属性描述符订阅长期持有已关闭的页面。
+        if (target is ContentControl { IsLoaded: true, IsVisible: true } content
+            && GetAnimateOnVisible(content) && !ReferenceEquals(e.OldValue, e.NewValue))
+            PrepareEntrance(content);
+    }
 
     private static void OnVisibleBehaviorChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {
@@ -59,6 +71,9 @@ public static class PageTransitionBehavior
             element.Loaded += Element_Loaded;
             element.IsVisibleChanged += Element_IsVisibleChanged;
             element.Unloaded += Element_Unloaded;
+            if (element is ContentControl content)
+                BindingOperations.SetBinding(content, ObservedContentProperty,
+                    new Binding(nameof(ContentControl.Content)) { Source = content, Mode = BindingMode.OneWay });
             if (element.IsVisible) PrepareVisibleEntrance(element);
         }
         else
@@ -66,6 +81,8 @@ public static class PageTransitionBehavior
             element.Loaded -= Element_Loaded;
             element.IsVisibleChanged -= Element_IsVisibleChanged;
             element.Unloaded -= Element_Unloaded;
+            if (element is ContentControl content)
+                BindingOperations.ClearBinding(content, ObservedContentProperty);
             Cancel(element);
         }
     }

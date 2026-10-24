@@ -11,5 +11,12 @@
     <Compile Include="../../Services/LegacyTouchWorldEvidence.cs" Link="LegacyTouchWorldEvidence.cs" />
     <Compile Include="../../Services/LegacyTouchCursorEvidence.cs" Link="LegacyTouchCursorEvidence.cs" />
     <Compile Include="../../Services/LegacyTouchMotion.cs" Link="LegacyTouchMotion.cs" />
-  </ItemGroup>
+    <Compile Include="../../Services/LegacyTouchMousePolicy.cs" Link="LegacyTouchMousePolicy.cs" />
+    <Compile Include="../../Services/LegacyMouseMessageReceipts.cs" Link="LegacyMouseMessageReceipts.cs" />
+    <Compile Include="../../Services/LegacyTouchInputDelivery.cs" Link="LegacyTouchInputDelivery.cs" />
+      <Compile Include="../../Services/TouchCaptureRecovery.cs" Link="TouchCaptureRecovery.cs" />
+      <Compile Include="../../Services/TouchGameBackend.cs" Link="TouchGameBackend.cs" />
+    <Compile Include="../../Services/TouchRoutePolicy.cs" Link="TouchRoutePolicy.cs" />
+    <Compile Include="../../Services/SettingsScrollHintPolicy.cs" Link="SettingsScrollHintPolicy.cs" />
+</ItemGroup>
 </Project>

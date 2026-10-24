@@ -1,34 +1,48 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text.Json;
+using XCL2.App.Models;
 
 namespace XCL2.App.Services;
 
 /// <summary>
-/// 陶瓦联机(Terracotta | https://github.com/burningtnt/Terracotta) 集成服务。
-///
-/// 重要说明——这里做的是什么、不是什么：
-/// 陶瓦联机本体是一个独立的 Rust 程序(基于 EasyTier 的 P2P 组网工具，针对 Minecraft 做了
-/// 大量优化)，HMCL/PCL-CE/FMCL 等启动器是"打包/拉起这个独立程序"来提供联机入口，
-/// 而不是在自己的代码里重新实现了一遍 EasyTier 的 P2P 打洞协议——那是一整套独立的网络工程，
-/// 没有公开、稳定的"进程间通信协议"文档可以照抄(HMCL 的联机模块本身也不是开源的，见
-/// zhaose233/HMCL-Clean 仓库描述:"remove ... multiplayer(not FOSS)")。
-///
-/// 集成方式(v2 起改为内置)：
-/// 陶瓦联机的 Windows x64 可执行文件(0.4.2)已经作为 EmbeddedResource 编译进本程序集
-/// (见 .csproj)，不再需要用户自己去 GitHub 下载、也不需要手动选择文件路径——
-/// 首次点"启动陶瓦联机"时，EnsureExtracted 会把内嵌的字节流写到本地数据目录下
-/// 固定的一个文件，之后每次直接复用这份已释放的文件(用文件大小 + 校验做一次轻量比对，
-/// 避免每次启动都重新写一遍磁盘)。
-/// 建房/加入房间/输入房间码这些交互，仍然全部由陶瓦联机自己的窗口完成，
-/// 本启动器只负责"确保文件在本地 + 拉起进程"这一层，不假装重新实现了联机协议本身。
-///
-/// AppConfig.TerracottaExecutablePath 保留作为可选的手动覆盖——留空(默认)时总是使用内置版本，
-/// 只有用户主动通过"选择可执行文件..."指定了别的路径时才会改用那个路径（比如以后陶瓦联机出了
-/// 新版本、内置版本还没来得及更新，用户可以自己下载新版本临时替换）。
+/// 运行未经修改的 Terracotta；原生模式使用上游 v0.4.2 的 --hmcl 端口文件协议。
+/// 通过实际 HTTP API 为 WPF 原生控件提供房间、成员、连接与日志数据，不打开网页。
 /// </summary>
 public class TerracottaService
 {
+    private static readonly object ExtractionLock = new();
+    private static readonly SemaphoreSlim LaunchGate = new(1, 1);
+    private static (string Executable, Session Session)? CachedSession;
+    private static readonly HttpClient LocalClient = new(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
+        { Timeout = TimeSpan.FromSeconds(3) };
+    private readonly TerracottaApiClient _api = new(LocalClient);
+    public sealed record Session(Uri Endpoint, string Version, string EasyTierVersion)
+    {
+        public TerracottaMetadata? Metadata { get; init; }
+    }
+
+    public Task<Session> LaunchNativeAsync(string? configuredOverridePath, CancellationToken token = default)
+        => LaunchEmbeddedAsync(configuredOverridePath, token);
+    public Task<TerracottaMetadata> GetMetadataAsync(Uri endpoint, CancellationToken token = default)
+        => _api.GetMetadataAsync(endpoint, token);
+    public Task<TerracottaRoomState> GetStateAsync(Uri endpoint, CancellationToken token = default)
+        => _api.GetStateAsync(endpoint, token);
+    public Task<TerracottaRoomState> CreateRoomAsync(Uri endpoint, string? room = null, string? player = null,
+        IReadOnlyList<string>? publicNodes = null, CancellationToken token = default)
+        => _api.CreateRoomAsync(endpoint, room, player, publicNodes, token);
+    public Task<TerracottaRoomState> JoinRoomAsync(Uri endpoint, string roomCode, string? player = null,
+        IReadOnlyList<string>? publicNodes = null, CancellationToken token = default)
+        => _api.JoinRoomAsync(endpoint, roomCode, player, publicNodes, token);
+    public Task<TerracottaRoomState> LeaveRoomAsync(Uri endpoint, CancellationToken token = default)
+        => _api.LeaveRoomAsync(endpoint, token);
+    /// <summary>显式退出全局服务；不能用于页面离开或取消等待。</summary>
+    public Task<TerracottaServiceStopResult> StopServiceAsync(Uri endpoint, CancellationToken token = default)
+        => _api.StopServiceAsync(endpoint, token);
+
     public const string ReleasesUrl = "https://github.com/burningtnt/Terracotta/releases";
     public const string ProjectHomeUrl = "https://github.com/burningtnt/Terracotta";
 
@@ -51,6 +65,11 @@ public class TerracottaService
     /// </summary>
     private string EnsureExtracted()
     {
+        lock (ExtractionLock) return ExtractCore();
+    }
+
+    private string ExtractCore()
+    {
         var dir = Path.Combine(App.DataDir, "terracotta");
         Directory.CreateDirectory(dir);
         var targetPath = Path.Combine(dir, ExtractedFileName);
@@ -61,7 +80,12 @@ public class TerracottaService
                 $"当前构建没有携带内置陶瓦联机资源（{EmbeddedResourceName}）。请点击“使用其他版本”选择 Terracotta 可执行文件；如果你是从源码构建，也可以把对应 exe 放回 Resources\\Terracotta 后重新编译。");
 
         if (File.Exists(targetPath) && new FileInfo(targetPath).Length == resourceStream.Length)
-            return targetPath;
+        {
+            using var current = File.OpenRead(targetPath);
+            if (CryptographicOperations.FixedTimeEquals(SHA256.HashData(current), SHA256.HashData(resourceStream)))
+                return targetPath;
+            resourceStream.Position = 0;
+        }
 
         // 先写到临时文件再原子性地移动过去，避免"写到一半时用户正好又点了一次启动"
         // 或者程序被强制结束导致目标路径留下一个不完整、无法运行的半成品文件。
@@ -97,6 +121,115 @@ public class TerracottaService
             UseShellExecute = true,
             WorkingDirectory = Path.GetDirectoryName(executablePath) ?? Environment.CurrentDirectory
         });
+    }
+
+    public async Task<Session> LaunchEmbeddedAsync(string? configuredOverridePath, CancellationToken token = default)
+    {
+        await LaunchGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            var executable = await Task.Run(() => ResolveExecutable(configuredOverridePath), token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            if (CachedSession is { } cached && string.Equals(cached.Executable, executable, StringComparison.OrdinalIgnoreCase))
+            {
+                try { return await ReadSessionAsync(cached.Session.Endpoint, token).ConfigureAwait(false); }
+                catch (Exception ex) when (ex is HttpRequestException or JsonException or KeyNotFoundException or IOException) { CachedSession = null; }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested) { CachedSession = null; }
+            }
+            var session = await LaunchEmbeddedCoreAsync(executable, token).ConfigureAwait(false);
+            CachedSession = (executable, session);
+            return session;
+        }
+        finally { LaunchGate.Release(); }
+    }
+
+    private static async Task<Session> ReadSessionAsync(Uri endpoint, CancellationToken token)
+    {
+        var metadata = await new TerracottaApiClient(LocalClient).GetMetadataAsync(endpoint, token).ConfigureAwait(false);
+        return new Session(endpoint, metadata.Version, metadata.EasyTierVersion) { Metadata = metadata };
+    }
+
+    private static async Task<Session> LaunchEmbeddedCoreAsync(string executable, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var directory = Path.Combine(App.DataDir, "terracotta", "sessions");
+        Directory.CreateDirectory(directory);
+        var portFile = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".json");
+        Process? helper = null;
+        try
+        {
+            // 上游 Windows --hmcl 会自行委托 --hmcl2，父进程退出不等于联机服务失败。
+            token.ThrowIfCancellationRequested();
+            helper = Process.Start(TerracottaProtocol.CreateEmbeddedStart(executable, portFile))
+                ?? throw new InvalidOperationException("陶瓦进程未能启动。");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(14));
+            Exception? lastFailure = null;
+            while (true)
+            {
+                timeout.Token.ThrowIfCancellationRequested();
+                try
+                {
+                    if (File.Exists(portFile) && new FileInfo(portFile).Length is > 0 and <= 4096)
+                    {
+                        var endpoint = TerracottaProtocol.ReadEndpoint(await File.ReadAllTextAsync(portFile, timeout.Token).ConfigureAwait(false));
+                        return await ReadSessionAsync(endpoint, timeout.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or JsonException or HttpRequestException or KeyNotFoundException)
+                {
+                    lastFailure = ex;
+                }
+                catch (OperationCanceledException) when (!timeout.IsCancellationRequested)
+                {
+                    lastFailure = new TimeoutException("本地服务正在准备中。");
+                }
+                if (timeout.IsCancellationRequested && lastFailure != null)
+                    LauncherLogService.AppendLine("[陶瓦启动等待] " + lastFailure.Message);
+                await Task.Delay(100, timeout.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        {
+            throw new TimeoutException("等待陶瓦启动超时（14 秒）。可以使用“打开程序”检查，或更换兼容的官方版本。");
+        }
+        finally
+        {
+            // 上游父进程也会观察这个端口文件，保留 15 秒让其完成握手；取消时也清理迟到文件。
+            // 不结束全局 Terracotta 核心：它可能正被其他页面或启动器复用。
+            _ = CleanupHandshakeAsync(portFile, helper);
+        }
+    }
+
+    private static async Task CleanupHandshakeAsync(string portFile, Process? helper)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+        try { File.Delete(portFile); File.Delete(portFile + ".tmp"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        finally { helper?.Dispose(); }
+    }
+
+    public async Task<string> ReadLogAsync(Uri endpoint, CancellationToken token)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        token = timeout.Token;
+        using var response = await LocalClient.GetAsync(TerracottaProtocol.CreateApiUri(endpoint, TerracottaApiOperation.Log), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        using var stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
+        using var reader = new StreamReader(stream);
+        var tail = new System.Text.StringBuilder();
+        var buffer = new char[4096];
+        var total = 0;
+        while (total < 2 * 1024 * 1024)
+        {
+            var count = await reader.ReadAsync(buffer.AsMemory(), token).ConfigureAwait(false);
+            if (count == 0) break;
+            total += count;
+            tail.Append(buffer, 0, count);
+            if (tail.Length > 20000) tail.Remove(0, tail.Length - 20000);
+        }
+        return (total >= 2 * 1024 * 1024 ? "日志过大，仅显示已读取部分。\n" : "") + tail.ToString();
     }
 
     /// <summary>打开系统默认浏览器访问陶瓦联机的 GitHub Releases 页面。

@@ -39,6 +39,9 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     private IntPtr _gameHwnd;
     private readonly int _gamePid;
     private readonly Func<bool> _canTakeOver;
+    private readonly bool _forceTouchpad;
+    private readonly bool _desktopWindow;
+    private readonly WindowTouchPointer? _desktopPointer;
     private IntPtr _overlayHwnd;
     private HwndSource? _source;
     private readonly DispatcherTimer _followTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
@@ -63,10 +66,12 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     private readonly TouchModeStability _modeStability = new();
     private long _modeChangeAllowedAfter;
     private const int GameModeStabilityMilliseconds = 300;
-    private const int MenuModeStabilityMilliseconds = 1000;
+    private const int MenuModeStabilityMilliseconds = 250;
     private const int ContactSettleMilliseconds = 180;
     private long _menuRequestedUntil;
     private bool _hasObservedMenu;
+    private readonly LegacyTouchWorldEvidence _worldEvidence;
+    private LegacyTouchWorldPhase _lastRecoveryPhase;
 
     // 一根手指负责菜单指针/视角，其他手指仍可独立按住虚拟键。
     private TouchDevice? _viewTouch;
@@ -81,6 +86,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     private const double MenuDragThreshold = 12;
     private const int MenuPickUpHoldMilliseconds = 350;
     private bool _menuMode = true;
+    private readonly TouchCaptureRecovery _captureRecovery = new();
     private bool _hidden;
     private bool _closingDown;
     private double _sensitivity;
@@ -92,12 +98,20 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     private bool IsGameForeground => !_closingDown && _canTakeOver() && _gameHwnd != IntPtr.Zero &&
         GetForegroundWindow() == _gameHwnd && !IsIconic(_gameHwnd);
 
-    public OriginalTouchOverlayWindow(IntPtr gameHwnd, double buttonScale, double opacityPercent, double sensitivity, int gamePid, Func<bool> canTakeOver)
+    public OriginalTouchOverlayWindow(IntPtr gameHwnd, double buttonScale, double opacityPercent, double sensitivity, int gamePid, Func<bool> canTakeOver, bool forceTouchpad = false, bool desktopWindow = false)
+        : this(gameHwnd, buttonScale, opacityPercent, sensitivity, gamePid, canTakeOver, new LegacyTouchWorldEvidence(), forceTouchpad, desktopWindow) { }
+
+    internal OriginalTouchOverlayWindow(IntPtr gameHwnd, double buttonScale, double opacityPercent, double sensitivity,
+        int gamePid, Func<bool> canTakeOver, LegacyTouchWorldEvidence worldEvidence, bool forceTouchpad = false, bool desktopWindow = false)
     {
         InitializeComponent();
         _gameHwnd = gameHwnd;
+        _worldEvidence = worldEvidence;
         _gamePid = gamePid;
         _canTakeOver = canTakeOver;
+        _forceTouchpad = forceTouchpad;
+        _desktopWindow = desktopWindow;
+        _desktopPointer = desktopWindow ? new WindowTouchPointer(gameHwnd) : null;
         _sensitivity = sensitivity <= 0 ? 1.4 : sensitivity;
         _buttonScale = !double.IsFinite(buttonScale) || buttonScale <= 0 ? 1.0 : buttonScale;
         RootGrid.Opacity = Math.Clamp(opacityPercent <= 0 ? 85 : opacityPercent, 20, 100) / 100.0;
@@ -112,6 +126,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         ViewPad.TouchUp += ViewPad_TouchUp;
         ViewPad.LostTouchCapture += ViewPad_LostTouchCapture;
         TouchpadPad.TouchDown += TouchpadPad_TouchDown;
+        TouchOverlaySettingsShortcut.Attach(TouchpadPad, OpenTouchSettings, "触摸并拖动以移动指针或调整游戏视角。");
         TouchpadPad.TouchMove += TouchpadPad_TouchMove;
         TouchpadPad.TouchUp += TouchpadPad_TouchUp;
         TouchpadPad.LostTouchCapture += TouchpadPad_LostTouchCapture;
@@ -136,7 +151,18 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     private bool? ReadGameCursorMode()
     {
         if (!IsGameForeground) return null;
-        var mode = OriginalTouchInputInjector.ReadGameMenuMode(_gameHwnd, _hasObservedMenu);
+        if (_desktopWindow) return true;
+        var phase = _worldEvidence.Phase;
+        if (phase != _lastRecoveryPhase)
+        {
+            if (phase == LegacyTouchWorldPhase.Loading) _captureRecovery.BeginLoading();
+            if (phase == LegacyTouchWorldPhase.Outside) _captureRecovery.Reset();
+            _lastRecoveryPhase = phase;
+        }
+        var mode = OriginalTouchInputInjector.ReadGameMenuMode(_gameHwnd, _hasObservedMenu, _captureRecovery,
+            _worldEvidence.Phase, Environment.TickCount64 < _menuRequestedUntil);
+        if (!mode.HasValue && (phase == LegacyTouchWorldPhase.Outside ||
+            (phase == LegacyTouchWorldPhase.Loading && !_captureRecovery.Captured))) mode = true;
         return IsGameForeground ? mode : null;
     }
 
@@ -170,7 +196,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
             // SendInput 鼠标输入也会命中置顶的悬浮层。必须在 WPF 处理前截住并转给游戏，
             // 否则一次模拟点击会再次触发虚拟键/拖动，形成重复点击甚至输入循环。
             if (IsGameForeground)
-                OriginalTouchInputInjector.ForwardMouseMessage(hwnd, _gameHwnd, message, wParam, lParam);
+                ForwardPointerMessage(hwnd, message, wParam, lParam);
             handled = true;
         }
         else if (!_hidden && IsGameForeground &&
@@ -178,10 +204,24 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
             ReferenceEquals(InputHitTest(PointFromScreen(new Point(x, y))), ViewPad))
         {
             // 外接鼠标在画面区域直接使用原来的鼠标消息，不把鼠标移动再模拟成第二份视角位移。
-            OriginalTouchInputInjector.ForwardMouseMessage(hwnd, _gameHwnd, message, wParam, lParam);
+            ForwardPointerMessage(hwnd, message, wParam, lParam);
             handled = true;
         }
         return IntPtr.Zero;
+    }
+
+    private void ForwardPointerMessage(IntPtr source, int message, IntPtr wParam, IntPtr lParam)
+    {
+        if (_desktopPointer != null)
+        {
+            _desktopPointer.Forward(source, message, wParam, lParam);
+            if (OriginalTouchInputInjector.TryGetMouseMessagePosition(source, message, lParam, out var x, out var y))
+            {
+                _menuPointerScreen = new Point(x, y);
+                _padPointerReady = true;
+            }
+        }
+        else OriginalTouchInputInjector.ForwardMouseMessage(source, _gameHwnd, message, wParam, lParam);
     }
 
     private void FollowGameWindow()
@@ -201,6 +241,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
                 _gameHwnd = current;
                 _lastClientBounds = null;
                 _menuMode = true;
+                _captureRecovery.Reset();
                 _hasObservedMenu = false;
                 _explicitModeUntil = 0;
                 ApplyOverlayVisibility();
@@ -228,6 +269,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
             if (Visibility != Visibility.Hidden)
             {
                 ReleaseHeld();
+                _captureRecovery.Reset();
                 Visibility = Visibility.Hidden;
                 _lastClientBounds = null;
             }
@@ -262,8 +304,9 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
 
     private void SyncInputMode()
     {
+        if (_desktopWindow) { _menuMode = true; return; }
         var now = Environment.TickCount64;
-        if (_closingDown || _hidden || !IsVisible || !IsGameForeground || HasActiveContact ||
+        if (_closingDown || _hidden || !IsVisible || !IsGameForeground ||
             now < _modeChangeAllowedAfter || now < _explicitModeUntil)
         {
             _modeStability.Reset();
@@ -277,10 +320,11 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
             if (menu == true) _hasObservedMenu = true;
             var confirmed = _modeStability.Observe(_menuMode, menu, HasActiveContact, now,
                 GameModeStabilityMilliseconds,
-                now < _menuRequestedUntil ? 100 : MenuModeStabilityMilliseconds);
+                now < _menuRequestedUntil ? 100 : MenuModeStabilityMilliseconds, allowDuringContact: menu.HasValue);
             if (!confirmed.HasValue) return;
             ReleaseHeld();
             _menuMode = confirmed.Value;
+            LauncherLogService.AppendLine($"[触屏模式] 后端={TouchGameWindow.Detect(_gameHwnd)}，状态={(_menuMode ? "菜单" : "游戏视角")}");
             ApplyOverlayVisibility();
         }
         catch { _modeStability.Reset(); }
@@ -290,14 +334,15 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     {
         ViewPad.Visibility = _hidden ? Visibility.Collapsed : Visibility.Visible;
         ControlCanvas.Visibility = _hidden ? Visibility.Collapsed : Visibility.Visible;
-        // 触摸板默认隐藏，需在按键设置里开启。
-        var padVisible = !_hidden && TouchControlSettingsService.TouchpadEnabled;
+        // 游戏保持原显示设置；从窗口列表明确开启时直接显示触摸板。
+        var padVisible = !_hidden && (_forceTouchpad || _desktopWindow || TouchControlSettingsService.TouchpadEnabled);
         TouchpadPad.Visibility = padVisible ? Visibility.Visible : Visibility.Collapsed;
         if (!padVisible && _padTouch != null) CancelPadGesture();
         foreach (var key in _keys)
         {
             if (ReferenceEquals(key, RestoreKey) || key.Tag is not TouchControlDefinition c) continue;
-            key.Visibility = c.Enabled && (c.Visibility == TouchControlVisibility.Always ||
+            var desktopPointerControl = _desktopWindow && (c.Binding is "MOUSE_L" or "MOUSE_R" or "MOUSE_M" or "WHEEL_UP" or "WHEEL_DOWN");
+            key.Visibility = c.Enabled && (desktopPointerControl || c.Visibility == TouchControlVisibility.Always ||
                 (c.Visibility == TouchControlVisibility.Menu) == _menuMode) ? Visibility.Visible : Visibility.Collapsed;
         }
         RestoreKey.Visibility = _hidden ? Visibility.Visible : Visibility.Collapsed;
@@ -315,7 +360,17 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         ReleaseHeld();
         ControlCanvas.Children.Clear();
         _keys.RemoveAll(k => !ReferenceEquals(k, RestoreKey));
-        foreach (var control in TouchControlSettingsService.Load())
+        var controls = TouchControlSettingsService.Load().Select(c => c.Copy()).ToList();
+        if (_desktopWindow)
+        {
+            foreach (var control in controls)
+                control.Label = control.Binding switch { "MOUSE_L" => "左键\n拖动", "MOUSE_R" => "右键", "MOUSE_M" => "中键", _ => control.Label };
+            if (!controls.Any(c => c.Enabled && c.Binding == "WHEEL_UP"))
+                controls.Add(new TouchControlDefinition { Id = "window-wheel-up", Label = "向上滚动", Binding = "WHEEL_UP", Mode = TouchControlMode.Tap, Visibility = TouchControlVisibility.Menu, Anchor = TouchControlAnchor.BottomLeft, X = 24, Y = 24, Width = 76, Height = 40 });
+            if (!controls.Any(c => c.Enabled && c.Binding == "WHEEL_DOWN"))
+                controls.Add(new TouchControlDefinition { Id = "window-wheel-down", Label = "向下滚动", Binding = "WHEEL_DOWN", Mode = TouchControlMode.Tap, Visibility = TouchControlVisibility.Menu, Anchor = TouchControlAnchor.BottomLeft, X = 108, Y = 24, Width = 76, Height = 40 });
+        }
+        foreach (var control in controls)
         {
             var key = new Border
             {
@@ -360,6 +415,8 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     private void HookKey(Border key)
     {
         _keys.Add(key);
+        TouchOverlaySettingsShortcut.Attach(key, OpenTouchSettings,
+            key.Tag is TouchControlDefinition control ? TouchOverlaySettingsShortcut.Describe(control) : "触屏虚拟按键。");
         key.TouchDown += Key_TouchDown;
         key.TouchUp += (_, e) => { e.Handled = true; ReleaseKeyTouch(e.TouchDevice.Id); };
         key.LostTouchCapture += (_, e) => ReleaseKeyTouch(e.TouchDevice.Id);
@@ -430,7 +487,15 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         {
             if (!down) return;
             if (control.MenuAction != TouchMenuAction.None) ApplyMenuAction(control.MenuAction);
-            if (name is "WHEEL_UP" or "WHEEL_DOWN") OriginalTouchInputInjector.MouseWheel(name == "WHEEL_UP" ? 1 : -1);
+            if (name is "WHEEL_UP" or "WHEEL_DOWN")
+            {
+                if (_desktopPointer != null)
+                {
+                    EnsureDesktopPointer();
+                    _desktopPointer.Wheel(name == "WHEEL_UP" ? 120 : -120, (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y));
+                }
+                else OriginalTouchInputInjector.MouseWheel(name == "WHEEL_UP" ? 1 : -1);
+            }
             else { AcquireBinding(sender, name); ReleaseBinding(sender); }
             return;
         }
@@ -465,7 +530,16 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         if (button is { } b)
         {
             _buttonReferences.TryGetValue(b, out var count); _buttonReferences[b] = count + 1;
-            if (count == 0) { _heldButtons.Add(b); OriginalTouchInputInjector.MouseDown(b); }
+            if (count == 0)
+            {
+                _heldButtons.Add(b);
+                if (_desktopPointer != null)
+                {
+                    EnsureDesktopPointer();
+                    _desktopPointer.Button(b, (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y), true);
+                }
+                else OriginalTouchInputInjector.MouseDown(b);
+            }
         }
     }
 
@@ -481,21 +555,25 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         if (binding.Button is { } b && _buttonReferences.TryGetValue(b, out var references))
         {
             if (references > 1) _buttonReferences[b] = references - 1;
-            else { _buttonReferences.Remove(b); _heldButtons.Remove(b); OriginalTouchInputInjector.MouseUp(b); }
+            else
+            {
+                _buttonReferences.Remove(b); _heldButtons.Remove(b);
+                if (_desktopPointer != null) _desktopPointer.Button(b, (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y), false);
+                else OriginalTouchInputInjector.MouseUp(b);
+            }
         }
     }
 
     private void ApplyMenuAction(TouchMenuAction action)
     {
-        var menu = action == TouchMenuAction.Open || (action == TouchMenuAction.Toggle && !_menuMode);
+        if (_desktopWindow) return;
         ReleaseHeld();
-        _menuMode = menu;
-        if (menu) _hasObservedMenu = true;
-        // 等待游戏处理刚注入的键；期间不发送绝对鼠标移动，以免变成视角跳转。
-        _menuTransitionUntil = Environment.TickCount64 + 180;
-        _explicitModeUntil = Environment.TickCount64 + 650;
-        _menuRequestedUntil = Environment.TickCount64 + 2000;
-        ApplyOverlayVisibility();
+        // Key intent is not confirmation. Keep the last confirmed mode until native evidence arrives.
+        var now = Environment.TickCount64;
+        _menuTransitionUntil = now + 180;
+        _explicitModeUntil = now + 180;
+        _menuRequestedUntil = now + 2000;
+        _modeStability.Reset();
     }
 
     private void OnPhysicalKeyDown(ushort vk)
@@ -517,7 +595,12 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
             case "GRAB": if (_gameHwnd != IntPtr.Zero) SetForegroundWindow(_gameHwnd); break;
             case "HIDE": SetHidden(!_hidden); break;
             case "SHOW": SetHidden(false); break;
-            case "MENU": ApplyMenuAction(TouchMenuAction.Toggle); break;
+            case "MENU":
+                if (_desktopWindow) break;
+                ReleaseHeld(); _menuMode = !_menuMode; _captureRecovery.Reset();
+                _explicitModeUntil = Environment.TickCount64 + 3000;
+                _menuTransitionUntil = Environment.TickCount64 + 180;
+                ApplyOverlayVisibility(); break;
             case "KEYBOARD":
                 ReleaseHeld();
                 try { ScreenKeyboardService.Show(); }
@@ -539,6 +622,11 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         OriginalTouchMousePromotionFilter.Disable(_overlayHwnd);
         Visibility = Visibility.Hidden;
         try { new TouchControlsSettingsWindow { Topmost = true }.ShowDialog(); }
+        catch (Exception ex)
+        {
+            LauncherLogService.AppendLine("[触屏设置] 打开失败：" + ex.Message);
+            ToastService.ShowWarning("触屏设置打开失败：" + ex.Message);
+        }
         finally
         {
             _settingsOpen = false;
@@ -564,6 +652,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         e.Handled = true;
         if (_hidden || _closingDown || !IsGameForeground || _viewTouch != null) return;
         if (Environment.TickCount64 < _menuTransitionUntil) return;
+        SyncInputMode();
         // 落指沿用已确认模式。第二根手指不得重新探测并释放第一根手指的前进键。
         ResetModeCandidate();
         _viewTouch = e.TouchDevice;
@@ -630,7 +719,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         }
         var point = e.GetTouchPoint(ViewPad).Position;
         var moved = (point - _viewDragStart).Length >= MenuDragThreshold;
-        if (_viewDragIsMenu && !_viewDragMoved && moved && _menuPointerDown &&
+        if (!_desktopWindow && _viewDragIsMenu && !_viewDragMoved && moved && _menuPointerDown &&
             (DateTime.UtcNow - _viewDragTime).TotalMilliseconds >= MenuPickUpHoldMilliseconds)
         {
             // Java 背包的拿起和放下通常是两次点击。长按后再拖动时，先在原位置
@@ -673,20 +762,32 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
             OriginalTouchInputInjector.MouseClick(OriginalTouchInputInjector.MouseButton.Left);
     }
 
+    private void EnsureDesktopPointer()
+    {
+        if (_padPointerReady && IsMenuPointerInsideGame()) return;
+        if (!OriginalTouchInputInjector.TryGetClientAreaOnScreen(_gameHwnd, out var left, out var top, out var right, out var bottom) || right <= left || bottom <= top) return;
+        _menuPointerScreen = new Point((left + right) / 2.0, (top + bottom) / 2.0);
+        _padPointerReady = MoveMenuPointer(ViewPad.PointFromScreen(_menuPointerScreen));
+    }
+
     private bool MoveMenuPointer(Point point)
     {
         var screen = ViewPad.PointToScreen(point);
-        if (!OriginalTouchInputInjector.MenuPointerMove(_gameHwnd, (int)Math.Round(screen.X),
-                (int)Math.Round(screen.Y), _menuPointerDown)) return false;
+        var moved = _desktopPointer != null
+            ? _desktopPointer.Move((int)Math.Round(screen.X), (int)Math.Round(screen.Y))
+            : OriginalTouchInputInjector.MenuPointerMove(_gameHwnd, (int)Math.Round(screen.X), (int)Math.Round(screen.Y), _menuPointerDown);
+        if (!moved) return false;
         _menuPointerScreen = screen;
+        if (_desktopWindow) _padPointerReady = true;
         return true;
     }
 
     private bool PressMenuPointer()
     {
         if (_menuPointerDown) return true;
-        _menuPointerDown = OriginalTouchInputInjector.MenuLeftButton(_gameHwnd,
-            (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y), true);
+        _menuPointerDown = _desktopPointer != null
+            ? _desktopPointer.Button(OriginalTouchInputInjector.MouseButton.Left, (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y), true)
+            : OriginalTouchInputInjector.MenuLeftButton(_gameHwnd, (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y), true);
         return _menuPointerDown;
     }
 
@@ -694,7 +795,8 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
     {
         if (!_menuPointerDown) return;
         _menuPointerDown = false;
-        OriginalTouchInputInjector.MenuLeftButton(_gameHwnd,
+        if (_desktopPointer != null) _desktopPointer.Button(OriginalTouchInputInjector.MouseButton.Left, (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y), false);
+        else OriginalTouchInputInjector.MenuLeftButton(_gameHwnd,
             (int)Math.Round(_menuPointerScreen.X), (int)Math.Round(_menuPointerScreen.Y), false);
     }
 
@@ -725,6 +827,7 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
         e.Handled = true;
         if (_hidden || _closingDown || !IsGameForeground || _padTouch != null) return;
         if (Environment.TickCount64 < _menuTransitionUntil) return;
+        SyncInputMode();
         ResetModeCandidate();
         _padTouch = e.TouchDevice;
         _padStart = _padLast = e.GetTouchPoint(TouchpadPad).Position;
@@ -836,7 +939,12 @@ public partial class OriginalTouchOverlayWindow : Window, IGlobalWindowTreatment
             ResetModeCandidate();
             CancelViewGesture();
             CancelPadGesture();
-            OriginalTouchInputInjector.ReleaseAll(_heldKeys, _heldButtons);
+            if (_desktopPointer != null)
+            {
+                _desktopPointer.ReleaseAll();
+                OriginalTouchInputInjector.ReleaseAll(_heldKeys, Array.Empty<OriginalTouchInputInjector.MouseButton>());
+            }
+            else OriginalTouchInputInjector.ReleaseAll(_heldKeys, _heldButtons);
             _heldKeys.Clear(); _heldButtons.Clear();
             _keyReferences.Clear(); _buttonReferences.Clear(); _activeBindings.Clear();
             var touches = _touchKeys.Values.ToList();

@@ -23,6 +23,8 @@ public partial class SettingsPage
     private void InitializePerformanceOverlaySettings(AppConfig cfg)
     {
         _performanceControlsReady = false;
+        _performanceLayoutDraft = null;
+        InitializePerformanceLayoutControls();
         foreach (var property in PerformanceConfigProperties) ApplyPerformanceConfigValue(cfg, property.Name);
         RefreshPerformanceInstanceChoices();
         _performanceConfigSnapshot = CapturePerformanceConfig(cfg);
@@ -37,10 +39,33 @@ public partial class SettingsPage
     {
         switch (property)
         {
+            case nameof(AppConfig.PerformanceOverlayLayoutMode): SelectComboByTag(PerformanceOverlayLayoutModeCombo, PerformanceOverlayTemplateFormatter.LayoutMode(cfg)); return nameof(PerformanceOverlayLayoutModeCombo);
+            case nameof(AppConfig.PerformanceOverlayLineBreakMode): SelectComboByTag(PerformanceOverlayLineBreakCombo, PerformanceOverlayTemplateFormatter.LineBreakMode(cfg)); return nameof(PerformanceOverlayLineBreakCombo);
+            case nameof(AppConfig.PerformanceOverlayTextTemplate): PerformanceOverlayTemplateBox.Text = cfg.PerformanceOverlayTextTemplate ?? ""; return nameof(PerformanceOverlayTemplateBox);
+            case nameof(AppConfig.PerformanceOverlayAutoWrap): PerformanceOverlayAutoWrapCheck.IsChecked = cfg.PerformanceOverlayAutoWrap; return nameof(PerformanceOverlayAutoWrapCheck);
+            case nameof(AppConfig.PerformanceOverlayClickThrough):
+                if (_performanceClickThroughCheck != null) _performanceClickThroughCheck.IsChecked = cfg.PerformanceOverlayClickThrough;
+                return "PerformanceOverlayClickThroughCheck";
             case nameof(AppConfig.PerformanceOverlayEnabled): PerformanceOverlayEnabledCheck.IsChecked = cfg.PerformanceOverlayEnabled; return nameof(PerformanceOverlayEnabledCheck);
             case nameof(AppConfig.PerformanceOverlayShowSystemCpu): PerformanceOverlaySystemCpuCheck.IsChecked = cfg.PerformanceOverlayShowSystemCpu; return nameof(PerformanceOverlaySystemCpuCheck);
             case nameof(AppConfig.PerformanceOverlayShowSystemMemory): PerformanceOverlaySystemMemoryCheck.IsChecked = cfg.PerformanceOverlayShowSystemMemory; return nameof(PerformanceOverlaySystemMemoryCheck);
             case nameof(AppConfig.PerformanceOverlayShowMemoryPercent): PerformanceOverlayMemoryPercentCheck.IsChecked = cfg.PerformanceOverlayShowMemoryPercent; return nameof(PerformanceOverlayMemoryPercentCheck);
+            case nameof(AppConfig.PerformanceOverlayShowGpu): PerformanceOverlayGpuCheck.IsChecked = cfg.PerformanceOverlayShowGpu; return nameof(PerformanceOverlayGpuCheck);
+            case nameof(AppConfig.PerformanceOverlayGpuShowUtilization): PerformanceOverlayGpuUtilizationCheck.IsChecked = cfg.PerformanceOverlayGpuShowUtilization; return nameof(PerformanceOverlayGpuUtilizationCheck);
+            case nameof(AppConfig.PerformanceOverlayGpuUtilizationFormat): SelectComboByTag(PerformanceOverlayGpuUtilizationFormatCombo, PerformanceOverlaySettings.HardwareUtilizationFormat(cfg.PerformanceOverlayGpuUtilizationFormat)); return nameof(PerformanceOverlayGpuUtilizationFormatCombo);
+            case nameof(AppConfig.PerformanceOverlayGpuShowDedicatedMemory): PerformanceOverlayGpuDedicatedMemoryCheck.IsChecked = cfg.PerformanceOverlayGpuShowDedicatedMemory ?? cfg.PerformanceOverlayShowDeviceMemory; return nameof(PerformanceOverlayGpuDedicatedMemoryCheck);
+            case nameof(AppConfig.PerformanceOverlayGpuDedicatedMemoryUnit): SelectComboByTag(PerformanceOverlayGpuDedicatedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(cfg.PerformanceOverlayGpuDedicatedMemoryUnit, cfg)); return nameof(PerformanceOverlayGpuDedicatedMemoryUnitCombo);
+            case nameof(AppConfig.PerformanceOverlayGpuShowSharedMemory): PerformanceOverlayGpuSharedMemoryCheck.IsChecked = cfg.PerformanceOverlayGpuShowSharedMemory ?? cfg.PerformanceOverlayShowDeviceMemory; return nameof(PerformanceOverlayGpuSharedMemoryCheck);
+            case nameof(AppConfig.PerformanceOverlayGpuSharedMemoryUnit): SelectComboByTag(PerformanceOverlayGpuSharedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(cfg.PerformanceOverlayGpuSharedMemoryUnit, cfg)); return nameof(PerformanceOverlayGpuSharedMemoryUnitCombo);
+            case nameof(AppConfig.PerformanceOverlayShowNpu): PerformanceOverlayNpuCheck.IsChecked = cfg.PerformanceOverlayShowNpu; return nameof(PerformanceOverlayNpuCheck);
+            case nameof(AppConfig.PerformanceOverlayNpuShowUtilization): PerformanceOverlayNpuUtilizationCheck.IsChecked = cfg.PerformanceOverlayNpuShowUtilization; return nameof(PerformanceOverlayNpuUtilizationCheck);
+            case nameof(AppConfig.PerformanceOverlayNpuUtilizationFormat): SelectComboByTag(PerformanceOverlayNpuUtilizationFormatCombo, PerformanceOverlaySettings.HardwareUtilizationFormat(cfg.PerformanceOverlayNpuUtilizationFormat)); return nameof(PerformanceOverlayNpuUtilizationFormatCombo);
+            case nameof(AppConfig.PerformanceOverlayNpuShowDedicatedMemory): PerformanceOverlayNpuDedicatedMemoryCheck.IsChecked = cfg.PerformanceOverlayNpuShowDedicatedMemory ?? cfg.PerformanceOverlayShowDeviceMemory; return nameof(PerformanceOverlayNpuDedicatedMemoryCheck);
+            case nameof(AppConfig.PerformanceOverlayNpuDedicatedMemoryUnit): SelectComboByTag(PerformanceOverlayNpuDedicatedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(cfg.PerformanceOverlayNpuDedicatedMemoryUnit, cfg)); return nameof(PerformanceOverlayNpuDedicatedMemoryUnitCombo);
+            case nameof(AppConfig.PerformanceOverlayNpuShowSharedMemory): PerformanceOverlayNpuSharedMemoryCheck.IsChecked = cfg.PerformanceOverlayNpuShowSharedMemory ?? cfg.PerformanceOverlayShowDeviceMemory; return nameof(PerformanceOverlayNpuSharedMemoryCheck);
+            case nameof(AppConfig.PerformanceOverlayNpuSharedMemoryUnit): SelectComboByTag(PerformanceOverlayNpuSharedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(cfg.PerformanceOverlayNpuSharedMemoryUnit, cfg)); return nameof(PerformanceOverlayNpuSharedMemoryUnitCombo);
+            case nameof(AppConfig.PerformanceOverlayShowDisk): PerformanceOverlayDiskCheck.IsChecked = cfg.PerformanceOverlayShowDisk; return nameof(PerformanceOverlayDiskCheck);
+            case nameof(AppConfig.PerformanceOverlayShowNetwork): PerformanceOverlayNetworkCheck.IsChecked = cfg.PerformanceOverlayShowNetwork; return nameof(PerformanceOverlayNetworkCheck);
             case nameof(AppConfig.PerformanceOverlayShowGames): PerformanceOverlayGamesCheck.IsChecked = cfg.PerformanceOverlayShowGames; return nameof(PerformanceOverlayGamesCheck);
             case nameof(AppConfig.PerformanceOverlayShowGameTotals): PerformanceOverlayGameTotalsCheck.IsChecked = cfg.PerformanceOverlayShowGameTotals; return nameof(PerformanceOverlayGameTotalsCheck);
             case nameof(AppConfig.PerformanceOverlayShowLauncher): PerformanceOverlayLauncherCheck.IsChecked = cfg.PerformanceOverlayShowLauncher; return nameof(PerformanceOverlayLauncherCheck);
@@ -72,6 +97,13 @@ public partial class SettingsPage
 
     private void SavePerformanceOverlaySettings(AppConfig cfg)
     {
+        CapturePerformanceOverlayControls(cfg);
+        PerformanceOverlayService.PreviewHardwareSettings(null);
+        _performanceConfigSnapshot = CapturePerformanceConfig(cfg);
+    }
+
+    private void CapturePerformanceOverlayControls(AppConfig cfg)
+    {
         cfg.PerformanceOverlayEnabled = PerformanceOverlayEnabledCheck.IsChecked == true;
         cfg.PerformanceOverlayShowSystemCpu = PerformanceOverlaySystemCpuCheck.IsChecked == true;
         cfg.PerformanceOverlayShowSystemMemory = PerformanceOverlaySystemMemoryCheck.IsChecked == true;
@@ -99,13 +131,16 @@ public partial class SettingsPage
         cfg.PerformanceOverlayRefreshMilliseconds = int.TryParse(TagOf(PerformanceOverlayRefreshCombo), out var ms) ? Math.Clamp(ms, 500, 10000) : 1000;
         cfg.PerformanceOverlayAlwaysOnTop = PerformanceOverlayTopmostCheck.IsChecked == true;
         cfg.PerformanceOverlayLockPosition = PerformanceOverlayLockCheck.IsChecked == true;
-        _performanceConfigSnapshot = CapturePerformanceConfig(cfg);
+        SaveHardwarePerformanceSettings(cfg);
+        SavePerformanceLayoutSettings(cfg);
     }
 
     private void SubscribePerformanceOverlayUpdates()
     {
         PerformanceOverlayService.SettingsChanged -= PerformanceSettingsChanged;
         PerformanceOverlayService.SettingsChanged += PerformanceSettingsChanged;
+        PerformanceOverlayService.SnapshotUpdated -= PerformanceLayoutSampleUpdated;
+        PerformanceOverlayService.SnapshotUpdated += PerformanceLayoutSampleUpdated;
         _owner.ProcessManager.Changed -= PerformanceProcessesChanged;
         _owner.ProcessManager.Changed += PerformanceProcessesChanged;
         PerformanceSettingsChanged(_owner.ConfigService.Config);
@@ -115,6 +150,8 @@ public partial class SettingsPage
     private void UnsubscribePerformanceOverlayUpdates()
     {
         PerformanceOverlayService.SettingsChanged -= PerformanceSettingsChanged;
+        PerformanceOverlayService.SnapshotUpdated -= PerformanceLayoutSampleUpdated;
+        PerformanceOverlayService.PreviewHardwareSettings(null);
         _owner.ProcessManager.Changed -= PerformanceProcessesChanged;
     }
 
@@ -124,8 +161,17 @@ public partial class SettingsPage
         if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(new Action(() => PerformanceSettingsChanged(cfg))); return; }
         if (!_performanceControlsReady) return;
         var next = CapturePerformanceConfig(cfg);
-        var changed = PerformanceConfigProperties.Where(property => !_performanceConfigSnapshot.TryGetValue(property.Name, out var previous) ||
-            !Equals(previous, next[property.Name])).ToArray();
+        var changedProperties = PerformanceConfigProperties.Where(property => !_performanceConfigSnapshot.TryGetValue(property.Name, out var previous) ||
+            !Equals(previous, next[property.Name])).ToList();
+        // Old configurations inherit the global device-memory switch and memory unit. A context-menu
+        // change to either inherited preference must update the visible per-device controls as well.
+        var inheritedUnitsChanged = changedProperties.Any(p => p.Name == nameof(AppConfig.PerformanceOverlayMemoryUnit));
+        var inheritedVisibilityChanged = changedProperties.Any(p => p.Name == nameof(AppConfig.PerformanceOverlayShowDeviceMemory));
+        if (inheritedUnitsChanged || inheritedVisibilityChanged)
+            changedProperties.AddRange(PerformanceConfigProperties.Where(p => p.GetValue(cfg) == null &&
+                ((inheritedUnitsChanged && (p.Name.EndsWith("DedicatedMemoryUnit", StringComparison.Ordinal) || p.Name.EndsWith("SharedMemoryUnit", StringComparison.Ordinal))) ||
+                 (inheritedVisibilityChanged && (p.Name.EndsWith("ShowDedicatedMemory", StringComparison.Ordinal) || p.Name.EndsWith("ShowSharedMemory", StringComparison.Ordinal))))));
+        var changed = changedProperties.DistinctBy(property => property.Name).ToArray();
         if (changed.Length == 0) return;
         var controls = new HashSet<string>(StringComparer.Ordinal);
         var oldSuppress = _suppressDirtyTracking;
@@ -142,12 +188,15 @@ public partial class SettingsPage
         }
         finally { _suppressDirtyTracking = oldSuppress; }
         _performanceConfigSnapshot = next;
+        PreviewHardwarePerformance();
         if (!_uiFingerprintReady) return;
         var current = BuildSettingsUiFingerprint();
         bool Affected(string line) { var fields = line.Split('|'); return fields.Length > 1 && controls.Contains(fields[1]); }
         _lastSavedUiFingerprint = string.Join("\n", _lastSavedUiFingerprint.Split('\n').Where(line => !Affected(line))
             .Concat(current.Split('\n').Where(Affected)).OrderBy(line => line, StringComparer.Ordinal));
         _lastPolledFingerprint = current;
+        _hasUnsavedChanges = !cfg.SettingsAutoSaveWithoutConfirm && !string.Equals(current, _lastSavedUiFingerprint, StringComparison.Ordinal);
+        if (!_hasUnsavedChanges) ToastService.DismissActionPrompt("settings-dirty");
         SyncUxExternallySavedControls(controls);
         if (_preAutoSaveSnapshotJson != null)
         {
@@ -202,6 +251,8 @@ public partial class SettingsPage
 
     private void UpdatePerformanceScopeUi()
     {
+        UpdateHardwarePerformanceUi();
+        PreviewPerformanceLayout();
         var selected = TagOf(PerformanceOverlayScopeCombo) == "Selected";
         PerformanceOverlayInstanceCombo.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
         PerformanceOverlayRefreshGamesButton.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
@@ -211,6 +262,64 @@ public partial class SettingsPage
     {
         await _owner.ProcessManager.RefreshAsync();
         if (IsLoaded) RefreshPerformanceInstanceChoices();
+    }
+
+    private void SaveHardwarePerformanceSettings(AppConfig cfg)
+    {
+        cfg.PerformanceOverlayShowGpu = PerformanceOverlayGpuCheck.IsChecked == true;
+        cfg.PerformanceOverlayGpuShowUtilization = PerformanceOverlayGpuUtilizationCheck.IsChecked == true;
+        cfg.PerformanceOverlayGpuUtilizationFormat = PerformanceOverlaySettings.HardwareUtilizationFormat(TagOf(PerformanceOverlayGpuUtilizationFormatCombo));
+        cfg.PerformanceOverlayGpuShowDedicatedMemory = PerformanceOverlayGpuDedicatedMemoryCheck.IsChecked == true;
+        cfg.PerformanceOverlayGpuDedicatedMemoryUnit = PerformanceOverlaySettings.HardwareMemoryUnit(TagOf(PerformanceOverlayGpuDedicatedMemoryUnitCombo) ?? "Auto", cfg);
+        cfg.PerformanceOverlayGpuShowSharedMemory = PerformanceOverlayGpuSharedMemoryCheck.IsChecked == true;
+        cfg.PerformanceOverlayGpuSharedMemoryUnit = PerformanceOverlaySettings.HardwareMemoryUnit(TagOf(PerformanceOverlayGpuSharedMemoryUnitCombo) ?? "Auto", cfg);
+        cfg.PerformanceOverlayShowNpu = PerformanceOverlayNpuCheck.IsChecked == true;
+        cfg.PerformanceOverlayNpuShowUtilization = PerformanceOverlayNpuUtilizationCheck.IsChecked == true;
+        cfg.PerformanceOverlayNpuUtilizationFormat = PerformanceOverlaySettings.HardwareUtilizationFormat(TagOf(PerformanceOverlayNpuUtilizationFormatCombo));
+        cfg.PerformanceOverlayNpuShowDedicatedMemory = PerformanceOverlayNpuDedicatedMemoryCheck.IsChecked == true;
+        cfg.PerformanceOverlayNpuDedicatedMemoryUnit = PerformanceOverlaySettings.HardwareMemoryUnit(TagOf(PerformanceOverlayNpuDedicatedMemoryUnitCombo) ?? "Auto", cfg);
+        cfg.PerformanceOverlayNpuShowSharedMemory = PerformanceOverlayNpuSharedMemoryCheck.IsChecked == true;
+        cfg.PerformanceOverlayNpuSharedMemoryUnit = PerformanceOverlaySettings.HardwareMemoryUnit(TagOf(PerformanceOverlayNpuSharedMemoryUnitCombo) ?? "Auto", cfg);
+        cfg.PerformanceOverlayShowDisk = PerformanceOverlayDiskCheck.IsChecked == true;
+        cfg.PerformanceOverlayShowNetwork = PerformanceOverlayNetworkCheck.IsChecked == true;
+    }
+
+    private void UpdateHardwarePerformanceUi()
+    {
+        PerformanceOverlayGpuOptions.IsEnabled = PerformanceOverlayGpuCheck.IsChecked == true;
+        PerformanceOverlayGpuUtilizationFormatCombo.IsEnabled = PerformanceOverlayGpuUtilizationCheck.IsChecked == true;
+        PerformanceOverlayGpuDedicatedMemoryUnitCombo.IsEnabled = PerformanceOverlayGpuDedicatedMemoryCheck.IsChecked == true;
+        PerformanceOverlayGpuSharedMemoryUnitCombo.IsEnabled = PerformanceOverlayGpuSharedMemoryCheck.IsChecked == true;
+        PerformanceOverlayNpuOptions.IsEnabled = PerformanceOverlayNpuCheck.IsChecked == true;
+        PerformanceOverlayNpuUtilizationFormatCombo.IsEnabled = PerformanceOverlayNpuUtilizationCheck.IsChecked == true;
+        PerformanceOverlayNpuDedicatedMemoryUnitCombo.IsEnabled = PerformanceOverlayNpuDedicatedMemoryCheck.IsChecked == true;
+        PerformanceOverlayNpuSharedMemoryUnitCombo.IsEnabled = PerformanceOverlayNpuSharedMemoryCheck.IsChecked == true;
+    }
+
+    private void PerformanceHardwareToggle_Changed(object sender, RoutedEventArgs e) => PreviewHardwarePerformance();
+    private void PerformanceHardwareChoice_Changed(object sender, SelectionChangedEventArgs e) => PreviewHardwarePerformance();
+
+    private void PreviewHardwarePerformance() => PreviewPerformanceLayout();
+
+    private void RegisterHardwarePerformanceResets(AppConfig defaults)
+    {
+        RegisterPerformanceLayoutResets(defaults);
+        RegisterUxReset(PerformanceOverlayGpuCheck, () => PerformanceOverlayGpuCheck.IsChecked = defaults.PerformanceOverlayShowGpu);
+        RegisterUxReset(PerformanceOverlayGpuUtilizationCheck, () => PerformanceOverlayGpuUtilizationCheck.IsChecked = defaults.PerformanceOverlayGpuShowUtilization);
+        RegisterUxReset(PerformanceOverlayGpuUtilizationFormatCombo, () => SelectComboByTag(PerformanceOverlayGpuUtilizationFormatCombo, PerformanceOverlaySettings.HardwareUtilizationFormat(defaults.PerformanceOverlayGpuUtilizationFormat)));
+        RegisterUxReset(PerformanceOverlayGpuDedicatedMemoryCheck, () => PerformanceOverlayGpuDedicatedMemoryCheck.IsChecked = defaults.PerformanceOverlayGpuShowDedicatedMemory ?? defaults.PerformanceOverlayShowDeviceMemory);
+        RegisterUxReset(PerformanceOverlayGpuDedicatedMemoryUnitCombo, () => SelectComboByTag(PerformanceOverlayGpuDedicatedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(defaults.PerformanceOverlayGpuDedicatedMemoryUnit, defaults)));
+        RegisterUxReset(PerformanceOverlayGpuSharedMemoryCheck, () => PerformanceOverlayGpuSharedMemoryCheck.IsChecked = defaults.PerformanceOverlayGpuShowSharedMemory ?? defaults.PerformanceOverlayShowDeviceMemory);
+        RegisterUxReset(PerformanceOverlayGpuSharedMemoryUnitCombo, () => SelectComboByTag(PerformanceOverlayGpuSharedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(defaults.PerformanceOverlayGpuSharedMemoryUnit, defaults)));
+        RegisterUxReset(PerformanceOverlayNpuCheck, () => PerformanceOverlayNpuCheck.IsChecked = defaults.PerformanceOverlayShowNpu);
+        RegisterUxReset(PerformanceOverlayNpuUtilizationCheck, () => PerformanceOverlayNpuUtilizationCheck.IsChecked = defaults.PerformanceOverlayNpuShowUtilization);
+        RegisterUxReset(PerformanceOverlayNpuUtilizationFormatCombo, () => SelectComboByTag(PerformanceOverlayNpuUtilizationFormatCombo, PerformanceOverlaySettings.HardwareUtilizationFormat(defaults.PerformanceOverlayNpuUtilizationFormat)));
+        RegisterUxReset(PerformanceOverlayNpuDedicatedMemoryCheck, () => PerformanceOverlayNpuDedicatedMemoryCheck.IsChecked = defaults.PerformanceOverlayNpuShowDedicatedMemory ?? defaults.PerformanceOverlayShowDeviceMemory);
+        RegisterUxReset(PerformanceOverlayNpuDedicatedMemoryUnitCombo, () => SelectComboByTag(PerformanceOverlayNpuDedicatedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(defaults.PerformanceOverlayNpuDedicatedMemoryUnit, defaults)));
+        RegisterUxReset(PerformanceOverlayNpuSharedMemoryCheck, () => PerformanceOverlayNpuSharedMemoryCheck.IsChecked = defaults.PerformanceOverlayNpuShowSharedMemory ?? defaults.PerformanceOverlayShowDeviceMemory);
+        RegisterUxReset(PerformanceOverlayNpuSharedMemoryUnitCombo, () => SelectComboByTag(PerformanceOverlayNpuSharedMemoryUnitCombo, PerformanceOverlaySettings.HardwareMemoryUnit(defaults.PerformanceOverlayNpuSharedMemoryUnit, defaults)));
+        RegisterUxReset(PerformanceOverlayDiskCheck, () => PerformanceOverlayDiskCheck.IsChecked = defaults.PerformanceOverlayShowDisk);
+        RegisterUxReset(PerformanceOverlayNetworkCheck, () => PerformanceOverlayNetworkCheck.IsChecked = defaults.PerformanceOverlayShowNetwork);
     }
 
     public void RevealPerformanceSettings()

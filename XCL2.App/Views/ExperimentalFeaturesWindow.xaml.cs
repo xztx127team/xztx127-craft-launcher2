@@ -23,6 +23,7 @@ public partial class ExperimentalFeaturesWindow : OverlayDialogControl
     {
         _owner = owner;
         InitializeComponent();
+        MiniWorldFeatureButton.Visibility = owner.ConfigService.Config.EnableMiniWorldExperimental ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Close_Click(object sender, RoutedEventArgs e)
@@ -30,15 +31,16 @@ public partial class ExperimentalFeaturesWindow : OverlayDialogControl
         CloseWith(null);
     }
 
-    /// <summary>
-    /// "初步测试版功能"下唯一的子功能入口：多加载器合装。打开专门的
-    /// MultiLoaderInstallWindow，那边有自己独立的风险提示 + token 校验，这里不重复处理。
-    /// </summary>
-    private void PluginManager_Click(object sender, RoutedEventArgs e)
+    private void MiniWorldFeature_Click(object sender, RoutedEventArgs e)
     {
-        OverlayDialogService.ShowModal(new PluginManagerDialog(_owner));
+        // 每次打开都阅读并答题；不复用外层实验功能总开关的一次性解锁。
+        if (!_owner.ConfigService.Config.EnableMiniWorldExperimental) return;
+        if (new MiniWorldGateDialog().ShowDialog() != true) return;
+        if (_owner.ConfigService.Config.EnableMiniWorldExperimental)
+            new MiniWorldLauncherDialog(_owner).ShowDialog();
     }
 
+    /// <summary>多加载器合装保留自己的风险提示与授权校验。</summary>
     private void MultiLoaderFeature_Click(object sender, RoutedEventArgs e)
     {
         var window = new MultiLoaderInstallWindow(_owner) ;

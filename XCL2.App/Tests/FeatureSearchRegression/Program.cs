@@ -1,3 +1,4 @@
+using System.Xml.Linq;
 using XCL2.App.Models;
 using XCL2.App.Services;
 
@@ -40,10 +41,37 @@ Check(FeatureSearchMatcher.Match(entries, "显卡").Any(entry => entry.PageKey =
     "all scope crosses page boundaries");
 
 var toolboxTabs = entries.Where(entry => entry.Id.StartsWith("toolbox.tab.", StringComparison.Ordinal)).ToArray();
-Check(toolboxTabs.Length == 36 && toolboxTabs.Select(entry => entry.TabIndex).SequenceEqual(Enumerable.Range(0, 36).Select(index => (int?)index)),
+Check(toolboxTabs.Length == 37 && toolboxTabs.Select(entry => entry.TabIndex).SequenceEqual(Enumerable.Range(0, 37).Select(index => (int?)index)),
     "every toolbox tab has the exact zero-based navigation index");
+using (var toolboxXaml = typeof(FeatureSearchCatalog).Assembly.GetManifestResourceStream("ToolboxPage.xaml")
+    ?? throw new InvalidOperationException("Missing real toolbox XAML for navigation regression."))
+{
+    XNamespace wpf = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+    XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+    var actualTabs = XDocument.Load(toolboxXaml).Descendants(wpf + "TabControl")
+        .Single(element => (string?)element.Attribute(xaml + "Name") == "ToolboxTabControl")
+        .Elements(wpf + "TabItem").ToArray();
+    Check(actualTabs.Length == toolboxTabs.Length, "search catalog includes every real toolbox tab");
+    Check(toolboxTabs.All(entry =>
+    {
+        var header = (string?)actualTabs[entry.TabIndex!.Value].Attribute("Header");
+        return header == (entry.ResourceKey is { Length: > 0 } key
+            ? "{DynamicResource " + key + "}" : entry.Title);
+    }), "toolbox search titles and stored indices match the actual UI order");
+}
 Check(FeatureSearchMatcher.Match(toolboxTabs, "四则")[0].TabIndex == 5, "calculator synonym points to the calculator tab");
 Check(FeatureSearchMatcher.Match(toolboxTabs, "ping")[0].TabIndex == 8, "ping synonym points to the server latency tab");
+Check(toolboxTabs[29].Title == "服务器地址解析" && toolboxTabs[35].Title == "下载正版账户皮肤",
+    "appending a tool preserves existing server parser and official skin navigation ids");
+Check(FeatureSearchMatcher.Match(entries, "服务器端口探测")[0].Id == "toolbox.tab.36",
+    "global search opens the new port probe tool by its exact title");
+foreach (var alias in new[] { "端口扫描", "TCP", "IP", "多IP", "port scan", "每IP最大数量" })
+{
+    Check(FeatureSearchMatcher.Match(toolboxTabs, alias, "toolbox").Any(entry => entry.TabIndex == 36),
+        $"toolbox search finds the new port probe tool by alias: {alias}");
+    Check(FeatureSearchMatcher.Match(entries, alias).Any(entry => entry.Id == "toolbox.tab.36"),
+        $"global search finds the new port probe tool by alias: {alias}");
+}
 Check(entries.Single(entry => entry.TargetName == "ModSearchBox").SectionKey == "ModPanel",
     "custom download category metadata retains the correct hidden panel");
 

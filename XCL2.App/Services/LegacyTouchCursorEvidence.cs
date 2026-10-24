@@ -17,6 +17,18 @@ internal sealed class LegacyTouchCursorEvidence
         Captured = false;
     }
 
+    /// <summary>
+    /// GLFW 的空光标或 LWJGL 的透明光标是后端主动隐藏信号，允许观察游戏自己的回中。
+    /// 仍须先有真实离中心的菜单定位，再有持续回中；只有该证据成立后才能解除触摸抑制。
+    /// 普通箭头被 Windows 临时隐藏时，既不能建立回中证据，也不能解除抑制。
+    /// </summary>
+    public (bool Captured, bool Suppressed) ObserveBackendCursor(int x, int y, int centerX, int centerY,
+        bool showing, bool suppressed, bool backendHidden, long now)
+    {
+        var captured = Observe(x, y, centerX, centerY, showing, suppressed && !backendHidden, now);
+        return (captured, suppressed && !(backendHidden && captured));
+    }
+
     public bool Observe(int x, int y, int centerX, int centerY, bool showing, bool suppressed, long now)
     {
         // 手指隐藏箭头不能建立新证据；已经确认的抓取仍须由可见菜单/失焦撤销。

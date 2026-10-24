@@ -19,5 +19,7 @@
     <Compile Include="../../Services/AiCommandPermissionService.cs" Link="AiCommandPermissionService.cs" />
     <Compile Include="../../Services/AiCommandApproval.cs" Link="AiCommandApproval.cs" />
     <Compile Include="../../Services/AiShellPolicy.cs" Link="AiShellPolicy.cs" />
+    <Compile Include="../../Services/AiElevationPolicy.cs" Link="AiElevationPolicy.cs" />
+    <Compile Include="../../Services/AiElevationInteraction.cs" Link="AiElevationInteraction.cs" />
   </ItemGroup>
 </Project>

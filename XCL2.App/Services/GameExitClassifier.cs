@@ -14,7 +14,7 @@ public enum GameExitKind
 /// <param name="JvmIssues">本次退出里识别出的 JVM 启动参数错误（见 <see cref="JvmArgumentDiagnostics"/>）；没有则为 null。
 /// 有值时 Kind 一定是 Crash：JVM 都没起来，游戏代码根本没跑。</param>
 public sealed record GameExitAssessment(GameExitKind Kind, int ExitCode, string Evidence, bool LogLooksTruncated,
-    IReadOnlyList<JvmArgIssue>? JvmIssues = null);
+    IReadOnlyList<JvmArgIssue>? JvmIssues = null, bool SuspectedLogFailure = false);
 
 /// <summary>
 /// 对 Minecraft Java 进程退出做最保守的分类。核心目标不是“尽量多报崩溃”，而是避免把
@@ -73,10 +73,6 @@ public static class GameExitClassifier
         if (info.UserRequestedClose)
             return new(GameExitKind.UserRequested, exitCode, "", false);
 
-        // Java/Minecraft 正常从菜单退出时最可靠的信号就是 0。无论日志内容长短，都不能再写成“崩溃”。
-        if (exitCodeKnown && exitCode == 0)
-            return new(GameExitKind.Normal, exitCode, "", false);
-
         var output = info.GetOutputSnapshot();
 
         // JVM 启动参数错误：只看进程自己的控制台输出——这类错误发生在游戏代码运行之前，
@@ -98,6 +94,11 @@ public static class GameExitClassifier
         var tail = evidence.Length > SoftEvidenceTailChars ? evidence[^SoftEvidenceTailChars..] : evidence;
         var hasNormalShutdown = ContainsAny(tail, NormalShutdownMarkers);
 
+        // 可恢复的模组异常（包括被捕获的内存错误）也会出现硬关键字；明确正常收尾且返回0时，
+        // 没有本次崩溃产物就保留正常退出，不能把曾经打印过异常等同于最终崩溃。
+        if (exitCodeKnown && exitCode == 0 && hasNormalShutdown && !hasCrashArtifact)
+            return new(GameExitKind.Normal, exitCode, evidence, false);
+
         // 有明确的正常关服/保存世界收尾，而且没有硬崩溃证据时，按正常退出处理——
         // 即使日志里别处有 Mod 的 Caused by / GLFW 提示这类软字样，也不能因此叫“崩溃”。
         // 这覆盖少数 Mod/Wrapper 会在正常退出时返回非 0 的情况。
@@ -107,7 +108,14 @@ public static class GameExitClassifier
         // 软证据：只看末尾，并且 OpenGL 诊断也只在没有正常收尾时才算。
         var hasSoftCrashEvidence = ContainsAny(tail, SoftCrashMarkers)
             || (!hasNormalShutdown && OpenGlTroubleshooter.IsOpenGlFailure(tail));
-        var hasStrongCrashEvidence = hasHardCrashEvidence || hasSoftCrashEvidence;
+        // 某些旧版/包装器即使因错误退出也返回0；分别检查控制台和磁盘日志，避免重复计数。
+        var hasErrorBurst = !hasNormalShutdown &&
+            (GameLogDiagnostics.HasTerminalErrorBurst(output) || GameLogDiagnostics.HasTerminalErrorBurst(latest ?? ""));
+        var hasStrongCrashEvidence = hasHardCrashEvidence || hasSoftCrashEvidence || hasErrorBurst;
+        if (exitCodeKnown && exitCode == 0 && !hasHardCrashEvidence && !hasErrorBurst)
+            return new(GameExitKind.Normal, exitCode, evidence, false);
+        if (hasErrorBurst && !hasHardCrashEvidence)
+            return new(GameExitKind.Crash, exitCode, evidence, latestEndsMidLine, SuspectedLogFailure: true);
 
         // 被 Ctrl+C / 关闭控制台 / 会话注销等外部方式终止：不是游戏自己崩溃。
         if (exitCodeKnown && !hasStrongCrashEvidence && ExternalTerminationExitCodes.Contains(exitCode))

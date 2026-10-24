@@ -37,6 +37,7 @@ public partial class AiAssistantPanel
         public string RouteStatus { get; set; } = "正在生成…";
         public string? FailureText { get; set; }
         public AiQuestionCard? Question { get; set; }
+        public AiElevationRequestCard? Elevation { get; set; }
     }
 
     private readonly Dictionary<string, SessionRun> _runningSessions = new(StringComparer.Ordinal);
@@ -91,6 +92,7 @@ public partial class AiAssistantPanel
         SaveAttachmentDraft(_session.Id);
         _session = _runningSessions.TryGetValue(session.Id, out var run) ? run.Session
             : _unsavedSessions.TryGetValue(session.Id, out var unsaved) ? unsaved : session;
+        ShowParameterFailure();
         // Restore the selected conversation's mode without changing any other run's
         // live mode callback. Configuration still supplies the shared permission gates.
         _config.WorkMode = run?.WorkMode
@@ -112,9 +114,13 @@ public partial class AiAssistantPanel
     private void RefreshSessionQuestionVisibility()
     {
         foreach (var run in _runningSessions.Values)
+        {
             if (run.Question != null)
                 run.Question.Visibility = IsCurrentRun(run) && run.Question.IsAsking ? Visibility.Visible : Visibility.Collapsed;
-        InputArea.IsEnabled = CurrentRun?.Question?.IsAsking != true;
+            if (run.Elevation != null)
+                run.Elevation.Visibility = IsCurrentRun(run) && run.Elevation.IsPending ? Visibility.Visible : Visibility.Collapsed;
+        }
+        InputArea.IsEnabled = CurrentRun?.Question?.IsAsking != true && CurrentRun?.Elevation?.IsPending != true;
     }
 
     private async Task<AiQuestionAnswer?> ShowSessionQuestionAsync(SessionRun run, AiQuestionSet set, CancellationToken ct)
@@ -147,6 +153,9 @@ public partial class AiAssistantPanel
         try
         {
             var answer = card.AskAsync(set, ct);
+            using var notice = AiAttentionService.Track(() => AiInteractionWindow,
+                () => IsLoaded && IsVisible && IsCurrentRun(run), "AI 助手正在询问",
+                string.Join("\n", set.Questions.Select(q => q.Text)), () => ActivateAiInteraction(run));
             RefreshSessionQuestionVisibility();
             if (IsCurrentRun(run)) ScrollToBottom();
             else RefreshHistory();

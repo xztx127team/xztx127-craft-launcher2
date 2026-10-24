@@ -6,6 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Models/AppConfig.PerformanceHardwareDetails.cs" Link="AppConfig.PerformanceHardwareDetails.cs" />
+    <Compile Include="../../Services/PerformanceHardwareDetails.cs" Link="PerformanceHardwareDetails.cs" />
+
+    <Compile Include="../../Models/AppConfig.PerformanceLayout.cs" Link="AppConfig.PerformanceLayout.cs" />
+    <Compile Include="../../Services/PerformanceOverlayTemplateFormatter.cs" Link="PerformanceOverlayTemplateFormatter.cs" />
+    <Compile Include="../../Models/AppConfig.HardwarePerformance.cs" Link="AppConfig.HardwarePerformance.cs" />
     <Compile Include="../../Models/PerformanceMetrics.cs" Link="PerformanceMetrics.cs" />
     <Compile Include="../../Services/PerformanceMetricsMath.cs" Link="PerformanceMetricsMath.cs" />
     <Compile Include="../../Services/PerformanceOverlaySettings.cs" Link="PerformanceOverlaySettings.cs" />

@@ -100,7 +100,7 @@ public static class Win11EffectsService
 
         var state = WindowStates.GetValue(window, _ => new WindowEffectState());
         var transparent = ThemeService.CurrentGlobalTransparencyEnabled && ThemeService.CurrentGlobalOpacityPercent < 100;
-        var corner = enabled || CurrentWinUi3Enabled ? DWMWCP_ROUND : DWMWCP_DEFAULT;
+        var corner = window is MainWindow || enabled || CurrentWinUi3Enabled ? DWMWCP_ROUND : DWMWCP_DEFAULT;
         var backdrop = enabled && !transparent
             ? (window is MainWindow ? (int)CurrentMainWindowMaterial : DWMSBT_TRANSIENTWINDOW)
             : DWMSBT_NONE;
@@ -113,6 +113,21 @@ public static class Win11EffectsService
             var margins = requestedBackdrop
                 ? new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 }
                 : new MARGINS();
+            if (!requestedBackdrop && window is MainWindow
+                && System.Windows.Shell.WindowChrome.GetWindowChrome(window) is { } chrome)
+            {
+                // 关闭云母/亚克力只撤销背景材质，保留 WindowChrome 的原生合成边缘。
+                // 归零会在 Loaded/主题刷新时覆盖主窗口为 DWM 保留的 1 DIP frame。
+                var frame = chrome.GlassFrameThickness;
+                var dpi = VisualTreeHelper.GetDpi(window);
+                margins = new MARGINS
+                {
+                    Left = (int)Math.Ceiling(Math.Max(0, frame.Left) * dpi.DpiScaleX),
+                    Right = (int)Math.Ceiling(Math.Max(0, frame.Right) * dpi.DpiScaleX),
+                    Top = (int)Math.Ceiling(Math.Max(0, frame.Top) * dpi.DpiScaleY),
+                    Bottom = (int)Math.Ceiling(Math.Max(0, frame.Bottom) * dpi.DpiScaleY)
+                };
+            }
             var frameResult = DwmExtendFrameIntoClientArea(hwnd, ref margins);
             state.BackdropApplied = requestedBackdrop && frameResult == 0;
             if (requestedBackdrop && !state.BackdropApplied)

@@ -114,8 +114,10 @@ public static class BedrockPackageRegistrationHelper
     /// </summary>
     /// <param name="extractedDir">DownloadClientAsync 返回的解压目录。</param>
     /// <param name="progress">注册进度回调（百分比 0-100 + 当前阶段文字）。</param>
-    public static async Task RegisterAsync(string extractedDir, IProgress<(int Percent, string State)>? progress = null)
+    public static async Task RegisterAsync(string extractedDir, IProgress<(int Percent, string State)>? progress = null,
+        CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var manifestPath = FindAppxManifest(extractedDir);
         if (manifestPath == null)
             throw new InvalidOperationException(
@@ -144,7 +146,9 @@ public static class BedrockPackageRegistrationHelper
                 tcs.TrySetResult();
         };
 
+        using var cancellation = ct.Register(() => { try { deployment.Cancel(); } catch { } });
         await tcs.Task;
+        ct.ThrowIfCancellationRequested();
     }
 
     /// <summary>
@@ -153,8 +157,9 @@ public static class BedrockPackageRegistrationHelper
     /// "直接 Process.Start 解压出来的 exe"这条旧路径。
     /// </summary>
     public static async Task RegisterAndLaunchAsync(string extractedDir,
-        IProgress<(int Percent, string State)>? progress = null)
+        IProgress<(int Percent, string State)>? progress = null, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (!IsDeveloperModeEnabled())
             throw new InvalidOperationException(
                 "系统未开启开发者模式，侧载（非 Microsoft Store 安装）方式注册应用包可能会被拒绝。\n" +
@@ -163,9 +168,10 @@ public static class BedrockPackageRegistrationHelper
         if (!IsRegistered())
         {
             progress?.Report((0, "正在注册应用包"));
-            await RegisterAsync(extractedDir, progress);
+            await RegisterAsync(extractedDir, progress, ct);
         }
 
+        ct.ThrowIfCancellationRequested();
         progress?.Report((100, "启动游戏"));
         BedrockLaunchService.Launch();
     }

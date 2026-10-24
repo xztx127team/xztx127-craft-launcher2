@@ -377,7 +377,8 @@ internal static class OriginalTouchInputInjector
     /// 加载画面隐藏光标不等于进入世界：还必须确认光标被约束在游戏客户区内。
     /// true=菜单，false=游戏视角，null=状态不明确，调用方保留已确认的模式。
     /// </summary>
-    public static bool? ReadGameMenuMode(IntPtr gameHwnd, bool allowFullscreenCapture = false)
+    public static bool? ReadGameMenuMode(IntPtr gameHwnd, bool allowFullscreenCapture = false, TouchCaptureRecovery? recovery = null,
+        LegacyTouchWorldPhase phase = LegacyTouchWorldPhase.Unknown, bool menuRequested = false)
     {
         if (!TryGetClientAreaOnScreen(gameHwnd, out var left, out var top, out var right, out var bottom) ||
             right <= left || bottom <= top || !GetClipCursor(out var clip)) return null;
@@ -391,6 +392,16 @@ internal static class OriginalTouchInputInjector
             clip.Bottom == desktopTop + GetSystemMetrics(79);
         var info = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
         if (!GetCursorInfo(ref info)) return null;
+        var nativeShowing = (info.flags & CURSOR_SHOWING) != 0;
+        var nativeSuppressed = (info.flags & CURSOR_SUPPRESSED) != 0;
+        var centeredNow = Math.Abs(info.ptScreenPos.x - (left + right) / 2) <= 3 &&
+            Math.Abs(info.ptScreenPos.y - (top + bottom) / 2) <= 3;
+        var recovered = recovery?.Observe(nativeShowing, nativeSuppressed, centeredNow,
+            phase == LegacyTouchWorldPhase.Loading, phase == LegacyTouchWorldPhase.Outside,
+            Environment.TickCount64) == true;
+        if (menuRequested && nativeShowing && !nativeSuppressed && info.hCursor != IntPtr.Zero) return true;
+        if (recovered && !nativeShowing && !nativeSuppressed) return false;
+        if (!nativeShowing && wholeDesktop && phase == LegacyTouchWorldPhase.Loading) return null;
         return TouchInputModePolicy.ClassifyModern(confined, wholeDesktop, info.hCursor != IntPtr.Zero,
             (info.flags & CURSOR_SHOWING) != 0, (info.flags & CURSOR_SUPPRESSED) != 0, allowFullscreenCapture);
     }

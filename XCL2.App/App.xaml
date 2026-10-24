@@ -419,108 +419,90 @@
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
             </Style>
 
-            <Style TargetType="Button" x:Key="PrimaryButton">
+            <!-- Shared action surfaces preserve routed commands, complete content templates,
+                 alignment and keyboard access. Only decorative focus visuals ignore hit testing. -->
+            <Style TargetType="Button" x:Key="ActionButtonBase">
                 <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
-                <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
-                <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
-                <Setter Property="FontSize" Value="15"/>
-                <Setter Property="Padding" Value="12,8"/>
-                <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource ButtonBackgroundBrush}"/>
-                <Setter Property="Cursor" Value="Hand"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="bd" Background="{TemplateBinding Background}"
-                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-                <Style.Triggers>
-                    <Trigger Property="IsMouseOver" Value="True">
-                        <Setter Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
-                    </Trigger>
-                    <Trigger Property="IsEnabled" Value="False">
-                        <Setter Property="Opacity" Value="0.5"/>
-                    </Trigger>
-                </Style.Triggers>
-            </Style>
-
-            <!-- 隐式默认按钮样式：项目里有一批按钮（取消、浏览、删除等）没有显式设置
-                 Style，之前会退化成 WPF 默认的灰色系统按钮，跟其它按钮风格不统一。
-                 这里加一个不带 x:Key 的 Button 样式，效果与 PrimaryButton 一致，
-                 所有未显式指定 Style 的 Button 会自动套用，不用逐个改 XAML。
-                 已经显式引用 PrimaryButton / SideNavButton / TileButton 等具名样式的
-                 按钮不受影响。 -->
-            <Style TargetType="Button">
-                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
-                <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
-                <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
-                <Setter Property="FontSize" Value="15"/>
-                <Setter Property="Padding" Value="12,8"/>
-                <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="BorderBrush" Value="{DynamicResource ButtonBackgroundBrush}"/>
-                <Setter Property="Cursor" Value="Hand"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="bd" Background="{TemplateBinding Background}"
-                                    BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-                <Style.Triggers>
-                    <Trigger Property="IsMouseOver" Value="True">
-                        <Setter Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
-                    </Trigger>
-                    <Trigger Property="IsEnabled" Value="False">
-                        <Setter Property="Opacity" Value="0.5"/>
-                    </Trigger>
-                </Style.Triggers>
-            </Style>
-
-            <!-- 描边按钮：仿 PCL 筛选栏里"重置条件"那种样式——跟 PrimaryButton 的实心强调色不同，
-                 这里是透明背景 + 边框，用在"次要操作"上（重置筛选条件），避免跟"搜索"这个主操作
-                 抢视觉焦点。结构基本照抄 PrimaryButton，只是配色反过来。 -->
-            <Style TargetType="Button" x:Key="SecondaryButton">
-                <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocusRing}"/>
-                <Setter Property="Background" Value="Transparent"/>
-                <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
-                <Setter Property="FontSize" Value="15"/>
-                <Setter Property="Padding" Value="12,8"/>
-                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="FontWeight" Value="Normal"/>
+                <Setter Property="Padding" Value="11,6"/>
+                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                <Setter Property="SnapsToDevicePixels" Value="True"/>
                 <Setter Property="Cursor" Value="Hand"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
-                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                            <Border x:Name="ActionSurface" Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                                    CornerRadius="7" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                                <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                  ContentTemplateSelector="{TemplateBinding ContentTemplateSelector}" ContentStringFormat="{TemplateBinding ContentStringFormat}"
+                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" RecognizesAccessKey="True"/>
                             </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource GlowBrush}"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
                 <Style.Triggers>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
+                        <Setter Property="Background" Value="{DynamicResource GlowSoftBrush}"/>
+                        <Setter Property="BorderBrush" Value="{DynamicResource BorderHoverBrush}"/>
+                    </MultiTrigger>
+                    <Trigger Property="IsPressed" Value="True"><Setter Property="Opacity" Value="0.78"/></Trigger>
+                    <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                    <Trigger Property="IsDefaulted" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
                     <Trigger Property="IsEnabled" Value="False">
-                        <Setter Property="Opacity" Value="0.5"/>
+                        <Setter Property="Opacity" Value="0.48"/>
+                        <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+                        <Setter Property="Cursor" Value="Arrow"/>
                     </Trigger>
+                </Style.Triggers>
+            </Style>
+            <Style TargetType="Button" BasedOn="{StaticResource ActionButtonBase}"/>
+            <Style TargetType="Button" x:Key="PrimaryButton" BasedOn="{StaticResource ActionButtonBase}">
+                <Setter Property="Background" Value="{DynamicResource ButtonBackgroundBrush}"/>
+                <Setter Property="Foreground" Value="{DynamicResource ButtonForegroundBrush}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource ButtonBackgroundBrush}"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Padding" Value="14,7"/>
+                <Setter Property="MinHeight" Value="34"/>
+                <Style.Triggers>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
+                        <Setter Property="Background" Value="{DynamicResource ButtonHoverBackgroundBrush}"/>
+                        <Setter Property="BorderBrush" Value="{DynamicResource BorderHoverBrush}"/>
+                    </MultiTrigger>
+                </Style.Triggers>
+            </Style>
+            <Style TargetType="Button" x:Key="SecondaryButton" BasedOn="{StaticResource ActionButtonBase}">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="Padding" Value="13,7"/>
+                <Setter Property="MinHeight" Value="34"/>
+            </Style>
+            <Style TargetType="Button" x:Key="CompactActionButton" BasedOn="{StaticResource SecondaryButton}">
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="Padding" Value="11,5"/>
+                <Setter Property="MinHeight" Value="32"/>
+                <Setter Property="HorizontalAlignment" Value="Left"/>
+            </Style>
+            <Style TargetType="Button" x:Key="QuietActionButton" BasedOn="{StaticResource CompactActionButton}">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+                <Style.Triggers>
+                    <MultiTrigger>
+                        <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True"/><Condition Property="IsEnabled" Value="True"/></MultiTrigger.Conditions>
+                        <Setter Property="Background" Value="{DynamicResource GlowSoftBrush}"/>
+                        <Setter Property="BorderBrush" Value="Transparent"/>
+                    </MultiTrigger>
                 </Style.Triggers>
             </Style>
 
@@ -1088,14 +1070,22 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="ComboBoxItem">
                             <Border x:Name="bd" Background="Transparent" CornerRadius="4" Padding="{TemplateBinding Padding}">
-                                <ContentPresenter TextBlock.Foreground="{TemplateBinding Foreground}"
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <ContentPresenter Grid.Column="0" TextBlock.Foreground="{TemplateBinding Foreground}"
                                                    TextElement.Foreground="{TemplateBinding Foreground}"/>
+                                    <Path x:Name="selectionCheck" Grid.Column="1" Width="12" Height="10" Margin="14,0,0,0"
+                                          VerticalAlignment="Center" Visibility="Hidden" IsHitTestVisible="False"
+                                          Data="M 1,5 L 4.5,8.5 L 11,1" Stretch="Uniform" Stroke="{TemplateBinding Foreground}"
+                                          StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                </Grid>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsHighlighted" Value="True">
                                     <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlowSoftBrush}"/>
                                 </Trigger>
                                 <Trigger Property="IsSelected" Value="True">
+                                    <Setter TargetName="selectionCheck" Property="Visibility" Value="Visible"/>
                                     <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlowSoftBrush}"/>
                                     <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
                                     <Setter Property="FontWeight" Value="SemiBold"/>
@@ -1229,6 +1219,7 @@
             </Style>
 
             <Style TargetType="TabControl">
+                <Setter Property="services:PageTransitionBehavior.AnimateSelection" Value="True"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="BorderThickness" Value="0"/>
                 <Setter Property="Template">
@@ -1458,6 +1449,7 @@
                  底 + TextPrimaryBrush 字 + 一个跟随展开状态旋转的箭头，展开内容区透明、
                  直接铺在父容器已有的背景上，不额外加边框/阴影。 -->
             <Style TargetType="Expander">
+                <Setter Property="services:DrawerMotionBehavior.Enabled" Value="True"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="Template">
                     <Setter.Value>
@@ -1677,6 +1669,10 @@
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
+                                    <Path x:Name="checkedGlyph" Grid.Column="0" Width="13" Height="11" Margin="0,0,8,0"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" IsHitTestVisible="False"
+                                          Data="M 1,5 L 4.5,9 L 12,1" Stretch="Uniform" Stroke="{TemplateBinding Foreground}"
+                                          StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                     <ContentPresenter x:Name="iconPresenter" Grid.Column="0" ContentSource="Icon"
                                                        Width="15" Height="15" Margin="0,0,8,0"
                                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -1708,6 +1704,17 @@
                                      "剪切/复制/粘贴"没有图标时，不留一块空白挤占文字。 -->
                                 <Trigger Property="Icon" Value="{x:Null}">
                                     <Setter TargetName="iconPresenter" Property="Visibility" Value="Collapsed"/>
+                                </Trigger>
+                                <Trigger Property="IsCheckable" Value="True">
+                                    <Setter TargetName="checkedGlyph" Property="Visibility" Value="Hidden"/>
+                                    <Setter TargetName="iconPresenter" Property="Visibility" Value="Collapsed"/>
+                                </Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="checkedGlyph" Property="Visibility" Value="Visible"/>
+                                    <Setter TargetName="iconPresenter" Property="Visibility" Value="Collapsed"/>
+                                    <Setter TargetName="bd" Property="Background" Value="{DynamicResource GlowSoftBrush}"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                    <Setter Property="FontWeight" Value="SemiBold"/>
                                 </Trigger>
                                 <Trigger Property="Role" Value="TopLevelHeader">
                                     <Setter TargetName="PART_Popup" Property="Placement" Value="Bottom"/>

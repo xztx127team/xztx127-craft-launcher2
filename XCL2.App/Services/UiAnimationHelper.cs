@@ -197,7 +197,7 @@ public static class UiAnimationHelper
     }
     public static void FadeIn(UIElement element, double to = 1.0, Action? onCompleted = null,
         AnimationKind kind = AnimationKind.Popup)
-        => Run(element, 0, to, 240, kind, onCompleted: onCompleted);
+        => Run(element, 0.35, to, 180, kind, onCompleted: onCompleted);
     public static void CrossFade(UIElement element, Action applyChange, double to = 1.0,
         AnimationKind kind = AnimationKind.Sidebar)
     {
@@ -206,22 +206,55 @@ public static class UiAnimationHelper
         applyChange();
         FadeIn(element, to, kind: kind);
     }
-    public static void FadeInMove(UIElement element, TranslateTransform move, double offset = 14,
+    public static void FadeInMove(UIElement element, TranslateTransform move, double offset = 8,
         Action? onCompleted = null, AnimationKind kind = AnimationKind.WindowOpen)
-        => Run(element, 0.2, 1, 260, kind, move: move, fromY: offset, onCompleted: onCompleted);
+        => Run(element, kind == AnimationKind.WindowRestore ? 0.92 : 0.35, 1, 180, kind, move: move, fromY: offset, onCompleted: onCompleted);
     public static void FadeOutMove(UIElement element, TranslateTransform move, double offset = 10,
         Action? onCompleted = null, AnimationKind kind = AnimationKind.WindowClose)
         => Run(element, element.Opacity, kind == AnimationKind.WindowMinimize ? 0.25 : 0, 180, kind,
             move: move, fromY: move.Y, toY: offset, onCompleted: onCompleted);
+    public static void BeforeMinimize(UIElement element, TranslateTransform move, Action minimize)
+        => Run(element, 1, .65, 95, AnimationKind.WindowMinimize,
+            move: move, fromY: 0, toY: 2, onCompleted: minimize);
+
     public static void SettleScale(UIElement element, ScaleTransform scale, Action? onCompleted = null,
         AnimationKind kind = AnimationKind.WindowRestore)
-        => Run(element, kind == AnimationKind.WindowFullscreen ? 0.6 : 0.35, 1,
-            kind == AnimationKind.WindowFullscreen ? 220 : 240, kind, scale: scale,
-            fromScale: kind == AnimationKind.WindowFullscreen ? 0.985 : 0.96, onCompleted: onCompleted);
+    {
+        // 等尺寸变化后的首帧完成再播放，避免复杂页面布局耗掉整段窗口过渡。
+        Reset(element, scale: scale);
+        if (element is FrameworkElement { IsLoaded: true, IsVisible: true } content
+            && AnimationSettingsService.Intensity(kind) > 0)
+        {
+            var state = Transitions.GetValue(element, _ => new Transition());
+            var generation = state.Generation;
+            var cancellation = new CancellationTokenSource();
+            state.PreparationCancellation = cancellation;
+            var from = kind == AnimationKind.WindowOpen ? .4 : .78;
+            element.SetCurrentValue(UIElement.OpacityProperty, 1 - (1 - from) * AnimationSettingsService.Intensity(kind));
+            _ = SettleAfterRenderAsync(content, generation, cancellation, kind, onCompleted);
+        }
+        else Run(element, kind == AnimationKind.WindowOpen ? .4 : .78, 1, 190, kind, onCompleted: onCompleted);
+    }
+
+    private static async Task SettleAfterRenderAsync(FrameworkElement content, int generation,
+        CancellationTokenSource cancellation, AnimationKind kind, Action? onCompleted)
+    {
+        var token = cancellation.Token;
+        try
+        {
+            await UiRenderScheduler.AfterRenderAsync(content, token);
+            if (!Transitions.TryGetValue(content, out var state) || state.Generation != generation || token.IsCancellationRequested) return;
+            state.PreparationCancellation = null;
+            if (!content.IsVisible || Window.GetWindow(content)?.WindowState == WindowState.Minimized)
+            { Reset(content); return; }
+            Run(content, kind == AnimationKind.WindowOpen ? .4 : .78, 1, 190, kind, onCompleted: onCompleted);
+        }
+        catch (OperationCanceledException) { }
+        finally { cancellation.Dispose(); }
+    }
     public static void BeforeWindowStateChange(UIElement element, ScaleTransform scale, Action applyChange)
     {
-        Reset(element, scale: scale);
-        applyChange();
+        Run(element, 1, .84, 85, AnimationKind.WindowFullscreen, scale: scale, onCompleted: applyChange);
     }
     public static void PageEntrance(UIElement element, TranslateTransform move, ScaleTransform scale)
     {
@@ -273,12 +306,12 @@ public static class UiAnimationHelper
         state.Move = page ? GetEntranceTransforms(element).Move : null;
         // 只有宿主内 Overlay 可以缩放；原生 Popup 的 HWND 边界不能向外扩展。
         state.Scale = scale;
-        state.FromScale = scale == null ? 1 : 0.94;
+        state.FromScale = scale == null ? 1 : 0.985;
         state.Settled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         // 页面由加载层遮住准备帧；弹窗自身就是反馈，首帧保留低强度可见内容。
         var fromOpacity = page ? 0 : PopupEntranceOpacity;
         element.SetCurrentValue(UIElement.OpacityProperty, Math.Max(0.001, 1 - (1 - fromOpacity) * strength));
-        if (state.Move != null) state.Move.Y = 18 * strength;
+        if (state.Move != null) state.Move.Y = 12 * strength;
         if (scale != null) scale.ScaleX = scale.ScaleY = 1 - (1 - state.FromScale) * strength;
         // 修改动画设置是正常收尾；关闭/覆盖则通过 Reset 取消，不能激活旧弹窗。
         state.Finish = () => ResetCore(element, settled: true);
@@ -337,8 +370,8 @@ public static class UiAnimationHelper
             return true;
         }
         onStarting?.Invoke();
-        Run(element, popup ? PopupEntranceOpacity : 0, 1, popup ? 220 : 320, popup ? AnimationKind.Popup : AnimationKind.Page,
-            move: move, fromY: popup ? 0 : 18, scale: scale, fromScale: fromScale);
+        Run(element, popup ? PopupEntranceOpacity : 0, 1, popup ? 180 : 240, popup ? AnimationKind.Popup : AnimationKind.Page,
+            move: move, fromY: popup ? 0 : 12, scale: scale, fromScale: fromScale);
         return state.Settled == null || await state.Settled.Task;
     }
     public static void Entrance(FrameworkElement element, bool page = true)

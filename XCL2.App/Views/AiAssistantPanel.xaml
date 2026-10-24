@@ -9,6 +9,57 @@
               d:DesignWidth="1040" d:DesignHeight="650"
               Loaded="UserControl_Loaded" Unloaded="UserControl_Unloaded">
     <UserControl.Resources>
+        <Style x:Key="SearchableModelComboStyle" TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+            <Setter Property="IsTextSearchEnabled" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="SelectorBorder" Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                                                BorderThickness="1" CornerRadius="6">
+                                            <TextBlock Text="⌄" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,10,2"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="SelectorBorder" Property="BorderBrush" Value="{DynamicResource BorderHoverBrush}"/></Trigger>
+                                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="SelectorBorder" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter IsHitTestVisible="False" Margin="9,0,30,0" VerticalAlignment="Center"
+                                              Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
+                            <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="None">
+                                <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
+                                        CornerRadius="8" Padding="6" Width="{TemplateBinding ActualWidth}"
+                                        MaxHeight="{TemplateBinding MaxDropDownHeight}" services:PageTransitionBehavior.PopupFadeOnVisible="True">
+                                    <Grid>
+                                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                                        <TextBox x:Name="PopupModelSearchBox" MinHeight="32" Margin="0,0,0,6"
+                                                 TextChanged="ModelSearch_Changed" PreviewKeyDown="ModelSearch_KeyDown"
+                                                 ToolTip="输入模型名称、ID 或供应商筛选；按 ↓ 选择，Enter 确认，Esc 收起。"/>
+                                        <ScrollViewer Grid.Row="1" CanContentScroll="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsPresenter/>
+                                        </ScrollViewer>
+                                        <TextBlock x:Name="NoMatchingModels" Grid.Row="1" Text="没有匹配的模型" Visibility="Collapsed" Margin="8,12"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    </Grid>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="HasItems" Value="False"><Setter TargetName="NoMatchingModels" Property="Visibility" Value="Visible"/></Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="ActivityTextStyle" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
             <Setter Property="IsReadOnly" Value="True"/>
             <Setter Property="IsReadOnlyCaretVisible" Value="False"/>
@@ -34,16 +85,17 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- 背景层单独承载"抽屉"独立透明度/磨砂：不直接把 Effect 挂在 UserControl 根节点上，
              否则连带把下面聊天文字/输入框一起糊掉。跟 OverlayCard 的 OverlayCardBackgroundLayer
              是同一个思路（见 MainWindow.xaml 注释），这里额外横跨两行铺满整个面板。 -->
-        <Border x:Name="DrawerBackgroundLayer" Grid.Row="0" Grid.RowSpan="2"
+        <Border x:Name="DrawerBackgroundLayer" Grid.Row="0" Grid.RowSpan="3"
                 Background="{DynamicResource DrawerBackgroundBrush}" Effect="{DynamicResource DrawerBlurEffect}"/>
 
         <!-- 顶栏：模型/设置仍在聊天区上方，历史改成左侧常驻，不再用浮层遮住消息。 -->
-        <Border Grid.Row="0" Background="{DynamicResource PanelBrush}"
+        <Border x:Name="FloatingPanelHeader" Grid.Row="0" Background="{DynamicResource PanelBrush}"
                 BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,0,0,1" Padding="13,9">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -83,9 +135,9 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
+        <Grid x:Name="FloatingConversationLayout" Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="178"/>
+                <ColumnDefinition Width="210"/>
                 <ColumnDefinition Width="1"/>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="1"/>
@@ -148,7 +200,7 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
-                    <TextBlock Grid.Row="3" Text="历史仅保存在本机" FontSize="9" Margin="5,8,0,0"
+                    <TextBlock Grid.Row="3" Text="历史仅保存在本机" FontSize="10" Margin="5,8,0,0"
                                Foreground="{DynamicResource TextSecondaryBrush}"/>
                 </Grid>
             </Border>
@@ -164,7 +216,7 @@
                 <!-- 路由 / 模型仍固定在最上面。自动、普通、专家模式下模型由设置决定，不能在这里误改。 -->
                 <Border Grid.Row="0" Margin="10,10,10,4" Padding="10" CornerRadius="12"
                         Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
-                    <StackPanel>
+                    <StackPanel x:Name="FloatingModelOptions">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="72"/>
@@ -186,10 +238,17 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="模型" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
                             <Grid Grid.Column="1">
-                                <ComboBox x:Name="ModelCombo" Height="30" FontSize="11"
-                                          SelectedValuePath="ModelKey" SelectionChanged="ModelCombo_SelectionChanged">
+                                <ComboBox x:Name="ModelCombo" Height="32" FontSize="11" Style="{StaticResource SearchableModelComboStyle}"
+                                          SelectedValuePath="ModelKey" SelectionChanged="ModelCombo_SelectionChanged" MaxDropDownHeight="320"
+                                          DropDownOpened="ModelCombo_DropDownOpened" DropDownClosed="ModelCombo_DropDownClosed"
+                                          PreviewMouseWheel="ModelCombo_MouseWheel" ToolTip="展开后可搜索模型名称、ID 或供应商；也可以滚动鼠标滚轮切换模型。">
+                                    <ComboBox.ItemContainerStyle>
+                                        <Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+                                            <EventSetter Event="PreviewMouseLeftButtonUp" Handler="ModelItem_PreviewMouseLeftButtonUp"/>
+                                        </Style>
+                                    </ComboBox.ItemContainerStyle>
                                     <ComboBox.ItemTemplate>
-                                        <DataTemplate><TextBlock><Run Text="{Binding ProviderName, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding DisplayName, Mode=OneWay}"/></TextBlock></DataTemplate>
+                                        <DataTemplate><TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding Id}"><Run Text="{Binding ProviderName, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding DisplayName, Mode=OneWay}"/></TextBlock></DataTemplate>
                                     </ComboBox.ItemTemplate>
                                 </ComboBox>
                                 <Border x:Name="ResolvedModelBorder" CornerRadius="6" Background="{DynamicResource SideBrush}"
@@ -604,5 +663,7 @@
                 </Grid>
             </Border>
         </Grid>
+        <Button x:Name="CompactTermsButton" Grid.Row="2" Content="拒绝 AI 助手的用户协议与条款 · 关闭 AI 助手" Click="RejectAssistantTerms_Click"
+                HorizontalAlignment="Center" Margin="8,4,8,7" Padding="8,4" FontSize="10"/>
     </Grid>
 </UserControl>

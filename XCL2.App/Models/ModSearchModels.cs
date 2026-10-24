@@ -22,7 +22,9 @@ public enum FavoriteItemType
     ResourcePack,
     DataPack,
     Shader,
-    Map
+    Map,
+    BedrockClient,
+    BedrockServer
 }
 
 /// <summary>

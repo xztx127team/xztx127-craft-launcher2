@@ -51,6 +51,7 @@ var temporary = Path.Combine(Path.GetTempPath(), "XCL2-legacy-launch-" + Guid.Ne
 Directory.CreateDirectory(temporary);
 try
 {
+    TouchOptionsCases.Run(temporary, Check);
     var indexes = Path.Combine(temporary, "assets", "indexes"); Directory.CreateDirectory(indexes);
     var hash = new string('a', 40);
     var objectDir = Path.Combine(temporary, "assets", "objects", "aa"); Directory.CreateDirectory(objectDir);

@@ -12,7 +12,7 @@ public partial class AppConfig
     public bool Ux50InputPreciseSliders { get; set; } = true;
     [ExperiencePreference("输入与编辑", "拖入路径", Description = "拖入单个文件或文件夹只填写路径，不打开、导入或执行。")]
     public bool Ux50InputPathDrop { get; set; } = true;
-    [ExperiencePreference("输入与编辑", "记住文件选择目录", Description = "默认关闭；按用途单独记住目录，不保存选中文件。可在下方清除。")]
+    [ExperiencePreference("输入与编辑", "记住文件选择目录", Description = "按用途单独记住目录，不保存选中文件。可在下方清除。")]
     public bool Ux50InputRememberPickerDirectory { get; set; }
     [ExperiencePreference("输入与编辑", "就地复制反馈")]
     public bool Ux50InputLocalCopyFeedback { get; set; } = true;
@@ -20,7 +20,7 @@ public partial class AppConfig
     public bool Ux50InputEscapeRevert { get; set; } = true;
     [ExperiencePreference("输入与编辑", "单行输入的多行粘贴预览", Description = "不处理密码框、命令、源码、密钥及多行编辑框。")]
     public bool Ux50InputMultilinePastePreview { get; set; } = true;
-    [ExperiencePreference("隐私与输入", "允许按住查看密码或密钥", Description = "默认关闭；按住密码框的眼睛按钮临时显示，松开或失去焦点立即隐藏。")]
+    [ExperiencePreference("隐私与输入", "允许按住查看密码或密钥", Description = "按住密码框的眼睛按钮临时显示，松开或失去焦点立即隐藏。")]
     public bool Ux50InputHoldRevealSecret { get; set; }
     public Dictionary<string, string> Ux50PickerDirectories { get; set; } = new(StringComparer.Ordinal);
 }

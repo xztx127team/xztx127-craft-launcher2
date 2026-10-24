@@ -205,7 +205,7 @@ public static class AprilFoolsUi
         {
             _recoveryTimer?.Stop();
             if (AprilFoolsService.IsActive)
-                ReminderCenterService.Publish("april-fools-recovery", "愚人节彩蛋", "点击右下角白旗或按 F1 可立即结束今天的整蛊；设置 → 趣味与彩蛋关闭总开关会打开确认挑战，输入彩蛋码可跳过。");
+                ReminderCenterService.Publish("april-fools-recovery", "愚人节彩蛋", "点击右下角白旗或按 F1 可立即结束今天的整蛊；设置 → 趣味与彩蛋关闭总开关直接进入闯关，窗口中可查看本次启动密码。");
         };
         _recoveryTimer.Start();
     }

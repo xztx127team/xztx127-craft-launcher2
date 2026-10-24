@@ -25,6 +25,8 @@ public partial class AiAssistantPanel : UserControl
     private readonly ObservableCollection<BubbleVm> _bubbles = new();
     private bool _sending;
     private bool _overlayClosed;
+    private readonly CancellationTokenSource _prewarmCancellation = new();
+    private Task _prewarmTask = Task.CompletedTask;
     internal bool RequireCrashLogPermission { get; set; }
     internal bool SuppressPrewarm { get; set; }
     internal bool AnalysisOnly { get; set; }
@@ -41,6 +43,7 @@ public partial class AiAssistantPanel : UserControl
     public AiAssistantPanel()
     {
         InitializeComponent();
+        RoundedWindowService.ClipContent(this);
         MessagesItemsControl.ItemsSource = _bubbles;
         PendingAttachmentsItemsControl.ItemsSource = PendingAttachments;
         _waitTimer.Tick += (_, _) => UpdateWaitHint();
@@ -71,7 +74,7 @@ public partial class AiAssistantPanel : UserControl
     public void Attach(AiAssistantService service, AiAssistantConfig config)
     {
         _service = service;
-        _service.ConfirmAccessRequest = (title, msg) => MessageBoxDialog.ShowConfirm(msg, title);
+        _service.ConfirmAccessRequest = ConfirmAiAccessRequest;
         _service.ReviewFileChange = (change, diff) => AiWorkbenchDialogs.Review(Window.GetWindow(this), change, diff);
         // 模型发起 XCL2_ASK 时，在输入框位置弹出提问卡片，等用户作答后再继续。
         _service.AskQuestionAsync = ShowQuestionAsync;
@@ -90,7 +93,7 @@ public partial class AiAssistantPanel : UserControl
         // 一次预热请求，不等待、不展示、不影响页面其它初始化。fire-and-forget 用 _ = 忽略
         // 返回的 Task——WarmUpAsync 内部已经吞掉了所有异常，这里不需要再 catch 一次。
         if (!SuppressPrewarm && _config.PrewarmSystemPromptOnOpen)
-            _ = _service.WarmUpAsync();
+            _prewarmTask = _service.WarmUpAsync(_prewarmCancellation.Token);
     }
 
     /// <summary>
@@ -104,6 +107,9 @@ public partial class AiAssistantPanel : UserControl
         try
         {
             ScrollToBottom();
+            using var notice = AiAttentionService.Track(() => AiInteractionWindow,
+                () => IsLoaded && IsVisible, "AI 助手正在询问",
+                string.Join("\n", set.Questions.Select(q => q.Text)), () => ActivateAiInteraction(null));
             return await QuestionCard.AskAsync(set, ct);
         }
         finally
@@ -153,12 +159,14 @@ public partial class AiAssistantPanel : UserControl
     internal async Task StopForOverlayCloseAsync()
     {
         _overlayClosed = true;
+        _prewarmCancellation.Cancel();
+        _elevationSessions.Clear();
         _uploadCts?.Cancel();
         DiscardAllAttachmentDrafts();
         _waitTimer.Stop();
         var runs = _runningSessions.Values.ToArray();
         foreach (var run in runs) run.Cancellation.Cancel();
-        await Task.WhenAll(runs.Select(run => run.Completion.Task));
+        await Task.WhenAll(runs.Select(run => run.Completion.Task).Append(_prewarmTask));
     }
 
     private string ModelDisplayName(string? modelKey)
@@ -212,7 +220,7 @@ public partial class AiAssistantPanel : UserControl
         _suppressModelSelection = true;
         try
         {
-            ModelCombo.ItemsSource = catalog;
+            ModelCombo.ItemsSource = catalog.Where(ModelMatchesSearch).ToList();
             ModelCombo.SelectedValue = catalog.Any(m => string.Equals(m.ModelKey, _config.SelectedModel, StringComparison.OrdinalIgnoreCase))
                 ? _config.SelectedModel
                 : catalog.FirstOrDefault()?.ModelKey;
@@ -224,10 +232,11 @@ public partial class AiAssistantPanel : UserControl
     /// <summary>只有“指定模型”模式允许在聊天页改模型；自动/普通/专家完全由设置页的默认模型决定。</summary>
     private void UpdateModelSelectionState()
     {
-        bool manual = _config.RoutingMode == AiRoutingMode.SpecificModel;
+        bool manual = _config.RoutingMode == AiRoutingMode.SpecificModel || IsFloatingBetaView;
         ModelCombo.Visibility = manual ? Visibility.Visible : Visibility.Collapsed;
         ResolvedModelBorder.Visibility = manual ? Visibility.Collapsed : Visibility.Visible;
         ModelCombo.IsEnabled = manual && !_sending;
+        if (!ModelCombo.IsEnabled) ModelCombo.IsDropDownOpen = false;
 
         var normal = ModelDisplayName(_config.NormalModelId);
         var expert = ModelDisplayName(_config.ExpertModelId);
@@ -329,11 +338,20 @@ public partial class AiAssistantPanel : UserControl
 
     private void ModelCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressModelSelection || _config.RoutingMode != AiRoutingMode.SpecificModel) return;
-        if (ModelCombo.SelectedValue is not string modelId || string.IsNullOrWhiteSpace(modelId)) return;
+        if (_suppressModelSelection || !IsFloatingBetaView && _config.RoutingMode != AiRoutingMode.SpecificModel) return;
+        var selected = e.AddedItems.OfType<AiModelDefinition>().FirstOrDefault() ?? ModelCombo.SelectedItem as AiModelDefinition;
+        if (selected == null || _sending) return;
+        var modelId = selected.ModelKey;
 
         _config.SelectedModel = modelId;
         _config.AutoModelRouting = false;
+
+        if (IsFloatingBetaView)
+        {
+            _config.RoutingMode = AiRoutingMode.SpecificModel;
+            RefreshRoutingUi();
+        }
+        _service?.UpdateConfig(_config);
         RefreshReasoningUi();
         UpdateRoutingText();
         PersistQuickConfig();
@@ -404,7 +422,7 @@ public partial class AiAssistantPanel : UserControl
         _config.WorkMode = mode;
         _sessionWorkModes[_session.Id] = mode;
         if (CurrentRun is { } run) run.SetWorkMode(mode);
-        if (mode == AiWorkMode.Agent && ConfigService.Active is { } active)
+        if (!IsFloatingBetaView && mode == AiWorkMode.Agent && ConfigService.Active is { } active)
         {
             active.Config.AiAssistant = _config;
             if (AiAgentAnimationService.ApplyProfile(active.Config, _config.AgentAnimationProfile)) active.Save();
@@ -471,6 +489,12 @@ public partial class AiAssistantPanel : UserControl
 
     private void PersistQuickConfig()
     {
+        if (FloatingQuickConfigSaved != null)
+        {
+            try { FloatingQuickConfigSaved(_config); }
+            catch (Exception ex) { ToastService.ShowWarning("保存悬浮聊天设置失败：" + ex.Message); }
+            return;
+        }
         if (_owner == null) return;
         _owner.AiAssistantConfig = _config;
         try { _owner.PersistAiAssistantConfig(); }
@@ -620,6 +644,8 @@ public partial class AiAssistantPanel : UserControl
 
         var service = _service;
         var session = _session;
+        _parameterFailures.Remove(session.Id);
+        ShowParameterFailure();
         var previousAssistant = session.Messages.LastOrDefault(message => message.Role == AiMessageRole.Assistant);
         _bubbles.Add(BubbleVm.UserBubble(text, attachments));
         var pending = BubbleVm.AssistantBubble("", null);
@@ -646,10 +672,11 @@ public partial class AiAssistantPanel : UserControl
 
         try
         {
+            using var elevationScope = CreateElevationInteraction(run).EnterScope();
             var replyTask = service.SendMessageAsync(
                 session, text,
                 isCrashLogContext: isCrashLogContext,
-                forcedModel: null,
+                forcedModel: _config.RoutingMode == AiRoutingMode.SpecificModel ? _config.SelectedModel : null,
                 deepThinking: SelectedReasoningLevel is not (AiReasoningLevel.Off or AiReasoningLevel.Fast),
                 webSearch: WebSearchCheck.IsChecked == true,
                 ct: sendToken,
@@ -687,6 +714,7 @@ public partial class AiAssistantPanel : UserControl
         }
         catch (Exception ex)
         {
+            if (ex is AiParameterAdaptationException adaptation) _parameterFailures[session.Id] = adaptation;
             var friendly = FriendlyAiError(ex.Message);
             run.FailureText = "出错了：" + friendly;
             run.RouteStatus = ex.Message.Contains("模型 ID", StringComparison.OrdinalIgnoreCase)
@@ -698,6 +726,7 @@ public partial class AiAssistantPanel : UserControl
         finally
         {
             run.Completed = true;
+            if (IsCurrentRun(run)) ShowParameterFailure();
             _runningSessions.Remove(session.Id);
             pending.IsGenerating = false;
             run.Completion.TrySetResult(true);
@@ -876,6 +905,7 @@ public partial class AiAssistantPanel : UserControl
         _unsavedSessions.Remove(target.Id);
         _sessionDrafts.Remove(target.Id);
         _sessionWorkModes.Remove(target.Id);
+        _elevationSessions.Remove(target.Id);
         DiscardAttachmentDraft(target.Id);
         if (target.Id == _session.Id)
             SwitchToSession(_service.ListSessions().FirstOrDefault() ?? _service.CreateNewSession());

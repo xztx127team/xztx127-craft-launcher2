@@ -20,18 +20,17 @@ public partial class MainWindow
         return Task.Run(() => CrashAiLogService.BuildPrompt(process, incidentObservedAt, summary, secrets, ct), ct);
     }
 
-    /// <summary>崩溃快捷入口专用。MainContent 与当前导航完全不变，关闭浮层即可继续原页面。</summary>
-    internal async Task ShowCrashAnalysisOverlayAsync(string prompt, string sessionTitle)
+    /// <summary>只读崩溃分析放在非模态右侧抽屉；收起保留报告和后台请求。</summary>
+    internal Task ShowCrashAnalysisOverlayAsync(string prompt, string sessionTitle)
     {
-        if (!EnsureNotRestrictedModeForAi() || !EnsureAiTermsAccepted()) return;
-        var dialog = new AiCrashAnalysisDialog(this, prompt, sessionTitle);
-        PreviewFluentTheme.ApplyTo(dialog);
-        try { await OverlayDialogService.ShowModalAsync(dialog); }
-        finally
-        {
-            await dialog.DisposeAsync();
-            _aiAssistantPanel?.ApplyConfig(AiAssistantConfig);
-            UpdateAiFloatingButtonVisibility(MainContent.Content is not AiAssistantPanel);
-        }
+        if (!EnsureNotRestrictedModeForAi() || !EnsureAiTermsAccepted()) return Task.CompletedTask;
+        EnsureAiSideDrawer();
+        var report = new AiCrashAnalysisDialog(this, prompt, sessionTitle);
+        _crashAnalysisDrawers.Add(report);
+        report.CollapseRequested += CollapseAiSideDrawer;
+        report.SetRevealAction(() => ShowAiSideDrawer(report.DrawerEntry));
+        PreviewFluentTheme.ApplyTo(report);
+        ShowAiSideDrawer(report.DrawerEntry);
+        return Task.CompletedTask;
     }
 }

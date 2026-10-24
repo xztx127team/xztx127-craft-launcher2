@@ -11,6 +11,7 @@ namespace XCL2.App.Services;
 public sealed class AiRequestTarget
 {
     public string ModelKey { get; init; } = "";
+    public AiApiProtocol Protocol { get; init; } = AiApiProtocol.OpenAI;
     public string ModelId { get; init; } = "";
     public string ProviderId { get; init; } = "";
     public string ProviderName { get; init; } = "";
@@ -27,6 +28,7 @@ public static class AiEndpointRouting
     {
         // Missing legacy values keep Build; invalid imported values never grant execution.
         if (!Enum.IsDefined(typeof(AiWorkMode), config.WorkMode)) config.WorkMode = AiWorkMode.Plan;
+        if (!Enum.IsDefined(typeof(AiApiProtocol), config.ApiProtocol)) config.ApiProtocol = AiApiProtocol.OpenAI;
         config.ApiKeys = CleanKeys(config.ApiKeys).ToList();
         config.ApiEndpoints ??= new();
         config.ApiEndpoints.RemoveAll(e => e == null);
@@ -41,6 +43,7 @@ public static class AiEndpointRouting
             }
             endpoint.Name = endpoint.Name?.Trim() ?? "自定义接口";
             endpoint.BaseUrl = endpoint.BaseUrl?.Trim() ?? "";
+            if (!Enum.IsDefined(typeof(AiApiProtocol), endpoint.Protocol)) endpoint.Protocol = AiApiProtocol.OpenAI;
             endpoint.ApiKeys = CleanKeys(endpoint.ApiKeys).ToList();
         }
         config.CustomModels ??= new();
@@ -84,7 +87,24 @@ public static class AiEndpointRouting
 
     public static string BuildModelsUrl(string? baseUrl) => BuildEndpointUrl(baseUrl, "/models");
 
-    private static string BuildEndpointUrl(string? baseUrl, string suffix)
+    public static string BuildMessagesUrl(string? baseUrl) => BuildEndpointUrl(baseUrl, "/messages", anthropic: true);
+    public static string BuildModelsUrl(string? baseUrl, AiApiProtocol protocol) =>
+        BuildEndpointUrl(baseUrl, "/models", protocol == AiApiProtocol.Anthropic);
+    public static string BuildCompletionUrl(AiRequestTarget target) => target.Protocol == AiApiProtocol.Anthropic
+        ? BuildMessagesUrl(target.BaseUrl) : BuildChatCompletionsUrl(target.BaseUrl);
+
+    public static void ApplyAuthentication(System.Net.Http.HttpRequestMessage request, string apiKey, AiApiProtocol protocol)
+    {
+        if (protocol == AiApiProtocol.Anthropic)
+        {
+            request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
+            if (!string.IsNullOrWhiteSpace(apiKey)) request.Headers.Add("x-api-key", apiKey.Trim());
+        }
+        else if (!string.IsNullOrWhiteSpace(apiKey))
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey.Trim());
+    }
+
+    private static string BuildEndpointUrl(string? baseUrl, string suffix, bool anthropic = false)
     {
         var value = (baseUrl ?? "").Trim();
         if (value.IndexOfAny(new[] { '\r', '\n' }) >= 0
@@ -94,12 +114,13 @@ public static class AiEndpointRouting
             throw new ArgumentException("AI 接口地址无效，请填写 http/https 地址，并将 API 密钥填写在密钥栏。", nameof(baseUrl));
 
         var path = uri.AbsolutePath.TrimEnd('/');
-        foreach (var knownSuffix in new[] { "/chat/completions", "/models" })
+        foreach (var knownSuffix in new[] { "/chat/completions", "/models", "/messages" })
             if (path.EndsWith(knownSuffix, StringComparison.OrdinalIgnoreCase))
             {
                 path = path[..^knownSuffix.Length].TrimEnd('/');
                 break;
             }
+        if (anthropic && path.Length == 0) path = "/v1";
         // Preserve custom API prefixes, escaped path segments and required query parameters.
         // A fragment is local browser navigation and is never part of an HTTP API request.
         return uri.GetLeftPart(UriPartial.Authority) + path + suffix + uri.Query;
@@ -129,6 +150,7 @@ public static class AiEndpointRouting
     private static AiRequestTarget? CreateTarget(AiAssistantConfig config, AiModelDefinition model)
     {
         string url;
+        var protocol = AiApiProtocol.OpenAI;
         IReadOnlyList<string> keys;
         if (model.ProviderId == AiModelIds.BuiltInProviderId)
         {
@@ -138,6 +160,7 @@ public static class AiEndpointRouting
         else if (model.ProviderId == AiModelIds.CustomProviderId)
         {
             url = config.BaseUrl;
+            protocol = config.ApiProtocol;
             keys = CleanKeys(new[] { config.ApiKey }.Concat(config.ApiKeys ?? new()));
         }
         else
@@ -148,6 +171,7 @@ public static class AiEndpointRouting
             {
                 if (!endpoint.Enabled) return null;
                 url = endpoint.BaseUrl;
+                protocol = endpoint.Protocol;
                 keys = CleanKeys(endpoint.ApiKeys);
             }
             else if (model.ProviderId.StartsWith("legacy-", StringComparison.Ordinal)
@@ -161,7 +185,7 @@ public static class AiEndpointRouting
         if (string.IsNullOrWhiteSpace(url)) return null;
         return new AiRequestTarget
         {
-            ModelId = model.Id, ModelKey = model.ModelKey, ProviderId = model.ProviderId,
+            ModelId = model.Id, ModelKey = model.ModelKey, ProviderId = model.ProviderId, Protocol = protocol,
             ProviderName = model.ProviderName, BaseUrl = url.Trim(), Tier = model.Tier,
             ApiKeys = config.EnableApiKeyFailover ? keys : keys.Take(1).ToArray(),
             SupportsFastMode = model.SupportsFastMode

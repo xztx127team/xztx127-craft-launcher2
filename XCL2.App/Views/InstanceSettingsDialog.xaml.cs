@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using XCL2.App.Models;
 using XCL2.App.Services;
 
@@ -18,6 +19,10 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
     private readonly string _folderPath;
     private readonly GameVersion _version;
     private readonly MainWindow _owner;
+    private readonly DispatcherTimer _memoryPreviewTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private CancellationTokenSource? _javaPreviewCancellation;
+    private int? _previewJavaBitness;
+    private string _previewJavaNote = "Java 尚未匹配；启动前会按实际 Java 位数复核内存上限。";
 
     public InstanceSettingsDialog(MainWindow owner, string folderPath, GameVersion version)
     {
@@ -31,6 +36,20 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
 
         TitleText.Text = $"「{version.Id}」的单独设置";
         LoadSettings();
+        InstanceMinMemoryBoxDlg.TextChanged += MemoryPreview_Changed;
+        InstanceMaxMemoryBoxDlg.TextChanged += MemoryPreview_Changed;
+        InstanceCustomJvmArgsBoxDlg.TextChanged += MemoryPreview_Changed;
+        InstanceMemOptComboDlg.SelectionChanged += MemoryPreview_Changed;
+        VersionJavaListComboDlg.SelectionChanged += PreviewJava_Changed;
+        VersionJavaOverrideBoxDlg.TextChanged += PreviewJava_Changed;
+        VersionIsolationOverrideCheckDlg.Checked += PreviewJava_Changed;
+        VersionIsolationOverrideCheckDlg.Unchecked += PreviewJava_Changed;
+        SkipJavaMismatchPromptCheckDlg.Checked += PreviewJava_Changed;
+        SkipJavaMismatchPromptCheckDlg.Unchecked += PreviewJava_Changed;
+        _memoryPreviewTimer.Tick += (_, _) => RefreshMemoryPreview();
+        Loaded += (_, _) => { _memoryPreviewTimer.Start(); RefreshPreviewJavaAsync(); };
+        Unloaded += (_, _) => { _memoryPreviewTimer.Stop(); _javaPreviewCancellation?.Cancel(); };
+        RefreshMemoryPreview();
     }
 
     private void LoadSettings()
@@ -77,7 +96,7 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
 
         InstanceMinMemoryBoxDlg.Text = instance.MinMemoryMb?.ToString() ?? "";
         InstanceMaxMemoryBoxDlg.Text = instance.MaxMemoryMb?.ToString() ?? "";
-        InstanceCustomJvmArgsBoxDlg.Text = instance.CustomJvmArgs ?? _config.CustomJvmArgs ?? "";
+        InstanceCustomJvmArgsBoxDlg.Text = instance.CustomJvmArgs ?? "";
 
         // 内存优化：EnableMemoryOptimization 为 null 时代表"跟随全局"，非 null 时代表
         // 这个实例显式选了开启(true)/关闭(false)。OnLauncherOpen 只额外预览，
@@ -105,6 +124,162 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
         SelectGraphicsApiPreference(instance.GraphicsApiPreference);
 
         InstanceXclDirTextDlg.Text = InstanceConfigService.GetXclDir(versionDir);
+    }
+
+    private InstanceSettings ReadMemoryDraft(int? minimum, int? maximum)
+    {
+        var tag = (InstanceMemOptComboDlg.SelectedItem as ComboBoxItem)?.Tag as string ?? "Follow";
+        return new InstanceSettings
+        {
+            MinMemoryMb = minimum,
+            MaxMemoryMb = maximum,
+            EnableMemoryOptimization = tag switch
+            {
+                "Disabled" => false,
+                "BeforeGameLaunch" or "OnLauncherOpen" => true,
+                _ => null,
+            },
+            MemoryOptimizationTiming = tag switch
+            {
+                "BeforeGameLaunch" => MemoryOptimizationTiming.BeforeGameLaunch,
+                "OnLauncherOpen" => MemoryOptimizationTiming.OnLauncherOpen,
+                _ => null,
+            },
+        };
+    }
+
+    private void MemoryPreview_Changed(object sender, RoutedEventArgs e) => RefreshMemoryPreview();
+
+    private void RefreshMemoryPreview()
+    {
+        InstanceMemoryPreviewWarningDlg.Visibility = Visibility.Collapsed;
+        try
+        {
+            var draft = ReadMemoryDraft(ParseNullableMemory(InstanceMinMemoryBoxDlg.Text),
+                ParseNullableMemory(InstanceMaxMemoryBoxDlg.Text));
+            if (draft.MinMemoryMb > draft.MaxMemoryMb)
+                throw new InvalidOperationException("实例初始内存不能大于最大内存，请先调整再保存。");
+
+            // 与实际启动完全相同的实例/全局优先级、物理内存采样、32 位限制及会话覆盖。
+            var physical = MemoryOptimizerService.ReadPhysicalMemory();
+            var allocation = MemoryOptimizerService.ConstrainForJava(_config,
+                MemoryOptimizerService.ResolveLaunchMemory(_config, draft, physical), _previewJavaBitness);
+            var hasManual = draft.MinMemoryMb.HasValue || draft.MaxMemoryMb.HasValue;
+            var dynamicRequested = draft.EnableMemoryOptimization ?? (_config.EnableMemoryOptimization && !hasManual);
+            var source = allocation.IsDynamic
+                ? (_config.FixedMemoryAllocationMb is > 0 ? "动态模式中的固定分配值" : "按全局动态内存模式计算；启动前会重新计算")
+                : hasManual ? "实例手动内存优先，留空的端点跟随全局" : "使用全局手动内存";
+            if (dynamicRequested && physical == null)
+                source += "；无法读取物理内存，已按启动逻辑回退到手动值";
+            if (App.StartupArgs.MinMemoryMb.HasValue || App.StartupArgs.MaxMemoryMb.HasValue)
+            {
+                var session = CommandLineSessionPolicy.ResolveMemory(allocation.MinMemoryMb, allocation.MaxMemoryMb,
+                    App.StartupArgs.MinMemoryMb, App.StartupArgs.MaxMemoryMb);
+                allocation = allocation with { MinMemoryMb = session.MinMb, MaxMemoryMb = session.MaxMb, IsDynamic = false };
+                source = "使用本次启动器命令行的内存覆盖";
+            }
+            var instanceJvm = string.IsNullOrWhiteSpace(InstanceCustomJvmArgsBoxDlg.Text)
+                ? null : InstanceCustomJvmArgsBoxDlg.Text.Trim();
+            var jvm = CommandLineSessionPolicy.CombineJvmArguments(_config.AdvancedMode,
+                instanceJvm, _config.CustomJvmArgs, App.StartupArgs.ExtraJvmArgs);
+            List<string> tokens = new();
+            string? warning = null;
+            try { if (jvm != null) tokens = LauncherService.SplitArgsRespectingQuotes(jvm); }
+            catch (FormatException) { warning = "JVM 参数引号未闭合，启动器会忽略整段自定义参数。"; }
+            var preview = MemoryLaunchPreviewPolicy.Apply(allocation, tokens);
+            if (preview.Error != null) throw new InvalidOperationException(preview.Error);
+
+            InstanceMemoryPreviewTextDlg.Text = $"初始 {preview.InitialMbText} MB · 最大 {preview.MaximumMbText} MB";
+            if (preview.HasOverride) source += "；已计入自定义 JVM 堆内存覆盖";
+            if (!_config.AdvancedMode && (instanceJvm != null || !string.IsNullOrWhiteSpace(_config.CustomJvmArgs)))
+                source += "；普通模式下不应用已保存的自定义 JVM 参数";
+            var memoryInfo = physical == null ? "" : $"系统总内存 {physical.TotalMb} MB，当前可用 {physical.AvailableMb} MB。";
+            InstanceMemoryPreviewDetailDlg.Text = source + "。\n" + memoryInfo + _previewJavaNote;
+            warning = string.Join(" ", new[] { warning, preview.Uncertainty }.Where(s => !string.IsNullOrEmpty(s)));
+            if (_previewJavaBitness == 32 && preview.MaximumBytes > 1536L * 1024 * 1024)
+                warning += " 当前使用 32 位 Java，超过 1536 MB 的手动堆配置可能无法启动。";
+            if (!string.IsNullOrWhiteSpace(warning))
+            {
+                InstanceMemoryPreviewWarningDlg.Text = warning;
+                InstanceMemoryPreviewWarningDlg.Visibility = Visibility.Visible;
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            InstanceMemoryPreviewTextDlg.Text = "当前输入无法生成有效的启动内存预览";
+            InstanceMemoryPreviewDetailDlg.Text = "请检查初始内存、最大内存和自定义 JVM 参数。";
+            InstanceMemoryPreviewWarningDlg.Text = ex.Message;
+            InstanceMemoryPreviewWarningDlg.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void PreviewJava_Changed(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded) RefreshPreviewJavaAsync();
+    }
+
+    private async void RefreshPreviewJavaAsync()
+    {
+        _javaPreviewCancellation?.Cancel();
+        using var cancellation = new CancellationTokenSource();
+        _javaPreviewCancellation = cancellation;
+        var token = cancellation.Token;
+        _previewJavaBitness = null;
+        _previewJavaNote = "正在匹配 Java；启动前会按实际 Java 位数复核内存上限。";
+        RefreshMemoryPreview();
+        var selected = (VersionJavaListComboDlg.SelectedItem as JavaListItem)?.Entry;
+        var explicitPath = !string.IsNullOrWhiteSpace(App.StartupArgs.JavaPathOverride)
+            ? App.StartupArgs.JavaPathOverride
+            : _owner.ConfigService.ResolveJavaPath(selected?.Id ?? _config.SelectedJavaId);
+        var registered = _owner.ConfigService.GetJavaListInPriorityOrder().Select(j => j.JavawPath).ToArray();
+        var configuredPath = _config.JavaPath;
+        var isolate = VersionIsolationOverrideCheckDlg.IsChecked == true;
+        var explicitMajor = int.TryParse(VersionJavaOverrideBoxDlg.Text, out var major) && major > 0 ? major : (int?)null;
+        int? globalMajor = _config.AdvancedMode ? _config.PreferredJavaMajorVersion : null;
+        var skipMismatch = selected != null && SkipJavaMismatchPromptCheckDlg.IsChecked == true;
+        var enforceMatch = _config.EnforceJavaVersionMatch && !skipMismatch &&
+            string.IsNullOrWhiteSpace(App.StartupArgs.JavaPathOverride);
+        try
+        {
+            var path = await Task.Run(() =>
+            {
+                var required = explicitMajor ?? LauncherService.GetRequiredJavaMajorVersion(_folderPath, _version.Id, isolate);
+                var preferred = required is > 0 ? required : globalMajor;
+                if (explicitPath != null && enforceMatch && preferred is > 0)
+                {
+                    var actual = JavaService.TryGetJavaMajorVersionSync(explicitPath, token);
+                    if (actual is > 0 && !JavaService.IsJavaMajorCompatible(actual.Value, preferred.Value))
+                    {
+                        explicitPath = null;
+                        // 实际启动的强制切换分支从 FindJava(null, ...) 重新匹配，
+                        // 不再把全局手写路径当作额外候选。
+                        configuredPath = null;
+                    }
+                }
+                return explicitPath ?? new JavaService().FindJava(configuredPath, preferred, null, token, registered);
+            }, token);
+            if (token.IsCancellationRequested) return;
+            _previewJavaBitness = JavaService.TryGetJavaBitness(path);
+            _previewJavaNote = _previewJavaBitness switch
+            {
+                32 => "当前匹配 32 位 Java，已计入自动分配上限；启动时更换 Java 会重新计算。",
+                64 => "当前匹配 64 位 Java；启动时更换 Java 会重新计算。",
+                _ => "Java 位数暂未确定；如启动时匹配 32 位 Java，自动分配上限会调整为 1536 MB（显式固定值除外）。",
+            };
+            RefreshMemoryPreview();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (token.IsCancellationRequested) return;
+            _previewJavaNote = "暂时无法匹配 Java，预览未计入 32 位 Java 限制；启动时会重新检测。";
+            System.Diagnostics.Debug.WriteLine($"[XCL2] 实例内存预览 Java 检测失败：{ex.Message}");
+            RefreshMemoryPreview();
+        }
+        finally
+        {
+            if (ReferenceEquals(_javaPreviewCancellation, cancellation)) _javaPreviewCancellation = null;
+        }
     }
 
     private static bool SupportsGraphicsApiPreference(GameVersion version)
@@ -229,22 +404,7 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             _ => null,
         };
 
-        // 内存优化下拉框 → EnableMemoryOptimization / MemoryOptimizationTiming 这一对可空字段：
-        // "跟随全局设置" 两个都留 null；"关闭" 只置 EnableMemoryOptimization=false；
-        // 另外两项置 EnableMemoryOptimization=true 并带上对应的时机。
-        var memOptTag = (InstanceMemOptComboDlg.SelectedItem as ComboBoxItem)?.Tag as string ?? "Follow";
-        bool? instanceMemOptEnabled = memOptTag switch
-        {
-            "Disabled" => false,
-            "BeforeGameLaunch" or "OnLauncherOpen" => true,
-            _ => null,
-        };
-        MemoryOptimizationTiming? instanceMemOptTiming = memOptTag switch
-        {
-            "BeforeGameLaunch" => MemoryOptimizationTiming.BeforeGameLaunch,
-            "OnLauncherOpen" => MemoryOptimizationTiming.OnLauncherOpen,
-            _ => null,
-        };
+        var memoryDraft = ReadMemoryDraft(instanceMin, instanceMax);
 
         // 镜像写入实例目录：versions/<id>/xcl/settings.json（同 VersionSelectPage 那份逻辑）。
         var versionDir = Path.Combine(_folderPath, "versions", versionId);
@@ -263,8 +423,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
                 ? GetSelectedGraphicsApiPreference()
                 : null;
             instanceSettings.AutoJoinServerAddress = AutoJoinServerCheckDlg.IsChecked == true ? AutoJoinServerAddressBoxDlg.Text.Trim() : null;
-            instanceSettings.EnableMemoryOptimization = instanceMemOptEnabled;
-            instanceSettings.MemoryOptimizationTiming = instanceMemOptTiming;
+            instanceSettings.EnableMemoryOptimization = memoryDraft.EnableMemoryOptimization;
+            instanceSettings.MemoryOptimizationTiming = memoryDraft.MemoryOptimizationTiming;
             try
             {
                 InstanceConfigService.Save(versionDir, instanceSettings);

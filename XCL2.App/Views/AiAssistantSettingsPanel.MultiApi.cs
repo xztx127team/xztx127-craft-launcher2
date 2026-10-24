@@ -151,6 +151,7 @@ public partial class AiAssistantSettingsPanel
             EndpointEditor.IsEnabled = endpoint != null;
             EndpointNameBox.Text = endpoint?.Name ?? "";
             EndpointUrlBox.Text = endpoint?.BaseUrl ?? "";
+            EndpointProtocolCombo.SelectedValue = (endpoint?.Protocol ?? AiApiProtocol.OpenAI).ToString();
             EndpointEnabledCheck.IsChecked = endpoint?.Enabled == true;
             EndpointNewKeyBox.Clear();
             RefreshMaskedKeys();
@@ -217,7 +218,7 @@ public partial class AiAssistantSettingsPanel
         // An empty legacy public interface should not prevent named-only configurations.
         var defaultKeys = AiEndpointRouting.CleanKeys(new[] { ApiKeyBox.Password }.Concat(_defaultExtraKeys)).ToList();
         if (defaultKeys.Count > 0 || list.Count == 0 || _customModels.Any(m => AiModelIds.GetProviderId(m) == "custom"))
-            list.Insert(0, new AiApiEndpoint { Id = "custom", Name = "公共自定义接口", BaseUrl = BaseUrlBox.Text.Trim(), ApiKeys = defaultKeys, Enabled = true });
+            list.Insert(0, new AiApiEndpoint { Id = "custom", Name = "公共自定义接口", BaseUrl = BaseUrlBox.Text.Trim(), Protocol = SelectedApiProtocol, ApiKeys = defaultKeys, Enabled = true });
         return list;
     }
 
@@ -263,7 +264,7 @@ public partial class AiAssistantSettingsPanel
         {
             var selectedId = ModelEndpointCombo.SelectedValue as string ?? "custom";
             if (selectedId == "custom" && endpoints.All(e => e.Id != "custom"))
-                endpoints.Insert(0, new AiApiEndpoint { Id = "custom", Name = "公共自定义接口", BaseUrl = BaseUrlBox.Text.Trim(), ApiKeys = new(), Enabled = true });
+                endpoints.Insert(0, new AiApiEndpoint { Id = "custom", Name = "公共自定义接口", BaseUrl = BaseUrlBox.Text.Trim(), Protocol = SelectedApiProtocol, ApiKeys = new(), Enabled = true });
             endpoints = endpoints.Where(e => string.Equals(e.Id, selectedId, StringComparison.OrdinalIgnoreCase)).ToList();
         }
         await FetchModelTargetsAsync(endpoints);
@@ -366,7 +367,7 @@ public partial class AiAssistantSettingsPanel
             }
             RefreshCatalogPreservingSelection();
             var activationHint = UseCustomKeyCheck.IsChecked != true && MixBuiltInApiCheck.IsChecked != true
-                ? "启用自定义 API 或混合模式并保存后可使用。" : "请保存设置后使用。";
+                ? "启用自定义 API 或混合模式并保存后可使用。" : AutoSaveSettingsCheck.IsChecked == true ? "修改将自动保存。" : "请保存设置后使用。";
             if (totalAdded > 0) report.Add(activationHint);
             FetchModelsStatusText.Text = string.Join("\n", report);
             if (failures > 0) ToastService.ShowWarning($"已新增 {totalAdded} 个模型；{failures} 个接口拉取失败，请查看各接口结果。{(totalAdded > 0 ? activationHint : "")}");
@@ -383,6 +384,7 @@ public partial class AiAssistantSettingsPanel
             _fetchingModels = false;
             FetchModelsButton.IsEnabled = FetchAllModelsButton.IsEnabled =
                 FetchEditedEndpointButton.IsEnabled = FetchStandaloneModelsButton.IsEnabled = true;
+            if (totalAdded > 0) ScheduleAutoSave();
         }
     }
 
@@ -398,6 +400,7 @@ public partial class AiAssistantSettingsPanel
         }
         else if (request.Id == "custom")
         {
+            if (request.Protocol != SelectedApiProtocol) return false;
             currentUrl = BaseUrlBox.Text;
             currentKeys = new[] { ApiKeyBox.Password }.Concat(_defaultExtraKeys).Append(DefaultExtraKeyBox.Password);
         }
@@ -405,7 +408,7 @@ public partial class AiAssistantSettingsPanel
         {
             var current = _endpoints.FirstOrDefault(endpoint =>
                 string.Equals(endpoint.Id, request.Id, StringComparison.OrdinalIgnoreCase));
-            if (current?.Enabled != true) return false;
+            if (current?.Enabled != true || current.Protocol != request.Protocol) return false;
             providerName = current.Name;
             currentUrl = current.BaseUrl;
             currentKeys = current.ApiKeys ?? new();

@@ -1,6 +1,6 @@
 namespace XCL2.App.Services;
 
-/// <summary>只有空闲时连续、明确的样本才允许改变控制区；触点和未知样本都会中断确认。</summary>
+/// <summary>连续明确样本才能切换。调用方可允许已确认的原生证据终止活动手势；未知样本始终中断确认。</summary>
 internal sealed class TouchModeStability
 {
     private bool? _candidate;
@@ -9,9 +9,9 @@ internal sealed class TouchModeStability
     public void Reset() => _candidate = null;
 
     public bool? Observe(bool currentMenu, bool? observedMenu, bool hasActiveContact,
-        long now, int gameStabilityMilliseconds, int menuStabilityMilliseconds)
+        long now, int gameStabilityMilliseconds, int menuStabilityMilliseconds, bool allowDuringContact = false)
     {
-        if (hasActiveContact || !observedMenu.HasValue || observedMenu == currentMenu)
+        if ((hasActiveContact && !allowDuringContact) || !observedMenu.HasValue || observedMenu == currentMenu)
         {
             Reset();
             return null;

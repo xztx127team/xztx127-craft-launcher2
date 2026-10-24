@@ -41,6 +41,7 @@ public partial class HomePage
         foreach (var tile in new[] { LaunchTile, AccountsTile, DownloadTile, QuickStartTile, ServerManagerTile, SettingsTile })
             tile.Style = tileStyle;
         LanguageEntryButton.Style = languageStyle;
+        RefreshForSizeChange();
     }
 
     private void RefreshPreviewCards()
@@ -109,7 +110,7 @@ public partial class HomePage
             case "settings": _owner.NavigateToSettings(); break;
             case "ai": _owner.NavigateToAiAssistant(); break;
             case "downloads": _owner.NavigateToDownloadCenter(); break;
-            case "plugins": OverlayDialogService.ShowModal(new PluginManagerDialog(_owner)); break;
+            case "plugins": _owner.OpenPluginManager(); break;
         }
     }
 }

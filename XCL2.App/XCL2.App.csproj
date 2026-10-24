@@ -10,9 +10,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>XCL2</AssemblyName>
     <RootNamespace>XCL2.App</RootNamespace>
-    <Version>2.2.23</Version>
-    <AssemblyVersion>2.2.23.0</AssemblyVersion>
-    <FileVersion>2.2.23.0</FileVersion>
+    <Version>2.2.24</Version>
+    <AssemblyVersion>2.2.24.0</AssemblyVersion>
+    <FileVersion>2.2.24.0</FileVersion>
     <Platforms>AnyCPU</Platforms>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -152,11 +152,15 @@
   </Target>
 
   <ItemGroup>
+    <Content Include="Resources\Terracotta\LICENSE.txt;Resources\Terracotta\NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="Resources\Terracotta\terracotta-0.4.2-windows-x86_64.exe" Condition="Exists('Resources\Terracotta\terracotta-0.4.2-windows-x86_64.exe')">
       <LogicalName>XCL2.App.Resources.Terracotta.terracotta-0.4.2-windows-x86_64.exe</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\Data\FeatureSearchCatalog.json">
       <LogicalName>XCL2.App.Resources.Data.FeatureSearchCatalog.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Data\BedrockClientVersionsFallback.json">
+      <LogicalName>XCL2.App.Resources.Data.BedrockClientVersionsFallback.json</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\Data\WikiEntries.txt">
       <LogicalName>XCL2.App.Resources.Data.WikiEntries.txt</LogicalName>
@@ -175,6 +179,18 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\Docs\API_REFERENCE.md">
       <LogicalName>XCL2.App.Docs.API_REFERENCE.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_LAUNCHER_CONTROL.md">
+      <LogicalName>XCL2.App.Docs.API_LAUNCHER_CONTROL.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_LAUNCHER_COMPOSITION.md">
+      <LogicalName>XCL2.App.Docs.API_LAUNCHER_COMPOSITION.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_WORLDS.md">
+      <LogicalName>XCL2.App.Docs.API_WORLDS.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_EXAMPLES.md">
+      <LogicalName>XCL2.App.Docs.API_EXAMPLES.md</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="Resources\Docs\PLUGIN_EXE_PROTOCOL.md">
       <LogicalName>XCL2.App.Docs.PLUGIN_EXE_PROTOCOL.md</LogicalName>

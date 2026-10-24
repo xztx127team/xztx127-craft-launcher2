@@ -109,6 +109,7 @@
                             <TextBlock Text="{DynamicResource Str_Ui_Line_2_Optional}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                             <TextBox x:Name="AchLine2Box" Margin="0,0,0,14" Padding="6,5"/>
 
+                            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                             <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12" Margin="0,0,0,6"
                                     HorizontalAlignment="Left">
                                 <Grid Width="520" Height="80">
@@ -122,21 +123,22 @@
                                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                                 </Grid>
                             </Border>
+                            </ScrollViewer>
                             <TextBlock x:Name="AchStatusText" FontSize="11" Margin="0,0,0,14"
                                        Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" MaxWidth="520"/>
 
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Orientation="Horizontal">
                                 <Button x:Name="AchPreviewButton" Content="{DynamicResource Str_Ui_Preview_Image}" Padding="14,7" Margin="0,0,10,0" Click="AchPreview_Click"/>
                                 <Button x:Name="AchSaveButton" Content="{DynamicResource Str_Ui_Save_Image}" Style="{StaticResource PrimaryButton}" Padding="14,7" Click="AchSave_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12" Margin="0,14,0,0"
                                     HorizontalAlignment="Left">
                                 <StackPanel>
-                                    <StackPanel Orientation="Horizontal">
+                                    <WrapPanel Orientation="Horizontal">
                                         <Button Content="设置自己已经安装好的MC基岩版" Padding="12,6" Click="AchSetBedrockDir_Click"/>
                                         <Button Content="清除" Padding="12,6" Margin="8,0,0,0" Click="AchClearBedrockDir_Click"/>
-                                    </StackPanel>
+                                    </WrapPanel>
                                     <TextBlock x:Name="AchBedrockDirText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"
                                                TextWrapping="Wrap" MaxWidth="560" Margin="0,8,0,0"/>
                                 </StackPanel>
@@ -159,7 +161,7 @@
                                 <ComboBoxItem Content="256x256"/>
                             </ComboBox>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,14">
                                 <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12" Width="140" Height="140">
                                     <Image x:Name="AvatarPreviewImage" Stretch="Uniform"/>
                                 </Border>
@@ -167,12 +169,12 @@
                                     <TextBlock x:Name="AvatarSourceText" Text="{DynamicResource Str_Ui_No_Skin_File_Selected}" TextWrapping="Wrap" MaxWidth="300"
                                                Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
                                 </StackPanel>
-                            </StackPanel>
+                            </WrapPanel>
 
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Orientation="Horizontal">
                                 <Button Content="{DynamicResource Str_Ui_Choose_Skin}" Padding="14,7" Margin="0,0,10,0" Click="AvatarSelectSkin_Click"/>
                                 <Button Content="{DynamicResource Str_Ui_Save_Avatar}" Style="{StaticResource PrimaryButton}" Padding="14,7" Click="AvatarSave_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -205,10 +207,10 @@
                             <TextBlock Text="{DynamicResource Str_Ui_File_Name_Leave_Blank_To_Auto_Dete}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                             <TextBox x:Name="DlFileNameBox" Margin="0,0,0,10" Padding="6,5"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button x:Name="DlStartBtn" Content="{DynamicResource Str_Ui_Start_Download}" Style="{StaticResource PrimaryButton}" Padding="14,7" Margin="0,0,10,0" Click="DlStart_Click"/>
                                 <Button Content="{DynamicResource Str_Ui_Open_Folder}" Padding="14,7" Click="DlOpenFolder_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                             <TextBlock x:Name="DlStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,20" TextWrapping="Wrap"/>
 
                             <Border BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,16"/>
@@ -224,7 +226,8 @@
 
                 <!-- ===== Tab 4：加载器 Jar 单独下载 ===== -->
                 <TabItem Header="{DynamicResource Str_Ui_Loader_Downloads}">
-                    <Grid Margin="4,12,4,4">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
+                    <Grid Margin="4,12,4,4" MinWidth="560" MaxWidth="760">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="180"/>
                             <ColumnDefinition Width="16"/>
@@ -256,13 +259,14 @@
                             <TextBlock Text="{DynamicResource Str_Ui_Loader_Installer_Version}" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                             <ComboBox x:Name="LoaderVersionCombo" Margin="0,0,0,14" SelectionChanged="LoaderVersionCombo_SelectionChanged"/>
 
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Orientation="Horizontal">
                                 <Button x:Name="LoaderDownloadBtn" Content="{DynamicResource Str_Ui_Download_Jar}" Style="{StaticResource PrimaryButton}" Padding="14,7" Margin="0,0,10,0" Click="LoaderDownload_Click" IsEnabled="False"/>
                                 <Button Content="{DynamicResource Str_Ui_Open_Folder}" Padding="14,7" Click="LoaderOpenFolder_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                             <TextBlock x:Name="LoaderStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Grid>
+                    </ScrollViewer>
                 </TabItem>
 
                 <!-- ===== Tab 5：清理 / 快捷方式 / 启动计数 / 内存优化 ===== -->
@@ -273,18 +277,18 @@
                             <TextBlock Text="{DynamicResource Str_Ui_Clean_Junk_Files}" FontWeight="Bold" Margin="0,0,0,8"/>
                             <TextBlock Text="{DynamicResource Str_Ui_Removes_Temporary_Files_From_This_Minecr}"
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button Content="{DynamicResource Str_Ui_Scan_Junk}" Padding="14,7" Margin="0,0,10,0" Click="JunkScan_Click"/>
                                 <Button x:Name="JunkCleanBtn" Content="{DynamicResource Str_Ui_Clean_Junk_Files}" Style="{StaticResource PrimaryButton}" Padding="14,7" Click="JunkClean_Click" IsEnabled="False"/>
-                            </StackPanel>
+                            </WrapPanel>
                             <TextBlock x:Name="JunkStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,20" TextWrapping="Wrap"/>
 
                             <Border BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,16"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,20">
                                 <Button Content="{DynamicResource Str_Ui_Create_Shortcut}" Padding="14,7" Margin="0,0,10,0" Click="CreateShortcut_Click"/>
                                 <Button Content="{DynamicResource Str_Ui_Launch_Count}" Padding="14,7" Click="ShowLaunchCount_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <Border BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,16"/>
 
@@ -295,14 +299,14 @@
 
                             <!-- 内存优化触发时机：全局默认值，某个版本可以在「版本的单独设置」里单独覆盖。 -->
                             <TextBlock Text="额外预览时机（实际启动始终重新计算）" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <RadioButton x:Name="MemOptTimingBeforeLaunchRadio" GroupName="MemOptTiming"
                                              Content="仅游戏启动前计算" Margin="0,0,20,0"
                                              Checked="MemOptTiming_Changed"/>
                                 <RadioButton x:Name="MemOptTimingOnOpenRadio" GroupName="MemOptTiming"
                                              Content="启动器打开时也预览"
                                              Checked="MemOptTiming_Changed"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <Button Content="{DynamicResource Str_Ui_Preview_Recommended_Values}" Padding="14,7" HorizontalAlignment="Left" Click="MemOptPreview_Click"/>
                             <TextBlock x:Name="MemOptStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,10,0,0" TextWrapping="Wrap"/>
@@ -324,8 +328,8 @@
 
                 <!-- ===== Tab 7：桌面便签 ===== -->
                 <TabItem x:Name="StickyNoteTabItem" Header="桌面便签">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
-                        <StackPanel Margin="4,12,4,4">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
+                        <StackPanel Margin="4,12,4,4" MinWidth="620" MaxWidth="900">
                             <TextBlock Text="本地便签：自动保存到启动器数据目录，可新建、删除、切换样式，并把任意便签作为置顶桌面便签打开。" FontSize="12"
                                        Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10" TextWrapping="Wrap"
                                        MaxWidth="640" HorizontalAlignment="Left"/>
@@ -341,10 +345,10 @@
                             <TextBlock Text="清理电脑临时垃圾" FontWeight="Bold" Margin="0,0,0,8"/>
                             <TextBlock Text="扫描并清理系统临时文件夹(%TEMP%、Windows\Temp)和常见浏览器缓存。只清理超过 6 小时未修改、确定是缓存/临时性质的文件，不会碰你的文档、下载、桌面等任何个人数据，正被占用的文件会自动跳过。"
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button Content="扫描" Padding="14,7" Margin="0,0,10,0" Click="SysJunkScan_Click"/>
                                 <Button x:Name="SysJunkCleanBtn" Content="清理" Style="{StaticResource PrimaryButton}" Padding="14,7" Click="SysJunkClean_Click" IsEnabled="False"/>
-                            </StackPanel>
+                            </WrapPanel>
                             <TextBlock x:Name="SysJunkStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
                     </ScrollViewer>
@@ -355,7 +359,7 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
                         <StackPanel Margin="4,12,4,4" MaxWidth="640" HorizontalAlignment="Left">
                             <TextBlock Text="Minecraft 服务器测速 / MOTD 查询" FontWeight="Bold" Margin="0,0,0,8"/>
-                            <TextBlock Text="填入服务器地址，实测连接延迟、MOTD、在线人数和版本号——跟游戏里多人游戏列表看到的信息是同一套协议，不需要真的进游戏就能查。"
+                            <TextBlock Text="查询 Java 版服务器的延迟、MOTD、人数和版本。只填域名或 IP 即可，端口留空使用 25565；也支持 域名:端口、[IPv6]:端口。这里不查询基岩版或网页链接。"
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10"/>
 
                             <TextBlock Text="服务器地址" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
@@ -364,19 +368,30 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="90"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBox x:Name="PingHostBox" Padding="6,5" Text="mc.hypixel.net"/>
-                                <TextBox x:Name="PingPortBox" Grid.Column="1" Padding="6,5" Margin="8,0,0,0" Text="25565"/>
+                                <TextBox x:Name="PingHostBox" Padding="6,5" Text="mc.hypixel.net"
+                                         ToolTip="域名、IPv4 或 IPv6；带端口的 IPv6 使用 [地址]:端口"/>
+                                <TextBox x:Name="PingPortBox" Grid.Column="1" Padding="6,5" Margin="8,0,0,0"
+                                         ToolTip="端口可留空，默认 25565；地址已包含端口时无需重复填写"/>
                             </Grid>
-
-                            <Button x:Name="PingGoBtn" Content="开始测速" Style="{StaticResource PrimaryButton}"
-                                    Padding="14,7" HorizontalAlignment="Left" Click="PingGo_Click"/>
+                            <TextBlock Text="端口选填 · 留空默认 25565" FontSize="11" Margin="0,0,0,8"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <WrapPanel>
+                                <Button x:Name="PingGoBtn" Content="开始测速" Style="{StaticResource PrimaryButton}"
+                                        Padding="14,7" Margin="0,0,8,6" Click="PingGo_Click"/>
+                                <Button x:Name="PingLinkBtn" Content="检测本机链路速率" Padding="14,7" Margin="0,0,8,6" Click="PingLink_Click"/>
+                                <Button x:Name="PingCancelBtn" Content="取消" Padding="14,7" Margin="0,0,0,6" Click="PingCancel_Click" IsEnabled="False"/>
+                            </WrapPanel>
 
                             <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12" Margin="0,14,0,0">
                                 <StackPanel>
                                     <TextBlock x:Name="PingResultText" FontSize="13" TextWrapping="Wrap"
                                                Text="还没有测速结果。" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock x:Name="PingLinkResultText" FontSize="12" TextWrapping="Wrap" Margin="0,10,0,0"
+                                               Text="本机链路速率尚未检测。无需服务器在线，也可以单独检测。" Foreground="{DynamicResource TextSecondaryBrush}"/>
                                 </StackPanel>
                             </Border>
+                            <TextBlock Text="链路速率是系统报告的本机网卡速率（bit/s），不是服务器带宽、下载速度或延迟换算值；Wi-Fi、VPN 和虚拟网卡可能只提供驱动报告值。"
+                                       TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0" Foreground="{DynamicResource TextSecondaryBrush}"/>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -390,16 +405,16 @@
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,14"/>
 
                             <TextBlock Text="主世界坐标 (X, Z)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,14">
                                 <TextBox x:Name="OverworldXBox" Width="140" Padding="6,5" Text="0" TextChanged="OverworldCoord_TextChanged"/>
                                 <TextBox x:Name="OverworldZBox" Width="140" Padding="6,5" Margin="10,0,0,0" Text="0" TextChanged="OverworldCoord_TextChanged"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Text="下界坐标 (X, Z)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Orientation="Horizontal">
                                 <TextBox x:Name="NetherXBox" Width="140" Padding="6,5" Text="0" TextChanged="NetherCoord_TextChanged"/>
                                 <TextBox x:Name="NetherZBox" Width="140" Padding="6,5" Margin="10,0,0,0" Text="0" TextChanged="NetherCoord_TextChanged"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock x:Name="CoordStatusText" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,10,0,0"/>
                         </StackPanel>
@@ -427,10 +442,10 @@
                                 <TextBlock x:Name="ColorCodePreviewText" FontSize="14" TextWrapping="Wrap" FontFamily="Consolas"/>
                             </Border>
 
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Orientation="Horizontal">
                                 <Button Content="复制代码" Padding="12,6" Margin="0,0,10,0" Click="ColorCodeCopy_Click"/>
                                 <Button Content="清空" Padding="12,6" Click="ColorCodeClear_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -454,10 +469,10 @@
                                 </StackPanel>
                             </Border>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button Content="刷新" Padding="14,7" Margin="0,0,10,0" Click="MemMonRefresh_Click"/>
                                 <Button x:Name="MemMonTrimBtn" Content="一键释放内存" Style="{StaticResource PrimaryButton}" Padding="14,7" Click="MemMonTrim_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                             <TextBlock x:Name="MemMonStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
                     </ScrollViewer>
@@ -472,9 +487,9 @@
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,14"/>
 
                             <TextBlock Text="用户名" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <TextBox x:Name="OfflineUuidNameBox" Width="220" Padding="6,5" Text="Steve" TextChanged="OfflineUuidNameBox_TextChanged"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12">
                                 <StackPanel>
@@ -539,10 +554,10 @@
                             <TextBlock Text="选一个 .zip 格式的资源包文件，计算它的 SHA1 值（服务器 server.properties 里的 resource-pack-sha1、或对方发给你的\u201c官方校验值\u201d用的就是这个），同时读取包内 pack.mcmeta 的 pack_format 版本号，可以粘贴一个\u201c期望的 SHA1\u201d进来自动比对是否一致，用来确认下载到的资源包文件没有被损坏或篡改。"
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,14"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <Button Content="选择资源包 (.zip)" Padding="14,7" Margin="0,0,10,0" Click="RpVerifyBrowse_Click"/>
                                 <TextBlock x:Name="RpVerifyFileText" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Text="尚未选择文件"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12" Margin="0,0,0,10">
                                 <StackPanel>
@@ -582,26 +597,26 @@
                             <TextBlock Text="一键生成一个随机的存档种子，创建新世界时可以直接粘贴到\u201c种子\u201d输入框——纯本地随机数生成，不是查已有地图的种子。"
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,14"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <RadioButton x:Name="SeedNumericRadio" Content="纯数字种子" GroupName="SeedType" IsChecked="True" Margin="0,0,20,0" Checked="SeedTypeRadio_Changed"/>
                                 <RadioButton x:Name="SeedStringRadio" Content="字符串种子" GroupName="SeedType" Checked="SeedTypeRadio_Changed"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12" Margin="0,0,0,10">
                                 <TextBlock x:Name="SeedResultText" FontSize="16" FontFamily="Consolas" Text="点下面的按钮生成一个种子"/>
                             </Border>
 
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Orientation="Horizontal">
                                 <Button x:Name="SeedGenBtn" Content="生成种子" Style="{StaticResource PrimaryButton}" Padding="14,7" Margin="0,0,10,0" Click="SeedGen_Click"/>
                                 <Button Content="复制" Padding="14,7" Click="SeedCopy_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
 
                 <!-- ===== 种子结构查询：WebView2 懒加载，只有用户打开本工具后才创建浏览器。 ===== -->
                 <TabItem Header="种子结构查询">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
                         <StackPanel Margin="4,12,4,4">
                             <TextBlock Text="种子结构查询 / Seed Map" FontWeight="Bold" Margin="0,0,0,8"/>
                             <TextBlock Text="输入世界种子后在内嵌地图中查询村庄、要塞、远古城市、林地府邸、下界堡垒等结构。查询页面由 Chunkbase 提供，需要联网；WebView2 只在点“打开查询地图”后加载。"
@@ -641,18 +656,18 @@
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,14"/>
 
                             <TextBlock Text="坐标点 A (X, Y, Z)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,14">
                                 <TextBox x:Name="DistAxBox" Width="100" Padding="6,5" Text="0" TextChanged="DistBox_TextChanged"/>
                                 <TextBox x:Name="DistAyBox" Width="100" Padding="6,5" Margin="8,0,0,0" Text="64" TextChanged="DistBox_TextChanged"/>
                                 <TextBox x:Name="DistAzBox" Width="100" Padding="6,5" Margin="8,0,0,0" Text="0" TextChanged="DistBox_TextChanged"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Text="坐标点 B (X, Y, Z)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,14">
                                 <TextBox x:Name="DistBxBox" Width="100" Padding="6,5" Text="100" TextChanged="DistBox_TextChanged"/>
                                 <TextBox x:Name="DistByBox" Width="100" Padding="6,5" Margin="8,0,0,0" Text="64" TextChanged="DistBox_TextChanged"/>
                                 <TextBox x:Name="DistBzBox" Width="100" Padding="6,5" Margin="8,0,0,0" Text="100" TextChanged="DistBox_TextChanged"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12">
                                 <StackPanel>
@@ -698,11 +713,11 @@
                                 <TextBlock Text="玩家名（留空则用 @p 最近玩家）" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                                 <TextBox x:Name="CmdTpPlayerBox" Margin="0,0,0,10" Padding="6,5" TextChanged="CmdGenOption_TextChanged"/>
                                 <TextBlock Text="目标坐标 (X Y Z)" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                                <StackPanel Orientation="Horizontal">
+                                <WrapPanel Orientation="Horizontal">
                                     <TextBox x:Name="CmdTpXBox" Width="100" Padding="6,5" Text="0" TextChanged="CmdGenOption_TextChanged"/>
                                     <TextBox x:Name="CmdTpYBox" Width="100" Padding="6,5" Margin="8,0,0,0" Text="64" TextChanged="CmdGenOption_TextChanged"/>
                                     <TextBox x:Name="CmdTpZBox" Width="100" Padding="6,5" Margin="8,0,0,0" Text="0" TextChanged="CmdGenOption_TextChanged"/>
-                                </StackPanel>
+                                </WrapPanel>
                             </StackPanel>
 
                             <!-- /gamemode 参数 -->
@@ -763,11 +778,11 @@
 
                             <TextBlock x:Name="B64StatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
 
-                            <StackPanel Orientation="Horizontal">
+                            <WrapPanel Orientation="Horizontal">
                                 <Button Content="复制 Base64" Padding="12,6" Margin="0,0,10,0" Click="B64CopyEncoded_Click"/>
                                 <Button Content="复制原文" Padding="12,6" Margin="0,0,10,0" Click="B64CopyPlain_Click"/>
                                 <Button Content="清空" Padding="12,6" Click="B64Clear_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -879,9 +894,9 @@
                             <TextBlock Text="纯本地按词根拼接生成，只保证符合 Minecraft 用户名规则（3~16 位，仅字母/数字/下划线），不保证这个名字在正版没被注册，正式使用前建议自己去核实一下是否可用。"
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,14"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,10">
                                 <Button x:Name="NameGenBtn" Content="生成一批（8 个）" Style="{StaticResource PrimaryButton}" Padding="14,7" Click="NameGen_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <ItemsControl x:Name="NameGenList"/>
                         </StackPanel>
@@ -914,10 +929,10 @@
                                        TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,14"/>
 
                             <TextBlock Text="Unix 时间戳（自动识别秒/毫秒）" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,14">
                                 <TextBox x:Name="TsInputBox" Width="220" Padding="6,5" TextChanged="TsInputBox_TextChanged"/>
                                 <Button Content="填入当前时间" Padding="10,5" Margin="8,0,0,0" Click="TsNow_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
 
                             <TextBlock Text="本地日期时间（yyyy-MM-dd HH:mm:ss）" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                             <TextBox x:Name="TsDateBox" Width="220" HorizontalAlignment="Left" Padding="6,5" Margin="0,0,0,14" TextChanged="TsDateBox_TextChanged"/>
@@ -1007,14 +1022,14 @@
 
                 <!-- ===== Tab 33：基岩版 ↔ Java 版数据包互转 ===== -->
                 <TabItem Header="数据包互转">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
+                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
                         <tools:DatapackConverterTool Margin="4,12,4,4"/>
                     </ScrollViewer>
                 </TabItem>
 
                 <!-- ===== Tab 34：Web2（内嵌浏览器） ===== -->
                 <TabItem Header="Web2">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
+                    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True">
                         <tools:Web2BrowserTool Margin="4,12,4,4"/>
                     </ScrollViewer>
                 </TabItem>
@@ -1040,13 +1055,18 @@
                             <TextBlock Text="正版用户名" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4"/>
                             <TextBox x:Name="StandaloneOfficialSkinNameBox" Margin="0,0,0,10" Padding="6,5"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button Content="查询并下载" Style="{StaticResource PrimaryButton}" Padding="14,7" Margin="0,0,10,0" Click="StandaloneOfficialSkinDownload_Click"/>
                                 <Button Content="打开保存目录" Padding="14,7" Click="StandaloneOfficialSkinOpenFolder_Click"/>
-                            </StackPanel>
+                            </WrapPanel>
                             <TextBlock x:Name="StandaloneOfficialSkinStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
                         </StackPanel>
                     </ScrollViewer>
+                </TabItem>
+
+                <!-- Append new tools to preserve saved favorite/recent tab indices. -->
+                <TabItem Header="服务器端口探测">
+                    <tools:ServerPortScanTool/>
                 </TabItem>
 
             </TabControl>

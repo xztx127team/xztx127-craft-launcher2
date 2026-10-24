@@ -44,6 +44,20 @@ internal static class Program
         parent.Close();
         Check(parentTask.IsCompleted && !childTask.IsCompleted && parent.Notifications == 1, "Hidden parent closes without closing child");
         child.Close(); Check(childTask.IsCompleted && child.Disposals == 1, "Child closes normally after parent removal");
+        var writing = new WritingDialog { IsHostCloseBlocked = true };
+        var writingTask = OverlayDialogService.ShowModalAsync(writing);
+        var writeConfirmation = new Dialog();
+        var writeConfirmationTask = OverlayDialogService.ShowModalAsync(writeConfirmation);
+        Check(OverlayDialogService.BlocksHostClose, "A confirmation cannot hide a busy writer from the host close guard");
+        writeConfirmation.Close();
+        Check(writeConfirmationTask.IsCompleted && OverlayDialogService.BlocksHostClose, "Writer still protects host exit after confirmation closes");
+        writing.IsHostCloseBlocked = false;
+        Check(!OverlayDialogService.BlocksHostClose && !writingTask.IsCompleted, "Host exit becomes available when writing and cleanup finish");
+        writing.IsHostCloseBlocked = true;
+        host.DelayDismiss = true; writing.Close();
+        Check(OverlayDialogService.BlocksHostClose, "Pending dismiss cannot drop a writer's host guard early");
+        host.CompletePendingDismiss(); host.DelayDismiss = false;
+        Check(writingTask.IsCompleted && !OverlayDialogService.BlocksHostClose, "Completed overlay no longer blocks host exit");
         var broken = new Dialog { ThrowOnDispose = true }; var brokenTask = OverlayDialogService.ShowModalAsync(broken);
         broken.OverlayClosed += (_, _) => throw new InvalidOperationException("test cleanup failure");
         broken.Close(); Check(brokenTask.IsCompleted && broken.Notifications == 1 && broken.Disposals == 1, "Cleanup exceptions cannot strand modal waiters");
@@ -71,6 +85,10 @@ internal static class Program
     {
         public int DismissRequests;
         public void RequestDismiss() => DismissRequests++;
+    }
+    private sealed class WritingDialog : Dialog, IOverlayHostCloseGuard
+    {
+        public bool IsHostCloseBlocked { get; set; }
     }
 }
 

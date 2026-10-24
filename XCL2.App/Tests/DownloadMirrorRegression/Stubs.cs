@@ -3,6 +3,8 @@ namespace XCL2.App.Models
     public enum DownloadSource { Official, BMCLAPI }
     public sealed class AppConfig
     {
+        public bool EnableMultiThreadDownload { get; set; } = true;
+        public int MaxDownloadThreads { get; set; } = 4;
         public DownloadSource Source { get; set; }
         public DownloadMirrorConfig DownloadMirrors { get; set; } = new();
         public int DownloadSpeedLimitKBps { get; set; }

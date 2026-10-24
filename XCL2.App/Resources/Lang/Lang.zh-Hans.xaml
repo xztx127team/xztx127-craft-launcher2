@@ -237,7 +237,7 @@
     <system:String x:Key="Str_Ui_System_Tools">🧹 系统工具</system:String>
     <system:String x:Key="Str_Ui_Add_Offline_Account">添加离线账户</system:String>
     <system:String x:Key="Str_Ui_Game_Window_Size">游戏窗口大小</system:String>
-    <system:String x:Key="Str_Ui_Threads">并发线程数：</system:String>
+    <system:String x:Key="Str_Ui_Threads">下载并发上限：</system:String>
     <system:String x:Key="Str_Ui_Always_Treat_As_Modpack">一律当整合包</system:String>
     <system:String x:Key="Str_Ui_Always_Treat_As_Resource_Pack">一律当资源包</system:String>
     <system:String x:Key="Str_Ui_Game_Version_Downloads">游戏版本下载</system:String>
@@ -471,7 +471,7 @@
     <system:String x:Key="Str_Ui_Step_3_Pick_Mods_Optional">第三步：选 Mod（可跳过）</system:String>
     <system:String x:Key="Str_Ui_Quickly_Configure_The_Basics_For_Your_Se">快捷设置您的服务器基本设置。</system:String>
     <system:String x:Key="Str_Ui_Difficulty_1_14_X">服务器难度（1.14.X+）</system:String>
-    <system:String x:Key="Str_Ui_1_32_Recommended_Default_8">（建议 1~32，默认 8）</system:String>
+    <system:String x:Key="Str_Ui_1_32_Recommended_Default_8">（1~32；实际线程数自动选择）</system:String>
     <system:String x:Key="Str_Ui_User_Agent_Optional">User-Agent（可选）</system:String>
     <system:String x:Key="Str_Ui_Resource_Data_Shader_Packs">材质包 / 数据包 / 光影包</system:String>
     <system:String x:Key="Str_Ui_Data_From_Curseforge">数据来自 CurseForge</system:String>
@@ -581,7 +581,7 @@
     <system:String x:Key="Str_Ui_The_List_Refreshes_Automatically_Click_H">列表已自动刷新；网络失败或想立即按当前条件重新搜索时可点这里</system:String>
     <system:String x:Key="Str_Ui_The_Modpack_Goes_Into_A_Brand_New_Versio">整合包会安装到全新的版本目录，不影响已有的 Mod 和存档。</system:String>
     <system:String x:Key="Str_Ui_With_This_Off_Players_Can_Join_Without_A">关闭后玩家无需正版账号即可登录（离线模式），请注意安全风险。</system:String>
-    <system:String x:Key="Str_Ui_Show_The_Opening_Your_Server_To_The_Inte">服务器启动成功后自动弹出「如何开放外网访问」教程（默认开启）</system:String>
+    <system:String x:Key="Str_Ui_Show_The_Opening_Your_Server_To_The_Inte">服务器启动成功后自动弹出「如何开放外网访问」教程</system:String>
     <system:String x:Key="Str_Ui_Install_Every_Loader_Into_The_Same_Insta">把所有加载器安装在同一个实例当中（想法阶段，需要 Token）</system:String>
     <system:String x:Key="Str_Ui_A_Lightweight_Loader_Quick_To_Install_Qu">轻量加载器，安装快、启动快，多数优化类/内容类 Mod 首选。</system:String>
     <system:String x:Key="Str_Ui_Global_Default_Java_Used_When_A_Version_">全局默认 Java（未单独指定版本/服务器 Java 时使用）</system:String>
@@ -656,7 +656,7 @@
     <system:String x:Key="Str_Ui_Smart_Throttling_Watches_What_Other_Prog">智能限速（自动检测其他程序的网络占用，避免抢占带宽；可与上面的限速同时开启，取两者中更保守的一个）</system:String>
     <system:String x:Key="Str_Ui_Only_Applies_When_No_Specific_Java_Is_Ch">没有在上面选具体的 Java 时才生效：留空自动匹配（推荐）；填数字(如 25)可强制指定主版本号</system:String>
     <system:String x:Key="Str_Ui_Auth_Server_Api_Root_E_G_Https_Example_C">认证服务器 API 根地址，例如 https://example.com/api/yggdrasil</system:String>
-    <system:String x:Key="Str_Ui_Show_Mod_Icons_In_Search_Results_Fetched">下载中心 Mod 搜索结果显示模组图标（从 Modrinth/CurseForge 抓取，默认开启）</system:String>
+    <system:String x:Key="Str_Ui_Show_Mod_Icons_In_Search_Results_Fetched">下载中心 Mod 搜索结果显示模组图标（从 Modrinth/CurseForge 抓取）</system:String>
     <system:String x:Key="Str_Ui_Note_Java_8_Defaults_To_32_Bit_And_Every">提示：Java 8 默认使用 32 位，其余版本默认使用 64 位。不确定该选哪个可以直接用推荐设置。</system:String>
     <system:String x:Key="Str_Ui_Default_Light_Mode_From_08_00_To_19_00_A">默认：早上 8:00 到下午 19:00 为浅色模式，其余时间为深色模式。需要点「保存设置」才会生效。</system:String>
     <system:String x:Key="Str_Ui_Double_Click_An_Account_To_Launch_Straig">点两下账户可以直接启动；也可以选中后点下方「使用这个账户启动」。没有想要的账户？可以在下面直接添加一个。</system:String>
@@ -691,7 +691,7 @@
     <system:String x:Key="Str_Ui_In_Game_Watermark_Text_Shown_In_The_Bott">游戏内水印文字（左下角显示，如 &amp;quot;XCL2&amp;quot;；留空则显示官方原始的 &amp;quot;release&amp;quot;）</system:String>
     <system:String x:Key="Str_Ui_Turning_This_Off_Restores_The_Old_Behavi">关闭后会退回旧行为：只把整合包内容解压覆盖进你选的某个已有实例，不下载游戏本体和加载器——整合包版本跟实例对不上时会直接崩游戏。</system:String>
     <system:String x:Key="Str_Ui_Installing_The_Fabric_Client_Doesn_T_Run">Fabric 客户端安装本身不需要本地运行安装器，不填 Java 也可以安装；启动这个版本时仍会照常自动匹配/下载所需 Java。</system:String>
-    <system:String x:Key="Str_Ui_Keep_Resource_Data_And_Shader_Packs_Sepa">资源包/数据包/光影包按版本隔离，互不共用（默认开启；取消勾选=全局共用一份，避免重复下载；可在「版本选择」页为单个版本单独覆盖）</system:String>
+    <system:String x:Key="Str_Ui_Keep_Resource_Data_And_Shader_Packs_Sepa">资源包/数据包/光影包按版本隔离，互不共用（取消勾选=全局共用一份，避免重复下载；可在「版本选择」页为单个版本单独覆盖）</system:String>
     <system:String x:Key="Str_Ui_Already_Have_A_Minecraft_Folder_From_The">已经有一个 .minecraft 文件夹（比如以前用过官方启动器/其它启动器），直接指过去，跳过下载，自动匹配 Java 就能启动。</system:String>
     <system:String x:Key="Str_Ui_Keep_Mods_Resource_Packs_Data_Packs_And_">默认按版本隔离 mods / 资源包 / 数据包 / 存档等（推荐开启，与官方启动器行为一致；可在「版本选择」页为单个版本单独覆盖）</system:String>
     <system:String x:Key="Str_Ui_Colour_Themes_Blue_Yellow_Purple_Pink_An">界面换肤（蓝色系、黄色系、紫色系、粉色系等配色皮肤）已经是正式功能，不再属于实验性范围，可以直接在「设置」页放心使用，不需要经过这里。</system:String>

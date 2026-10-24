@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/PerformanceHardwareMetadata.cs" Link="PerformanceHardwareMetadata.cs" />
+    <Compile Include="../../Services/PerformanceMemoryMetadata.cs" Link="PerformanceMemoryMetadata.cs" />
+
+    <Compile Include="../../Services/PerformanceHardwareMath.cs" Link="PerformanceHardwareMath.cs" />
+    <Compile Include="../../Services/PerformanceHardwareService.cs" Link="PerformanceHardwareService.cs" />
+    <Compile Include="../../Models/PerformanceMetrics.cs" Link="PerformanceMetrics.cs" />
+    <Compile Include="../../Models/TerracottaModels.cs" Link="TerracottaModels.cs" />
+    <Compile Include="../../Services/TerracottaProtocol.Native.cs" Link="TerracottaProtocol.Native.cs" />
+    <Compile Include="../../Services/TerracottaApiClient.cs" Link="TerracottaApiClient.cs" />
+    <Compile Include="../../Services/TerracottaProtocol.cs" Link="TerracottaProtocol.cs" />
+  </ItemGroup>
+</Project>

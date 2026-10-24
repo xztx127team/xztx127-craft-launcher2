@@ -364,7 +364,7 @@ public partial class ServerManagerPage : UserControl
         var coreType = _selectedCoreType;
         var queueName = $"服务端核心 {coreType} {mcVersion}";
         if (DownloadQueueService.Instance.Items.Any(i => i.Name == queueName &&
-                i.Status is DownloadQueueItemStatus.Downloading or DownloadQueueItemStatus.Paused))
+                (i.IsRunning || i.IsCleaningUp || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting)))
         {
             MessageBoxDialog.ShowInfo("这个核心已经在下载列表中了，请等它完成。");
             return;
@@ -373,7 +373,7 @@ public partial class ServerManagerPage : UserControl
         DownloadQueueService.Instance.StartNew(queueName, async (item, ct) =>
         {
             var progress = item.CreateProgress();
-            var textProgress = new Progress<string>(line => item.StatusText = line);
+            var textProgress = item.CreateTextProgress();
 
             var result = await _coreService.DownloadAsync(req, progress, ct);
 
@@ -957,25 +957,34 @@ public partial class ServerManagerPage : UserControl
         // 这里读取 server.properties 的 server-port + 本机局域网 IP 拼出连接地址；
         // 未运行时也照样展示（server.properties 在核心下载完成后就已经存在，不需要等服务器启动）。
         var connectionText = data.ConnectionText;
-        var addressLine = new Grid { Margin = new Thickness(0, 4, 0, 0) };
-        addressLine.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        var addressLine = new Grid { Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        addressLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto, MaxWidth = 420 });
         addressLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
         addressLine.Children.Add(new TextBlock
         {
             Text = "连接地址：" + PresentationPreferencesService.FormatServerAddress(connectionText, _owner.ConfigService.Config),
+            VerticalAlignment = VerticalAlignment.Center,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
             FontSize = 12
         });
         var copyAddrBtn = new Button
         {
-            Content = "复制", Style = (Style)FindResource("PrimaryButton"),
-            Padding = new Thickness(6, 0, 6, 0), FontSize = 11,
-            Margin = new Thickness(8, 0, 0, 0), Background = System.Windows.Media.Brushes.Gray
+            Content = "复制", Style = (Style)FindResource("SecondaryButton"),
+            Padding = new Thickness(8, 3, 8, 3), FontSize = 11, MinWidth = 54,
+            Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center
         };
-        copyAddrBtn.Click += (_, _) =>
+        var copyFeedbackVersion = 0;
+        copyAddrBtn.Click += async (_, _) =>
         {
-            try { Clipboard.SetText(ServerConnectionCopyService.AddressOnly(connectionText)); ToastService.ShowSuccess("连接地址已复制。"); }
+            var feedback = ++copyFeedbackVersion;
+            try
+            {
+                Clipboard.SetText(ServerConnectionCopyService.AddressOnly(connectionText));
+                copyAddrBtn.Content = "已复制 ✓"; ToastService.ShowSuccess("连接地址已复制。");
+                await Task.Delay(1800);
+                if (feedback == copyFeedbackVersion) copyAddrBtn.Content = "复制";
+            }
             catch { ToastService.ShowWarning("复制失败，请检查连接地址或稍后重试。"); }
         };
         var copyMenu = new ContextMenu();
@@ -1624,8 +1633,11 @@ public partial class ServerManagerPage : UserControl
         ServerTargetCombo.ItemsSource = instances;
         if (instances.Count == 0)
         {
-            ServerResourceNoTargetHint.Visibility = Visibility.Visible;
-            ServerResourceListBox.Visibility = Visibility.Collapsed;
+            ServerResourceNoTargetHint.Visibility = Visibility.Collapsed;
+            ServerTargetCombo.ToolTip = "可先浏览资源；下载前请选择或创建目标服务器。";
+            // 没有目标时仍可浏览资源；实际安装时再要求选择目标。
+            ServerResourceListBox.Visibility = Visibility.Visible;
+            SrvResMod.IsEnabled = true;
             return;
         }
 
@@ -1644,19 +1656,18 @@ public partial class ServerManagerPage : UserControl
     {
         if (!_initialized) return;
         RefreshServerResourceModLoaderVisibility();
+        if (_serverResourcePanelLoaded) _ = RunServerResourceSearchAsync();
     }
 
     private void RefreshServerResourceModLoaderVisibility()
     {
+        // 分类是浏览入口，不能因当前选中 Paper/Vanilla 或尚未建服而失去点击能力。
+        // 是否可安装及加载器匹配在实际点击下载时检查。
+        SrvResMod.IsEnabled = true;
         var target = ServerTargetCombo.SelectedItem as ServerInstance;
-        var isModdedCore = target != null && target.CoreType is ServerCoreType.Fabric or ServerCoreType.Forge or ServerCoreType.NeoForge;
-        SrvResMod.IsEnabled = isModdedCore;
-        if (!isModdedCore && SrvResMod.IsChecked == true)
-        {
-            // 当前选的服务器不支持 Mod（比如切到了 Paper），自动退回"插件"分类，
-            // 而不是让用户停留在一个"选了也下载不了"的死状态上。
-            SrvResPlugin.IsChecked = true;
-        }
+        SrvResMod.ToolTip = target != null && ServerResourceInstallPolicy.GetModLoader(target.CoreType) != null
+            ? "浏览并下载与当前服务端加载器匹配的模组"
+            : "可以浏览模组；安装前请选用 Fabric、Forge、NeoForge 或 Quilt 等模组服务端。";
     }
 
     private async void ServerResourceSearch_Click(object sender, RoutedEventArgs e) => await RunServerResourceSearchAsync(showEmptyHint: true);
@@ -1708,11 +1719,29 @@ public partial class ServerManagerPage : UserControl
             //   其余核心类型(包括还没做插件下载的 Vanilla)不加这个 facet，交给用户自己筛选)。
             var targetCore = (ServerTargetCombo.SelectedItem as ServerInstance)?.CoreType;
             var loaderFilter = _serverResourceType == ModrinthResourceType.Mod
-                ? targetCore?.ToString()
+                ? (targetCore.HasValue ? ServerResourceInstallPolicy.GetModLoader(targetCore.Value) : null)
                 : (_serverResourceType == ModrinthResourceType.Plugin && targetCore == ServerCoreType.Paper
                     ? "paper" : null);
-            var outcome = await GetResourceModSearch().SearchResourcesAsync(_serverResourceSource, _serverResourceType,
-                keyword, string.IsNullOrEmpty(gameVersion) ? null : gameVersion, modLoader: loaderFilter);
+            ModSearchOutcome<UnifiedResourceItem> outcome;
+            if (_serverResourceType == ModrinthResourceType.Mod)
+            {
+                // 模组走专用搜索通道；资源包通道会直接跳过 CurseForge 的 Mod。
+                var mods = await GetResourceModSearch().SearchAsync(_serverResourceSource, keyword,
+                    string.IsNullOrEmpty(gameVersion) ? null : gameVersion, loaderFilter);
+                outcome = new ModSearchOutcome<UnifiedResourceItem>();
+                outcome.Warnings.AddRange(mods.Warnings);
+                outcome.Items.AddRange(mods.Items.Select(mod => new UnifiedResourceItem
+                {
+                    Source = mod.Source, SourceId = mod.SourceId, Title = mod.Title,
+                    Description = mod.Description, Author = mod.Author, IconUrl = mod.IconUrl,
+                    Downloads = mod.Downloads, RawItem = mod.RawItem
+                }));
+            }
+            else
+            {
+                outcome = await GetResourceModSearch().SearchResourcesAsync(_serverResourceSource, _serverResourceType,
+                    keyword, string.IsNullOrEmpty(gameVersion) ? null : gameVersion, modLoader: loaderFilter);
+            }
 
             if (seq != _serverResourceSearchSeq) return; // 期间已有更新的搜索发出，这次结果已过时，丢弃
 
@@ -1754,13 +1783,9 @@ public partial class ServerManagerPage : UserControl
     /// 暂不接入收藏功能，onFavoriteToggle 传 null。</summary>
     private async Task OpenServerResourceDetailAsync(UnifiedResourceItem item)
     {
-        if (ServerTargetCombo.SelectedItem is not ServerInstance targetInstance)
-        {
-            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Choose_A_Target_Server_Above_First_If_Yo", "请先在上面选择一个要下载到的服务器（还没有服务器的话，先去「服务器列表」创建一个）。"));
-            return;
-        }
-
-        item.IsDataPack = _serverResourceType == ModrinthResourceType.DataPack;
+        var targetInstance = ServerTargetCombo.SelectedItem as ServerInstance;
+        var resourceType = _serverResourceType;
+        item.IsDataPack = resourceType == ModrinthResourceType.DataPack;
         if (item.IsDataPack)
         {
             var worldName = string.IsNullOrWhiteSpace(ServerDataPackWorldBox.Text) ? "world" : ServerDataPackWorldBox.Text.Trim();
@@ -1771,7 +1796,7 @@ public partial class ServerManagerPage : UserControl
 
         var sourceUrl = item.RawItem switch
         {
-            ModrinthSearchHit h => $"https://modrinth.com/{ServerResourceProjectTypeSlug(_serverResourceType)}/{h.Slug}",
+            ModrinthSearchHit h => $"https://modrinth.com/{ServerResourceProjectTypeSlug(resourceType)}/{h.Slug}",
             CurseForgeMod m => m.Links?.WebsiteUrl,
             _ => null
         };
@@ -1782,9 +1807,10 @@ public partial class ServerManagerPage : UserControl
             item.SourceLabel, sourceUrl, item, item.IsFavorite,
             onFavoriteToggle: null,
             onBack: HideServerResourceDetail,
-            onDownload: entry => DownloadServerResourceInlineAsync(item, entry, targetInstance),
+            onDownload: entry => DownloadServerResourceInlineAsync(item, entry, targetInstance, resourceType),
             isDataPack: item.IsDataPack,
-            saveNames: item.SaveNames);
+            saveNames: item.SaveNames,
+            isMod: resourceType == ModrinthResourceType.Mod);
 
         ShowServerResourceDetail(detail);
 
@@ -1796,7 +1822,7 @@ public partial class ServerManagerPage : UserControl
         }
 
         detail.ShowLoading();
-        await LoadServerResourceVersionsAsync(item, ServerResourceGameVersionBox.Text?.Trim());
+        await LoadServerResourceVersionsAsync(item, ServerResourceGameVersionBox.Text?.Trim(), resourceType, targetInstance?.CoreType);
         detail.SetFlatEntries(item.Versions);
         detail.ShowGroups(item.Groups);
     }
@@ -1826,7 +1852,8 @@ public partial class ServerManagerPage : UserControl
     /// <summary>拉取一个服务端资源条目的版本列表并分组，从原来 ToggleServerResourceExpandAsync
     /// 里抽出来的共享逻辑，供整页详情复用，跟 DownloadCenterPage.LoadResourceVersionsAsync
     /// 是同一个思路。</summary>
-    private async Task LoadServerResourceVersionsAsync(UnifiedResourceItem item, string? gameVersion)
+    private async Task LoadServerResourceVersionsAsync(UnifiedResourceItem item, string? gameVersion,
+        ModrinthResourceType resourceType, ServerCoreType? targetCore)
     {
         item.IsLoadingVersions = true;
         try
@@ -1840,19 +1867,16 @@ public partial class ServerManagerPage : UserControl
             }
             else if (item.Source == ModSource.CurseForge)
             {
-                // ModrinthResourceType 和 CurseForgeResourceKind 是两套独立的枚举(历史遗留，
-                // 前者还多一个 Mod 值)；Mod 类型的服务端下载目前只支持 Modrinth 来源
-                // (CurseForgeResourceKind 没有 Mod 这个成员)。
-                if (_serverResourceType == ModrinthResourceType.Mod)
-                {
-                    MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Mods_Can_Currently_Only_Be_Downloaded_Fr", "Mod 类型目前仅支持从 Modrinth 下载，请把上方来源切换为「仅 Modrinth」或「综合」。"));
-                    item.HasNoResults = true;
-                    return;
-                }
-
                 var modId = int.Parse(item.SourceId);
                 var files = await GetResourceCurseForge().GetFilesAsync(modId, string.IsNullOrEmpty(gameVersion) ? null : gameVersion);
                 foreach (var f in files) item.Versions.Add(new InlineVersionEntry(f));
+            }
+            var loader = targetCore.HasValue ? ServerResourceInstallPolicy.GetModLoader(targetCore.Value) : null;
+            if (resourceType == ModrinthResourceType.Mod && loader != null)
+            {
+                // 搜索匹配项目不等于项目内的每个文件都匹配加载器。
+                foreach (var entry in item.Versions.Where(entry => !ServerResourceInstallPolicy.MatchesLoader(entry.Loaders, loader)).ToList())
+                    item.Versions.Remove(entry);
             }
             item.HasNoResults = item.Versions.Count == 0;
 
@@ -1879,13 +1903,38 @@ public partial class ServerManagerPage : UserControl
     /// <summary>ModDetailPage 里点"下载"回调，目标目录是 OpenServerResourceDetailAsync 打开
     /// 详情页那一刻就已经确定好的服务器实例（避免用户在详情页停留期间切换了 ServerTargetCombo
     /// 导致下载目录和预期不一致）。</summary>
-    private async Task DownloadServerResourceInlineAsync(UnifiedResourceItem item, InlineVersionEntry entry, ServerInstance targetInstance)
+    private async Task DownloadServerResourceInlineAsync(UnifiedResourceItem item, InlineVersionEntry entry,
+        ServerInstance? targetInstance, ModrinthResourceType resourceType)
     {
+        if (targetInstance == null)
+        {
+            MessageBoxDialog.ShowInfo("请返回列表，在上方选择或创建一个目标服务器，再下载资源。", "选择服务器");
+            return;
+        }
+        if (resourceType == ModrinthResourceType.Mod)
+        {
+            var loader = ServerResourceInstallPolicy.GetModLoader(targetInstance.CoreType);
+            if (loader == null)
+            {
+                MessageBoxDialog.ShowInfo("当前服务器核心不支持安装模组。请返回列表，选择 Fabric、Forge、NeoForge 或 Quilt 等模组服务端，再下载。", "需要模组服务端");
+                return;
+            }
+            if (!ServerResourceInstallPolicy.MatchesLoader(entry.Loaders, loader))
+            {
+                MessageBoxDialog.ShowWarning("这个文件的加载器与目标服务器不匹配，请选择对应的文件。", "加载器不匹配");
+                return;
+            }
+        }
         if (item.IsDataPack && string.IsNullOrEmpty(item.SelectedSaveName))
         {
             MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Enter_Which_World_To_Install_Into_First_", "请先填写要安装到哪个存档（数据包必须放进具体存档才会生效）。"));
             return;
         }
+
+        var saveName = item.IsDataPack ? item.SelectedSaveName : null;
+        string destination;
+        try { destination = ServerResourceInstallPolicy.GetDestination(targetInstance.Directory, resourceType, saveName); }
+        catch (ArgumentException ex) { MessageBoxDialog.ShowWarning(ex.Message, "目标目录无效"); return; }
 
         // 同 DownloadCenterPage 里的社区资源下载：接入全局下载队列，不再用独占的模态弹窗，
         // 标题栏下载列表能看到、支持切页面继续操作、开始/完成的气泡提示也统一生效。
@@ -1895,12 +1944,17 @@ public partial class ServerManagerPage : UserControl
             string path;
             if (entry.Source == ModSource.Modrinth)
             {
-                path = await _resourceModrinth.DownloadResourceAsync(targetInstance.Directory, _serverResourceType,
-                    (ModrinthVersion)entry.RawVersion, progress, item.IsDataPack ? item.SelectedSaveName : null, ct: ct);
+                path = await _resourceModrinth.DownloadResourceAsync(destination, resourceType,
+                    (ModrinthVersion)entry.RawVersion, progress, saveName, ct: ct, appendCategorySubdir: false);
+            }
+            else if (resourceType == ModrinthResourceType.Mod)
+            {
+                path = await GetResourceCurseForge().DownloadModAsync(destination,
+                    (CurseForgeFile)entry.RawVersion, progress, ct: ct, appendCategorySubdir: false);
             }
             else
             {
-                var kind = _serverResourceType switch
+                var kind = resourceType switch
                 {
                     ModrinthResourceType.Plugin => CurseForgeResourceKind.Plugin,
                     ModrinthResourceType.ResourcePack => CurseForgeResourceKind.ResourcePack,
@@ -1908,8 +1962,8 @@ public partial class ServerManagerPage : UserControl
                     ModrinthResourceType.DataPack => CurseForgeResourceKind.DataPack,
                     _ => throw new ArgumentOutOfRangeException()
                 };
-                path = await GetResourceCurseForge().DownloadResourceAsync(targetInstance.Directory, kind,
-                    (CurseForgeFile)entry.RawVersion, progress, item.IsDataPack ? item.SelectedSaveName : null, ct: ct);
+                path = await GetResourceCurseForge().DownloadResourceAsync(destination, kind,
+                    (CurseForgeFile)entry.RawVersion, progress, saveName, ct: ct, appendCategorySubdir: false);
             }
 
             await _owner.Dispatcher.InvokeAsync(() =>

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
@@ -155,22 +155,17 @@ public partial class MainWindow : Window
     /// 那段"彻底退出顺手清理游戏/服务器子进程"的逻辑这次要绕开，不能把用户明确要保留的
     /// 游戏进程也杀掉。</summary>
     private bool _touchCloseKeepGameRunning;
-    /// <summary>关闭前的"淡出+下沉"收尾动画只播一次：动画播完的回调里会再调用一次 Close()，
-    /// 重新进入 MainWindow_Closing，这时候要能识别出"动画已经放过了"直接放行，不然会
-    /// 死循环播放动画。</summary>
-    private bool _closeAnimationPlayed;
+    /// <summary>所有确认和异步收尾完成后，进入真正关闭；此后不接受新的窗口操作。</summary>
+    private bool _windowCloseCommitted;
+    private int _trayTransitionGeneration;
     private bool _closeRequestAccepted;
     private bool _shutdownAfterClose;
-    private bool _forceExitRequested;
-    private bool _changingFullScreen;
     private Action? _completeOverlayDismiss;
     private int _overlayRenderGeneration;
     private LauncherExitMode _requestedExitMode;
     private TaskCompletionSource<bool>? _updateExitCompletion;
     private Action? _authorizeUpdateOnClosed;
     private Windows11SnapLayoutService? _snapLayouts;
-    /// <summary>同步区分从最小化恢复与普通尺寸切换。</summary>
-    private WindowState _previousWindowStateForAnimation = WindowState.Normal;
     /// <summary>MainWindow 是否已经被真正 Close() 掉（"仅关闭启动器"场景：进程可能还在
     /// 后台跑，但这个窗口对象本身已经关闭，不能再对它调用 Show()/Activate()）。
     /// 供 <see cref="TryActivateFromAnotherInstance"/> 判断此刻是否还有窗口可以拉起。</summary>
@@ -243,14 +238,21 @@ public partial class MainWindow : Window
     /// 的注释)并带到前台，不需要每个调用点各自处理窗口状态。</summary>
     public void EnsureVisibleForDialog()
     {
+        if (_isWindowClosed || _windowCloseCommitted) return;
+        ++_trayTransitionGeneration;
+        UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+        WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowRestore);
+        if (!IsVisible) Show();
         if (WindowState == WindowState.Minimized)
             WindowState = _lastNonMinimizedWindowState;
         Activate();
+        _trayIcon?.Hide();
     }
 
     public MainWindow()
     {
         InitializeComponent();
+        RoundedWindowService.Attach(this, RootWindowGrid);
 
         // 这个处理器必须在后面的 Java/MC 自动扫描、首次协议/向导等 ContentRendered 处理器
         // 之前注册：第一帧一画出来先通知 App 关闭启动提示窗，然后再启动后台扫描/弹向导。
@@ -268,42 +270,32 @@ public partial class MainWindow : Window
         };
         ContentRendered += firstFrameOnce;
 
-        // 先呈现可见起点，待 Loaded / 首次布局完成再启动时钟；复杂插件初始化延后到
-        // 过渡结束，避免首布局或图片加载消耗整段开窗动画。禁用动画时同步使用终态。
-        Loaded += (_, _) =>
+        // DWM 为标准窗口执行一次开窗动画，内容从首帧起保持清晰、完整。
+        // 插件 UI 在首帧后延后初始化，避免其同步工作挤占原生开窗过渡。
+        // Loaded 兜底保证启动时最小化（没有 ContentRendered）也能初始化插件。
+        var pluginInitialization = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+            { Interval = TimeSpan.FromMilliseconds(320) };
+        var openingRendered = false;
+        var pluginInitializationCompleted = false;
+        EventHandler? openingFrame = null;
+        openingFrame = (_, _) =>
         {
-            var initializationFallback = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
-            {
-                Interval = AnimationSettingsService.Duration(260, AnimationKind.WindowOpen) + TimeSpan.FromMilliseconds(150)
-            };
-            void StopOpeningFallback(object? sender, EventArgs e) => initializationFallback.Stop();
-            void InitializeAfterOpening()
-            {
-                initializationFallback.Stop();
-                Closed -= StopOpeningFallback;
-                if (IsLoaded && !_isWindowClosed) InitializePluginUi();
-            }
-            initializationFallback.Tick += (_, _) => InitializeAfterOpening();
-            Closed += StopOpeningFallback;
-            var strength = AnimationSettingsService.Intensity(AnimationKind.WindowOpen);
-            RootWindowGrid.SetCurrentValue(OpacityProperty, 1 - 0.8 * strength);
-            RootWindowMoveTransform.Y = 14 * strength;
-            _ = Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
-            {
-                if (_isWindowClosed || !IsLoaded || !IsVisible || WindowState == WindowState.Minimized)
-                {
-                    UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform);
-                    InitializeAfterOpening();
-                    return;
-                }
-                // 兜底从真正开播时计时，不能让繁重首布局提前耗尽这段等待。
-                // 最大化、最小化或还原会重置旧动画；插件初始化仍须独立完成一次。
-                initializationFallback.Start();
-                UiAnimationHelper.FadeInMove(RootWindowGrid, RootWindowMoveTransform,
-                    onCompleted: () => Dispatcher.BeginInvoke(DispatcherPriority.Background,
-                        new Action(InitializeAfterOpening)));
-            }));
+            ContentRendered -= openingFrame;
+            openingRendered = true;
+            pluginInitialization.Stop();
+            pluginInitialization.Start();
         };
+        ContentRendered += openingFrame;
+        Loaded += (_, _) => { if (!openingRendered && !pluginInitializationCompleted) pluginInitialization.Start(); };
+        pluginInitialization.Tick += (_, _) =>
+        {
+            pluginInitialization.Stop();
+            ContentRendered -= openingFrame;
+            if (pluginInitializationCompleted) return;
+            pluginInitializationCompleted = true;
+            if (!_isWindowClosed && !_windowCloseCommitted) InitializePluginUi();
+        };
+        Closed += (_, _) => { pluginInitialization.Stop(); ContentRendered -= openingFrame; };
 
         // 注意：这里**不能**调用 ApplyFeatureVisibility()/RefreshSimplifiedModeNavVisibility()。
         // 那两个方法读的是 ConfigService.Config，而 ConfigService.Load() 要到下面几十行之后
@@ -322,8 +314,8 @@ public partial class MainWindow : Window
         SourceInitialized += (_, _) =>
         {
             WindowChromeService.EnableWorkAreaAwareMaximize(this);
-            // 只播放应用的一次轻过渡，避免 DWM 缩放和内容动画先后叠加。
-            WindowChromeService.DisableNativeTransitions(this);
+            // 保留 DWM 原生过渡，不再叠加主内容淡出/缩放。
+            WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowOpen);
         };
 
         // Win10 不创建计时器或弹层；Win11 首次悬停才构建布局界面。
@@ -405,26 +397,19 @@ public partial class MainWindow : Window
         {
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
             if (key != Key.F11) return;
-            if (_closeAnimationPlayed) { e.Handled = true; return; }
+            if (_windowCloseCommitted) { e.Handled = true; return; }
             // 愚人节彩蛋 5 号手段生效期间："无法全屏，强制窗口模式"——直接吃掉这次 F11，
             // 不调用 ToggleFullScreen，也不改任何 Chrome/标题栏状态。
             if (AprilFoolsUi.IsWindowMotionEnabled) { e.Handled = true; return; }
-            _changingFullScreen = true;
             UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
-            try
-            {
-                WindowChromeService.ToggleFullScreen(this);
-                var isFullScreen = WindowChromeService.IsFullScreen;
-                double captionHeight = isFullScreen ? 0 : IsNativePreviewOpen ? 40 : 32;
-                TitleBarRow.Height = new GridLength(captionHeight);
-                CustomTitleBar.Visibility = isFullScreen ? Visibility.Collapsed : Visibility.Visible;
-                var chrome = System.Windows.Shell.WindowChrome.GetWindowChrome(this);
-                if (chrome != null) chrome.CaptionHeight = captionHeight;
-            }
-            finally { _changingFullScreen = false; }
-            // 同一次消息内设好起点，不在渲染后再跳回半透明/缩小的状态。
-            UiAnimationHelper.SettleScale(RootWindowGrid, RootWindowScaleTransform,
-                kind: AnimationKind.WindowFullscreen);
+            WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowFullscreen);
+            WindowChromeService.ToggleFullScreen(this);
+            var isFullScreen = WindowChromeService.IsFullScreen;
+            double captionHeight = isFullScreen ? 0 : IsNativePreviewOpen ? 40 : 32;
+            TitleBarRow.Height = new GridLength(captionHeight);
+            CustomTitleBar.Visibility = isFullScreen ? Visibility.Collapsed : Visibility.Visible;
+            var chrome = System.Windows.Shell.WindowChrome.GetWindowChrome(this);
+            if (chrome != null) chrome.CaptionHeight = captionHeight;
             e.Handled = true;
         };
 
@@ -512,6 +497,7 @@ public partial class MainWindow : Window
         ApplySidebarCollapsedState(collapsed: false);
 
         ConfigService.Load();
+        InitializeNetworkDebug();
         InputExperienceService.Initialize();
         SearchListExperienceService.Initialize(() => ConfigService.Config, () => ConfigService.Save());
         // 彩蛋在读取用户总开关后初始化，关闭偏好从首帧开始生效。
@@ -521,6 +507,7 @@ public partial class MainWindow : Window
         InitializeReminderCenter();
         ApplyCommandLineWindowSize();
         InitializeUxPresentation();
+        InitializeResponsiveLayout();
         EventHandler? initializePerformanceOverlayOnce = null;
         initializePerformanceOverlayOnce = (_, _) =>
         {
@@ -651,6 +638,7 @@ public partial class MainWindow : Window
         AiAssistantService.UpdateConfig(AiAssistantConfig);
         // 同步悬浮球初始显示状态
         UpdateAiFloatingButtonVisibility();
+        InitializeFloatingToolsContextMenu();
 
         // 系统托盘：需求里的"最小化到托盘""关闭默认最小化到托盘""开机自启"都依赖它，
         // 图标本身在这里就常驻创建好（Show/Hide 只控制是否可见，不重复创建/销毁），
@@ -755,10 +743,11 @@ public partial class MainWindow : Window
               ConfigService.Config.AcceptedAgreementVersion >= AgreementsText.AgreementsVersion)))
         {
             EventHandler? applyStartupArgsOnce = null;
-            applyStartupArgsOnce = (_, _) =>
+            applyStartupArgsOnce = async (_, _) =>
             {
                 ContentRendered -= applyStartupArgsOnce;
-                ApplyStartupArgs(App.StartupArgs);
+                await EnsureStartupUpdateGateAsync();
+                if (!_isWindowClosed && !UpdateCheckService.IsRequiredUpdatePending) ApplyStartupArgs(App.StartupArgs);
             };
             ContentRendered += applyStartupArgsOnce;
         }
@@ -881,7 +870,7 @@ public partial class MainWindow : Window
         if (needsAgreements || !ConfigService.Config.FirstRunWizardCompleted)
         {
             EventHandler? showFirstRunOnce = null;
-            showFirstRunOnce = (_, _) =>
+            showFirstRunOnce = async (_, _) =>
             {
                 ContentRendered -= showFirstRunOnce;
 
@@ -916,6 +905,10 @@ public partial class MainWindow : Window
                     OverlayDialogService.ShowModal(wizard, dismissOnBackgroundClick: false);
                 }
                 ApplyRestrictedModeGating();
+                StartupDownloadNoticeService.ShowIfNeeded(ConfigService);
+                if (_isWindowClosed) return;
+                await EnsureStartupUpdateGateAsync();
+                if (_isWindowClosed || UpdateCheckService.IsRequiredUpdatePending) return;
                 ShowPendingAnnouncementsIfNeeded();
                 _ = ScanMinecraftFoldersInBackgroundAsync();
                 ApplyLauncherOpenMemoryOptimizationIfNeeded();
@@ -935,9 +928,13 @@ public partial class MainWindow : Window
             // 协议/新手引导都已经是老用户完成过的状态，不需要再反订阅只弹一次的局部变量
             // 写法，直接一次性 ContentRendered 就行。
             EventHandler? showAnnouncementsOnce = null;
-            showAnnouncementsOnce = (_, _) =>
+            showAnnouncementsOnce = async (_, _) =>
             {
                 ContentRendered -= showAnnouncementsOnce;
+                StartupDownloadNoticeService.ShowIfNeeded(ConfigService);
+                if (_isWindowClosed) return;
+                await EnsureStartupUpdateGateAsync();
+                if (_isWindowClosed || UpdateCheckService.IsRequiredUpdatePending) return;
                 ShowPendingAnnouncementsIfNeeded();
                 ApplyLauncherOpenMemoryOptimizationIfNeeded();
             };
@@ -1098,8 +1095,13 @@ public partial class MainWindow : Window
     private void OnPerformancePreferencesChanged()
     {
         if (_isWindowClosed) return;
-        if (Dispatcher.CheckAccess()) ApplyBackgroundPlaybackPolicy();
-        else if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(new Action(ApplyBackgroundPlaybackPolicy));
+        void ApplyPreferences()
+        {
+            WindowChromeService.ApplyNativeTransitionPreference(this);
+            ApplyBackgroundPlaybackPolicy();
+        }
+        if (Dispatcher.CheckAccess()) ApplyPreferences();
+        else if (!Dispatcher.HasShutdownStarted) Dispatcher.BeginInvoke(new Action(ApplyPreferences));
     }
 
     private void ApplyBackgroundPlaybackPolicy()
@@ -1496,6 +1498,7 @@ public partial class MainWindow : Window
             _ = Dispatcher.BeginInvoke(new Action(OnConfigSaved));
             return;
         }
+        ApplyNetworkDebugPreference();
         var enabled = ConfigService.Config.TouchModeEnabled;
         if (_lastSavedTouchModeEnabled && !enabled) TouchOverlayService.CloseAll();
         _lastSavedTouchModeEnabled = enabled;
@@ -2111,6 +2114,7 @@ public partial class MainWindow : Window
     /// </summary>
     public void ApplyStartupArgs(CommandLineService.ParsedArgs args)
     {
+        if (UpdateCheckService.IsRequiredUpdatePending) return;
         try
         {
             if (args.ShowDebugPanel) SetDebugPanelVisible(true);
@@ -2164,12 +2168,15 @@ public partial class MainWindow : Window
         switch (ConfigService.Config.AutoStartBehavior)
         {
             case AutoStartLaunchBehavior.Minimize:
-                WindowState = WindowState.Minimized;
+                MinimizeWithAnimation();
                 break;
             case AutoStartLaunchBehavior.MinimizeToTray:
                 MinimizeToTray();
                 break;
             default:
+                ++_trayTransitionGeneration;
+                UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+                WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowRestore);
                 Show();
                 WindowState = WindowState.Normal;
                 Activate();
@@ -2283,6 +2290,7 @@ public partial class MainWindow : Window
         ("服务端管理", "开服 服务器", NavigateToServerManager),
         ("账户", "登录 正版 离线", NavigateToAccounts),
         ("设置", "配置 选项", NavigateToSettings),
+        ("插件管理", "第三方插件 扩展 DLL EXE XCL 授权 导入 启动策略", OpenPluginManager),
         ("日志", "崩溃日志 报错", NavigateToLogs),
         ("AI 助手", "智能助手 聊天", NavigateToAiAssistant),
         ("百宝箱", "工具箱 计算器 数据包转换 结构查询 便签", NavigateToToolbox),
@@ -2452,6 +2460,7 @@ public partial class MainWindow : Window
     /// 不能有绕过这道确认的路径。</summary>
     private bool EnsureAiTermsAccepted()
     {
+        if (_revokingAiTerms) return false;
         if (AiAssistantConfig.AcceptedTermsVersion >= AiTermsDialog.CurrentVersion) return true;
 
         var dialog = new AiTermsDialog();
@@ -2522,7 +2531,7 @@ public partial class MainWindow : Window
 
     private void AiFloatingButton_Click(object sender, RoutedEventArgs e)
     {
-        NavigateToAiAssistant();
+        OpenAiFloatingEntry();
     }
 
     private void NavExperimental_Click(object sender, RoutedEventArgs e)
@@ -2626,10 +2635,7 @@ public partial class MainWindow : Window
 
     private void SidebarCollapseToggle_Click(object sender, RoutedEventArgs e)
     {
-        // 收起/展开会同时改宽度、文案、图标一大堆东西，直接跳变很突兀——用 CrossFade 把
-        // 整个侧边栏区域先淡出、在看不见的那一刻真正应用新状态、再淡回来，比单独给宽度
-        // 做 GridLength 动画简单得多，视觉效果也足够（内容变化被"藏"在淡出的间隙里）。
-        UiAnimationHelper.CrossFade(SidebarAreaBorder, () => ApplySidebarCollapsedState(!_sidebarCollapsed));
+        ToggleSidebarWithMotion();
     }
 
     /// <summary>
@@ -2663,20 +2669,10 @@ public partial class MainWindow : Window
         NavAiAssistantButton.Visibility = FeatureVisibilityService.IsVisible(cfg, FeatureVisibilityService.NavAiAssistant) ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>更新 AI 悬浮球显示状态，由设置页的 FloatingButtonCheck 控制。当 AI 面板打开时隐藏悬浮球。</summary>
+    /// <summary>同步普通入口和 Beta 桌面／启动器内悬浮球；聊天悬浮窗关闭不影响球。</summary>
     public void UpdateAiFloatingButtonVisibility(bool? forceShow = null)
     {
-        if (AiFloatingButton != null)
-        {
-            if (forceShow.HasValue)
-            {
-                AiFloatingButton.Visibility = forceShow.Value && ConfigService.Config.AiAssistantFloatingButton ? Visibility.Visible : Visibility.Collapsed;
-            }
-            else
-            {
-                AiFloatingButton.Visibility = ConfigService.Config.AiAssistantFloatingButton ? Visibility.Visible : Visibility.Collapsed;
-            }
-        }
+        SynchronizeAiFloatingBeta(forceShow);
     }
 
     /// <summary>
@@ -2695,7 +2691,9 @@ public partial class MainWindow : Window
     /// </summary>
     private void ApplySidebarCollapsedState(bool collapsed)
     {
+        SidebarColumn.BeginAnimation(ColumnDefinition.WidthProperty, null);
         _sidebarCollapsed = collapsed;
+        if (_responsiveLayoutReady && !_compactWindowLayout) _wideSidebarCollapsed = collapsed;
 
         SidebarColumn.Width = new GridLength(collapsed ? SidebarCollapsedWidth : IsNativePreviewOpen ? Math.Max(192, SidebarExpandedWidth) : SidebarExpandedWidth);
 
@@ -2784,6 +2782,7 @@ public partial class MainWindow : Window
         {
             RefreshAccountVersionSidebarText();
         }
+        ApplyResponsiveSidebarMetrics();
     }
 
 
@@ -3326,6 +3325,8 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task LaunchInternalAsync(object sender, RoutedEventArgs e, bool skipAccountConfirm = false, CancellationToken cancelToken = default)
     {
+        await EnsureStartupUpdateGateAsync();
+        if (_isWindowClosed || UpdateCheckService.IsRequiredUpdatePending || _closeRequestAccepted) return;
         var commandResult = _startupLaunchResult; _startupLaunchResult = null;
         try
         {
@@ -3947,6 +3948,7 @@ public partial class MainWindow : Window
                 }
             }
             ProcessManager.Register(processInfo);
+            StartLiveGameDiagnostics(processInfo);
             try
             {
                 if (!cfg.GuestModeEnabled && InstanceUxService.RecordSuccessfulLaunch(cfg, options.MinecraftDir, options.VersionId))
@@ -4155,7 +4157,7 @@ public partial class MainWindow : Window
 
     /// <summary>统一处理游戏进程退出。正常退出与用户主动关闭只记普通退出日志，不显示崩溃弹窗。
     /// 对疑似“外部强制关闭导致 latest.log 停在半行”的情况，不误报崩溃。
-    /// 异常退出先进入右下角提醒，点击后查看已有的详细诊断。</summary>
+    /// 异常退出在启动器覆盖层展示诊断，同时保留右下角通知供之后查看。</summary>
     private async Task HandleGameProcessExitAsync(GameProcessInfo processInfo, bool exitedDuringStartup)
     {
         if (!processInfo.TryClaimExitNotification()) return;
@@ -4168,7 +4170,7 @@ public partial class MainWindow : Window
         var exitCodeKnown = false;
         try { exitCode = processInfo.Process.ExitCode; exitCodeKnown = true; } catch { /* 进程句柄极端情况下已不可读 */ }
 
-        var assessment = GameExitClassifier.Assess(processInfo, exitCode, exitCodeKnown);
+        var assessment = await Task.Run(() => GameExitClassifier.Assess(processInfo, exitCode, exitCodeKnown));
         switch (assessment.Kind)
         {
             case GameExitKind.UserRequested:
@@ -4198,16 +4200,19 @@ public partial class MainWindow : Window
                     LauncherLogService.AppendLine("[JVM参数错误] " + string.Join(" | ", jvmIssues.Select(jx => jx.Title)));
                     await Dispatcher.InvokeAsync(() =>
                     {
-                        PublishGameDiagnostic(processInfo, "游戏未能启动：JVM 参数有误",
+                        ShowExitDiagnostic(processInfo, "游戏未能启动：JVM 参数有误",
                             string.Join("；", jvmIssues.Select(issue => issue.Title)),
                             () => CrashReportDialog.ShowJvmArgumentError(this, processInfo, exitCode, jvmIssues));
                     });
                     return;
                 }
 
-                var output = processInfo.GetOutputSnapshot();
+                await Task.Run(() => GameCrashLogService.Capture(processInfo, assessment));
+                var output = assessment.Evidence;
                 var tail = output.Length > 3000 ? output[^3000..] : output;
-                var message = exitedDuringStartup
+                var message = assessment.SuspectedLogFailure
+                    ? $"游戏「{processInfo.VersionId}」已退出，日志末尾出现了一连串 ERROR，可能报错（退出码 {exitCode}）。请查看具体记录与修复建议；日志等级本身不能确定根因。"
+                    : exitedDuringStartup
                     ? $"游戏进程刚启动就退出了（退出码 {exitCode}），大概率没有正常运行起来。\n\n" +
                       Loc.T("Str_Cs_Recent_Console_Output_N", "最近的控制台输出：\n") +
                       (string.IsNullOrWhiteSpace(tail) ? "(没有捕获到任何输出，可能是 Java 本身启动失败)" : tail)
@@ -4215,7 +4220,7 @@ public partial class MainWindow : Window
 
                 await Dispatcher.InvokeAsync(() =>
                 {
-                    PublishGameDiagnostic(processInfo, exitedDuringStartup ? "游戏未能启动" : "游戏异常退出",
+                    ShowExitDiagnostic(processInfo, assessment.SuspectedLogFailure ? "日志提示可能报错" : exitedDuringStartup ? "游戏未能启动" : "游戏异常退出",
                         $"实例：{processInfo.VersionId}，退出码 {exitCode}。可以查看本次日志与诊断建议。",
                         () => CrashReportDialog.Show(this, message, processInfo));
                 });
@@ -4478,10 +4483,12 @@ public partial class MainWindow : Window
     /// （仅剩托盘/便签在后台常驻）。</returns>
     public bool TryActivateFromAnotherInstance()
     {
-        if (_isWindowClosed) return false;
+        if (_isWindowClosed || _windowCloseCommitted) return false;
 
         try
         {
+            ++_trayTransitionGeneration;
+            WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowRestore);
             if (WindowState == WindowState.Minimized)
                 WindowState = _lastNonMinimizedWindowState;
 
@@ -4506,124 +4513,41 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
-    /// "彻底退出"路径下的兜底自杀保险：正常情况下 Application.Current.Shutdown() 会让整个
-    /// 进程干净退出，不需要这个方法做任何事。但实际观察到的问题是——某些情况下（未处理的
-    /// 后台线程没设 IsBackground、第三方组件起的 COM/句柄、WebView2 子进程没退干净等）
-    /// Shutdown() 触发了，主窗口也关了，但 xcl2.exe 本体在任务管理器里其实还挂着一个孤儿
-    /// 进程。用户完全看不出来，下次双击图标重新打开时，SingleInstanceService 探测到这个
-    /// "看不见"的旧实例，弹出多开确认框，在用户看来就是一次莫名其妙的弹窗骚扰。
-    ///
-    /// 这里在每次"彻底退出"（不是最小化/托盘/保留便签这几种明确要继续留在后台的场景）时，
-    /// 顺手起一个隐藏的 cmd 进程，先等几秒给 Shutdown() 走完正常流程的时间，再对着
-    /// 当前进程 PID 补一刀 taskkill /F。如果那时候进程早就正常退出了，taskkill 对一个
-    /// 不存在的 PID 只会静默失败，不会有任何副作用；只有真的卡成孤儿进程时，这一刀才有意义。
-    /// CreateNoWindow + UseShellExecute=false，不会弹出任何黑框打扰用户。
-    /// </summary>
+    /// <summary>正常退出若被第三方前台线程阻塞，只结束当前启动器，不结束子进程。</summary>
     private static void ScheduleSelfKillFailSafe()
     {
-        try
-        {
-            var pid = Environment.ProcessId;
-            var psi = new ProcessStartInfo("cmd.exe")
-            {
-                // /c 后面：先睡 6 秒把时间留给正常 Shutdown()，再无条件尝试 taskkill 这个 PID。
-                // 用 timeout /t 而不是 ping -n 之类的老技巧，避免在没有回环网络的极端环境下失效；
-                // 2>nul / >nul 把"进程已不存在"这种预期内的失败信息吞掉，不留下任何痕迹。
-                Arguments = $"/c timeout /t 6 >nul 2>nul & taskkill /F /PID {pid} >nul 2>nul",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-            };
-            Process.Start(psi);
-        }
-        catch
-        {
-            // 这个兜底保险本身失败（比如极端沙盒环境限制起进程）不应该影响正常退出流程，
-            // 正常的 Shutdown() 该怎么走还怎么走，只是少了这道保险。
-        }
+        // A background fallback can only terminate this launcher; no delayed PID-based taskkill.
+        _ = Task.Run(async () => { await Task.Delay(TimeSpan.FromSeconds(8)); Environment.Exit(0); });
     }
 
-    /// <summary>
-    /// 结束本进程名下所有正在运行的游戏进程和服务器进程（先优雅 CloseAll，服务器直接 ForceKill）。
-    /// 供 <see cref="PerformFullExit"/>（托盘"退出"/多开"FORCE_EXIT"）和
-    /// <see cref="MainWindow_Closing"/>（点关闭按钮、真的没有留任何东西要保留时）共用——
-    /// 两种路径本质都是"用户已经明确选择/确认了要真的关闭"，都不能留孤儿进程。
-    /// </summary>
-    private void KillAllGameAndServerProcesses()
+    /// <summary>Tray and single-instance exit use the same cancellable process confirmation as the close button.</summary>
+    public void PerformFullExit()
     {
-        // 自动退出清理只处理由 XCL2 启动的游戏；外部游戏仅在用户点击关闭游戏时结束。
-        try { ProcessManager.CloseOwned(); } catch { /* 单个进程关闭失败不影响整体退出 */ }
-
-        // 服务器进程没有窗口，CloseAll 语义上更接近"强制"，这里直接对每个仍在运行的
-        // 服务器实例调用 ForceKill——真正退出启动器时不适合再等"发 stop 命令、等它
-        // 优雅保存世界"这种可能耗时数秒到数十秒的流程，用户此刻的意图是"立刻结束"。
-        try
-        {
-            foreach (var p in ServerProcessManager.Processes.ToArray())
-            {
-                try { if (!p.HasExited) p.ForceKill(); }
-                catch { /* 忽略单个失败，继续处理其它进程 */ }
-            }
-        }
-        catch { /* 忽略：不能因为清理服务器进程失败而卡住退出流程 */ }
-    }
-
-    /// <summary>
-    /// 彻底退出：结束本进程名下所有正在运行的游戏进程和服务器进程，再关闭窗口/退出应用。
-    /// 供托盘"退出"菜单、以及被另一个新实例通过 SingleInstanceService 的 "FORCE_EXIT"
-    /// 指令要求关闭时共用——两种场景本质都是"用户已经明确选择了要真的关闭"，不需要
-    /// 再走"下载/启动进行中"那套二次确认，但都必须先清理干净子进程，不能留孤儿进程。
-    /// </summary>
-    public async void PerformFullExit()
-    {
-        // 托盘退出 / 单实例 FORCE_EXIT 都是“确定退出”路径。旧实现这里只把 Stopping
-        // 事件丢进后台队列，紧接着就 ShutdownAll，插件几乎没有机会真正收到退出通知。
-        // 这里改成先等待生命周期订阅者（受 PluginCallbackTimeoutSeconds 限制），再清理
-        // 游戏/服务器进程和关闭宿主；同时把 _pluginExitPrepared 置位，避免随后 WPF 的
-        // Closing 流程再重复准备一次。
-        if (_forceExitRequested) return;
-        _forceExitRequested = true;
-        _shutdownAfterClose = true;
-        try
-        {
-            if (Services.Plugins.PluginHostBridge.Current is { } pluginHost)
-            {
-                _pluginExitPreparing = true;
-                try { await pluginHost.PrepareExitAsync(); }
-                catch (Exception ex) { LauncherLogService.AppendLine("[插件] 退出通知失败：" + ex.GetType().Name); }
-                finally
-                {
-                    _pluginExitPreparing = false;
-                    _pluginExitPrepared = true;
-                }
-            }
-
-            KillAllGameAndServerProcesses();
-        }
-        finally
-        {
-            _trayIcon?.Hide();
-            ScheduleSelfKillFailSafe();
-            // 不再需要多开检测把这个进程当成"仍然存活的旧实例"，Shutdown() 会自然触发
-            // MainWindow.Closed（如果窗口还没关的话），SingleInstanceService 的管道服务端
-            // 线程是后台线程（IsBackground=true），进程退出时会被系统直接终止，不需要
-            // 额外手动停止。
-            System.Windows.Application.Current.Shutdown();
-        }
+        if (_isWindowClosed || _processExitPreparing || _pluginExitPreparing) return;
+        if (!IsVisible || WindowState == WindowState.Minimized) RestoreFromTray();
+        _explicitExitRequested = true;
+        Close();
+        if (!_closeRequestAccepted) _explicitExitRequested = false;
     }
 
     /// <summary>隐藏主窗口、显示托盘图标——"关闭按钮默认最小化到托盘"和四选一提示里的
     /// "返回任务栏托盘"选项共用这一个方法。</summary>
     private void MinimizeToTray()
     {
+        if (_isWindowClosed || _windowCloseCommitted) return;
+        var generation = ++_trayTransitionGeneration;
         _trayIcon?.Show();
         // 从前台切到后台：先把窗口内容淡出，动画播完（视觉上已经看不见了）再真正 Hide()，
-        // 而不是内容还没淡完窗口就没了——那样等于没做动画。EnableUiAnimations 关闭时
-        // UiAnimationHelper 内部会直接同步 Hide，不引入任何延迟。
+        // 收到托盘没有任务栏上的目标位置，保留一次轻量内容过渡。
+        // Hide 始终排队离开 Closing 栈：关闭按钮可能配置为“收到托盘”，无动画时
+        // 也不能在 WPF 的 Closing 回调内同步改 Visibility。还原会使旧请求失效。
         _snapLayouts?.Close();
         UiAnimationHelper.FadeOutMove(RootWindowGrid, RootWindowMoveTransform,
-            onCompleted: Hide, kind: AnimationKind.WindowMinimize);
+            onCompleted: () => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (generation == _trayTransitionGeneration && !_isWindowClosed && !_windowCloseCommitted)
+                    Hide();
+            })), kind: AnimationKind.WindowMinimize);
     }
 
     /// <summary>更新器专用：保留游戏并走完整关闭流程；用户取消时返回false，真正Closed才返回true。</summary>
@@ -4632,7 +4556,7 @@ public partial class MainWindow : Window
         Dispatcher.VerifyAccess();
         ArgumentNullException.ThrowIfNull(authorizeOnClosed);
         if (_updateExitCompletion is { } existing) return existing.Task;
-        if (_isWindowClosed || _forceExitRequested || _closeRequestAccepted || _pluginExitPreparing || _closeLifecycleBackupRunning)
+        if (_isWindowClosed || _closeRequestAccepted || _pluginExitPreparing || _closeLifecycleBackupRunning)
             return Task.FromResult(false);
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _updateExitCompletion = completion;
@@ -4652,6 +4576,7 @@ public partial class MainWindow : Window
 
     private void CancelAutomaticExitRequest()
     {
+        ResetProcessExitChoice();
         if (_requestedExitMode != LauncherExitMode.Normal) _touchCloseDecisionHandled = false;
         _requestedExitMode = LauncherExitMode.Normal;
         _updateExitCompletion?.TrySetResult(false);
@@ -4688,16 +4613,14 @@ public partial class MainWindow : Window
 
     private void RestoreFromTray()
     {
-        if (_isWindowClosed) return;
+        if (_isWindowClosed || _windowCloseCommitted) return;
+        ++_trayTransitionGeneration;
         UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+        WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowRestore);
         Show();
         WindowState = _lastNonMinimizedWindowState;
         Activate();
         _trayIcon?.Hide();
-        // 从后台切回前台：Show() 之后窗口是瞬间满 Opacity 出现的，这里补一个淡入，
-        // 呼应上面 MinimizeToTray 的淡出，让"托盘还原"也有过渡而不是硬切。
-        UiAnimationHelper.FadeInMove(RootWindowGrid, RootWindowMoveTransform, offset: 0,
-            kind: AnimationKind.WindowRestore);
     }
 
     /// <summary>绑定标题栏下载列表的数据源，并在集合变化时刷新角标数字/显示状态。</summary>
@@ -4827,29 +4750,26 @@ public partial class MainWindow : Window
         MinimizeWithAnimation();
     }
 
-    /// <summary>短暂轻反馈后直接最小化，不先隐藏内容再等待第二段系统缩放。</summary>
+    /// <summary>立即发送系统命令，由 DWM 合成整个窗口，不等待内容动画回调。</summary>
     private void MinimizeWithAnimation()
     {
-        if (WindowState == WindowState.Minimized || _isWindowClosed || _closeAnimationPlayed) return;
+        if (WindowState == WindowState.Minimized || _isWindowClosed || _windowCloseCommitted) return;
         _snapLayouts?.Close();
-        UiAnimationHelper.FadeOutMove(RootWindowGrid, RootWindowMoveTransform,
-            onCompleted: () =>
-            {
-                if (!_isWindowClosed) SystemCommands.MinimizeWindow(this);
-            }, kind: AnimationKind.WindowMinimize);
+        ++_trayTransitionGeneration;
+        UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+        WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowMinimize);
+        SystemCommands.MinimizeWindow(this);
     }
 
     private void MaximizeRestoreButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_closeAnimationPlayed || _isWindowClosed) return;
+        if (_windowCloseCommitted || _isWindowClosed) return;
         _snapLayouts?.Close();
-        var restore = WindowState == WindowState.Maximized;
-        UiAnimationHelper.BeforeWindowStateChange(RootWindowGrid, RootWindowScaleTransform, () =>
-        {
-            if (_isWindowClosed) return;
-            if (restore) SystemCommands.RestoreWindow(this);
-            else SystemCommands.MaximizeWindow(this);
-        });
+        ++_trayTransitionGeneration;
+        UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+        WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowFullscreen);
+        if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
+        else SystemCommands.MaximizeWindow(this);
     }
 
     /// <summary>关闭按钮：
@@ -4874,6 +4794,7 @@ public partial class MainWindow : Window
                 minimizeText: "最小化", trayText: "返回任务栏托盘");
         else
         {
+            if (_explicitExitRequested) return true;
             switch (ConfigService.Config.DefaultCloseAction)
             {
                 case CloseButtonAction.MinimizeToTray: MinimizeToTray(); return false;
@@ -4922,9 +4843,17 @@ public partial class MainWindow : Window
     /// "取消"则拦下这次关闭，两边都不动。没有任何便签在开时直接放行，不打扰。</summary>
     private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (_forceExitRequested) return;
+        if (_processExitPreparing) { e.Cancel = true; return; }
         if (_pluginExitPreparing) { e.Cancel = true; return; }
         if (_closeLifecycleBackupRunning) { e.Cancel = true; return; }
+        if (OverlayDialogService.BlocksHostClose)
+        {
+            e.Cancel = true;
+            _closeRequestAccepted = false;
+            CancelAutomaticExitRequest();
+            ToastService.ShowInfo("存档或备份操作尚未完成，请等待完成后再退出；也可先在备份窗口中关闭任务，等待清理结束。");
+            return;
+        }
         if (!_closeRequestAccepted)
         {
             if (!TryAcceptCloseRequest()) { e.Cancel = true; return; }
@@ -4977,7 +4906,7 @@ public partial class MainWindow : Window
         if (!_touchCloseDecisionHandled && TouchOverlayService.HasActive)
         {
             var touchChoice = MessageBoxDialog.ShowTouchModeCloseChoice(
-                "当前正在使用触屏模式玩游戏，关闭启动器会导致虚拟按键悬浮层一起消失，触屏操作会直接断开。",
+                "当前有触摸板或触屏虚拟按键正在运行，关闭启动器会关闭这些悬浮层并断开触屏操作。通过窗口列表附加的普通应用会继续运行。",
                 "关闭启动器",
                 cancelText: "取消",
                 closeAllText: "关闭所有（包括游戏）",
@@ -5007,8 +4936,7 @@ public partial class MainWindow : Window
             if (touchChoice == XclTouchCloseChoiceResult.CloseLauncherAndOverlayOnly)
             {
                 // 悬浮层立刻摘掉（幂等，TouchOverlayService.CloseAll 后面还会再调一次），
-                // 游戏进程完全不动。真正"不杀游戏"的效果落在下面那段 KillAllGameAndServerProcesses
-                // 的跳过判断上，这里只是记下用户的选择。
+                // 游戏进程完全不动，后续统一退出检查会保留游戏。
                 TouchOverlayService.CloseAll();
                 _touchCloseKeepGameRunning = true;
             }
@@ -5042,6 +4970,15 @@ public partial class MainWindow : Window
             {
                 foreach (var note in Views.StickyNoteWindow.OpenWindows.ToArray())
                     note.Close();
+                if (Views.StickyNoteWindow.OpenWindows.Count > 0)
+                {
+                    // 便签保存失败会取消自身关闭；不能再退出进程丢掉仍在编辑的正文。
+                    e.Cancel = true;
+                    _closeRequestAccepted = false;
+                    _stickyNoteCloseDecisionHandled = false;
+                    CancelAutomaticExitRequest();
+                    return;
+                }
             }
             else if (choice == XclMessageResult.No)
             {
@@ -5055,6 +4992,14 @@ public partial class MainWindow : Window
             }
         }
 
+
+        if (!ConfirmProcessExit())
+        {
+            e.Cancel = true;
+            _closeRequestAccepted = false;
+            CancelAutomaticExitRequest();
+            return;
+        }
 
         if (ConfigService.Config.BackupInstanceOnClose && !_closeLifecycleBackupCompleted)
         {
@@ -5077,10 +5022,27 @@ public partial class MainWindow : Window
             return;
         }
 
-        // 走到这里说明这次关闭真的会发生——上面设置未保存/桌面便签/备份这几处该拦的都已经
-        // 放行了，不会再被取消。先播一遍"淡出+下沉"的收尾动画，动画播完的回调里再真正
-        // Close()（会再次进入这个方法，_closeAnimationPlayed 已经是 true，直接放行，不会
-        // 死循环）。不这样做的话，用户点关闭那一下窗口会瞬间消失，是典型的"傻快傻快"。
+        // 所有用户确认通过后，先完成已授权的进程/插件收尾，再交给原生关闭。
+        // 不在 Closing 内播放内容动画后递归 Close：禁用动画时同步回调会重入 Closing。
+        if (HasConfirmedProcessesToClose)
+        {
+            e.Cancel = true;
+            _processExitPreparing = true;
+            var wasEnabled = RootWindowGrid.IsEnabled;
+            RootWindowGrid.IsEnabled = false;
+            bool completed = false;
+            try { await CloseConfirmedProcessesAsync(); completed = true; }
+            catch (Exception ex)
+            {
+                _closeRequestAccepted = false;
+                CancelAutomaticExitRequest();
+                RootWindowGrid.IsEnabled = wasEnabled;
+                MessageBoxDialog.ShowWarning(ex.Message, "未能关闭全部游戏");
+            }
+            finally { _processExitPreparing = false; RootWindowGrid.IsEnabled = wasEnabled; }
+            if (completed) _ = Dispatcher.BeginInvoke(new Action(Close), DispatcherPriority.Background);
+            return;
+        }
         if (!_pluginExitPrepared && Services.Plugins.PluginHostBridge.Current is { } closingPluginHost)
         {
             e.Cancel = true;
@@ -5097,17 +5059,13 @@ public partial class MainWindow : Window
             }
             return;
         }
-        if (!_closeAnimationPlayed)
-        {
-            e.Cancel = true;
-            _closeAnimationPlayed = true;
-            UiAnimationHelper.FadeOutMove(RootWindowGrid, RootWindowMoveTransform, onCompleted: Close);
-            return;
-        }
+        UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+        WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowClose);
+        _windowCloseCommitted = true;
         _shutdownAfterClose = true;
         _trayIcon?.Hide();
         TouchOverlayService.CloseAll();
-        if (LauncherExitPolicy.ShouldCloseGames(_requestedExitMode, _touchCloseKeepGameRunning)) KillAllGameAndServerProcesses();
+        // Only explicitly confirmed process snapshots were closed above. Never kill a new child at shutdown.
         ScheduleSelfKillFailSafe();
     }
 
@@ -5142,20 +5100,16 @@ public partial class MainWindow : Window
         SystemCommands.ShowSystemMenu(this, screenPos);
     }
 
-    /// <summary>状态改变的同一次消息内设置轻淡入起点，避免先完整绘制再延后一帧重播。</summary>
+    /// <summary>原生状态切换只同步 UI；不再在 DWM 过渡后重播内容淡入。</summary>
     private void MainWindow_StateChanged(object? sender, EventArgs e)
     {
         UpdateMaximizeRestoreIcon();
         if (DownloadQueuePopup != null) DownloadQueuePopup.IsOpen = false;
         _snapLayouts?.Close();
-        var previous = _previousWindowStateForAnimation;
-        _previousWindowStateForAnimation = WindowState;
-        // 已接受的关闭不能因最后一刻的系统尺寸消息而取消收尾回调。
-        if (_closeAnimationPlayed) return;
-        UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
-        if (_changingFullScreen || _isWindowClosed || WindowState == WindowState.Minimized || previous == WindowState) return;
-        UiAnimationHelper.SettleScale(RootWindowGrid, RootWindowScaleTransform,
-            kind: previous == WindowState.Minimized ? AnimationKind.WindowRestore : AnimationKind.WindowFullscreen);
+        ++_trayTransitionGeneration;
+        if (IsVisible) _trayIcon?.Hide();
+        if (!_windowCloseCommitted)
+            UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
     }
 
     /// <summary>

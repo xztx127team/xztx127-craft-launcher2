@@ -19,6 +19,7 @@ public sealed class PerformanceMetricsService
     private long _bedrockRefreshTimestamp;
     private IReadOnlyList<PerformanceGameTarget> _bedrockTargets = Array.Empty<PerformanceGameTarget>();
     private string? _discoveryWarning;
+    private PerformanceHardwareService? _hardware;
 
     private sealed record CpuBaseline(long CpuTicks, long StartedAtTicks, long Timestamp);
     private readonly record struct SystemTimes(ulong Idle, ulong Kernel, ulong User);
@@ -77,7 +78,15 @@ public sealed class PerformanceMetricsService
         _lastCompletedTimestamp = Stopwatch.GetTimestamp();
         return new PerformanceSnapshot(DateTimeOffset.Now, logicalProcessors, cpu, total, available,
             launcher.CpuPercent, launcher.WorkingSetBytes, games.ToArray(), cpuReason, memoryReason,
-            launcher.CpuUnavailableReason, launcher.MemoryUnavailableReason, _discoveryWarning);
+            launcher.CpuUnavailableReason, launcher.MemoryUnavailableReason, _discoveryWarning)
+        { Hardware = (_hardware ??= new PerformanceHardwareService()).Sample() };
+    }
+
+    public async Task ReleaseHardwareAsync()
+    {
+        await _sampleGate.WaitAsync().ConfigureAwait(false);
+        try { _hardware?.Dispose(); _hardware = null; }
+        finally { _sampleGate.Release(); }
     }
 
     private PerformanceGameSample ReadProcess(PerformanceGameTarget target, int logicalProcessors)

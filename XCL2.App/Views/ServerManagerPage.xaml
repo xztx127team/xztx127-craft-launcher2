@@ -360,7 +360,7 @@
                         <RadioButton x:Name="SrvResShader" Style="{StaticResource DownloadCategoryButton}"
                                      Content="{DynamicResource Str_Ui_Shader_Packs}" Checked="ServerResourceType_Checked" Tag="Shader" Margin="0,0,6,4"/>
                         <RadioButton x:Name="SrvResMod" Style="{StaticResource DownloadCategoryButton}"
-                                     Content="{DynamicResource Str_Ui_Mods_Needs_A_Fabric_Forge_Neoforge_Serve}" Checked="ServerResourceType_Checked" Tag="Mod" Margin="0,0,6,4"/>
+                                     Content="Mod / 模组" Checked="ServerResourceType_Checked" Tag="Mod" Margin="0,0,6,4"/>
                     </WrapPanel>
 
                     <!-- 仿 PCL「搜索 Mod」筛选栏：名称/来源 一行，版本/(数据包场景下是"目标世界文件夹") 一行，

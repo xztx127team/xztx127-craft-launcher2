@@ -19,10 +19,20 @@ try
     using (var jar = ZipFile.Open(Path.Combine(versionDir, "26.3.jar"), ZipArchiveMode.Create))
     using (var writer = new StreamWriter(jar.CreateEntry("version.json").Open())) writer.Write("{\"id\":\"26.3-snapshot-3\",\"release_target\":\"26.3\"}");
     Check(TouchVersionPolicy.Resolve(root, "26.3") == false, "real jar identity overrides folder name");
+    foreach (var id in new[] { "1.19", "1.19.4", "fabric-loader-0.16.14-1.19.2" })
+        Check(TouchVersionPolicy.FromVersion(id) == false, "reported 1.19 family uses legacy touch: " + id);
+    var renamed19 = Path.Combine(root, "versions", "19"); Directory.CreateDirectory(renamed19);
+    File.WriteAllText(Path.Combine(renamed19, "19.json"), "{\"id\":\"19\"}");
+    using (var jar = ZipFile.Open(Path.Combine(renamed19, "19.jar"), ZipArchiveMode.Create))
+    using (var writer = new StreamWriter(jar.CreateEntry("version.json").Open()))
+        writer.Write("{\"id\":\"1.19\",\"release_target\":\"1.19\"}");
+    Check(TouchVersionPolicy.FromVersion("19") == null, "renamed instance is not itself a version");
+    Check(TouchVersionPolicy.Resolve(root, "19") == false, "1.19 client jar selects legacy touch in instance named 19");
     foreach (var (id, expected) in new (string, bool)[]
     {
         ("26.3 Snapshot 3", false), ("26.3 Snapshot 4", true),
         ("26.3 第三个快照", false), ("26.3 第四快照", true),
+        ("26.3第三个快照", false), ("26.3第四个快照", true),
         ("fabric-loader-0.16.14-26.3-snapshot-3", false),
         ("fabric-loader-0.16.14-26.3-snapshot-4", true),
         ("26.3-pre-1", true), ("26.3.0", true), ("26.3.1", true), ("26.3.3", true)

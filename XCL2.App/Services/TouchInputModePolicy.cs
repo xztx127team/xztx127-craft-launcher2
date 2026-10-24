@@ -3,11 +3,27 @@ namespace XCL2.App.Services;
 /// <summary>鼠标抓取优先于系统残留光标；未知样本不切换模式。</summary>
 public static class TouchInputModePolicy
 {
+    // A look gesture already locks its mode. A synchronous GLFW cursor refresh cannot change
+    // that decision and may stall input for its entire timeout; menu-to-look recovery still probes.
+    public static bool ShouldProbeLegacyMode(bool currentMenu, bool activeContact)
+        => currentMenu || !activeContact;
+
+    /// <summary>
+    /// 原生抓取或已满足稳定期的一次性 Joined 恢复可保留按住的控制键进入视角。
+    /// Joined 恢复不是永久世界状态；不能单凭触摸抑制启用，也不能抢走已有菜单拖动。
+    /// 已确认的原生抓取仍可结束菜单手势；调用方保留控制键，并从当前触点重设视角基线。
+    /// </summary>
+    public static bool AllowLegacyLookDuringContact(bool currentMenu, bool? observedMenu, bool nativeLookConfirmed,
+        bool joinedRecoveryConfirmed = false, bool activeMenuGesture = false)
+        => currentMenu && observedMenu == false &&
+           (nativeLookConfirmed || joinedRecoveryConfirmed && !activeMenuGesture);
+
     /// <summary>SDL 的触摸抑制不是菜单证据，尤其不能用残留箭头隐藏正在操作的控制区。</summary>
     public static bool? ClassifyModern(bool confined, bool wholeDesktop, bool hasCursor,
         bool showing, bool suppressed, bool allowFullscreenCapture)
     {
-        if (suppressed) return confined && !wholeDesktop ? false : null;
+        if (confined && !wholeDesktop) return false;
+        if (suppressed) return null;
         if (hasCursor && showing) return true;
         if (!showing && confined && (!wholeDesktop || allowFullscreenCapture)) return false;
         return null;

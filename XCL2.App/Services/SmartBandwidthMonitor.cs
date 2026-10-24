@@ -34,9 +34,6 @@ public sealed class SmartBandwidthMonitor : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loopTask;
 
-    private long _selfBytesConsumedSinceLastSample;
-    private readonly object _selfLock = new();
-
     public SmartBandwidthMonitor(DownloadRateLimiter limiter, int manualCapKBps)
     {
         _limiter = limiter;
@@ -44,18 +41,15 @@ public sealed class SmartBandwidthMonitor : IDisposable
         _loopTask = Task.Run(MonitorLoopAsync);
     }
 
-    /// <summary>下载代码每读到一批字节后调用，用于统计"本程序自己消耗了多少流量"，
-    /// 从系统总流量里扣掉这部分才能估算出"别人用了多少"。</summary>
-    public void ReportSelfBytes(int bytes)
-    {
-        lock (_selfLock) { _selfBytesConsumedSinceLastSample += bytes; }
-    }
+    /// <summary>仅供未调用 DownloadTransferPolicy.ConsumeAsync 的自定义传输登记字节；统一传输层会自动登记。</summary>
+    public void ReportSelfBytes(int bytes) => DownloadTransferPolicy.ReportReceived(bytes);
 
     private async Task MonitorLoopAsync()
     {
         var nics = SafeGetNics();
         var lastTotal = SafeReadTotalBytes(nics);
         var lastTime = Stopwatch.GetTimestamp();
+        var lastSelf = DownloadTransferPolicy.TotalReceivedBytes;
 
         while (!_cts.IsCancellationRequested)
         {
@@ -74,12 +68,10 @@ public sealed class SmartBandwidthMonitor : IDisposable
             var totalDelta = Math.Max(0, currentTotal - lastTotal);
             lastTotal = currentTotal;
 
-            long selfDelta;
-            lock (_selfLock)
-            {
-                selfDelta = _selfBytesConsumedSinceLastSample;
-                _selfBytesConsumedSinceLastSample = 0;
-            }
+            // 多个任务/不同下载页面共享同一累计计数，不能把其它XCL下载误认为外部抢带宽。
+            var currentSelf = DownloadTransferPolicy.TotalReceivedBytes;
+            var selfDelta = Math.Max(0, currentSelf - lastSelf);
+            lastSelf = currentSelf;
 
             var totalRate = (long)(totalDelta / elapsedSec);
             var selfRate = (long)(selfDelta / elapsedSec);

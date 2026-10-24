@@ -794,7 +794,7 @@ public class BedrockContentService
                 catch (OperationCanceledException) { throw; }
                 catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
                 {
-                    throw new OperationCanceledException("未授予管理员权限，VC++ 运行库安装已取消。", ex);
+                    throw new DownloadUserCanceledException("未授予管理员权限，VC++ 运行库安装已取消。", ex);
                 }
                 catch (Exception ex)
                 {

@@ -99,6 +99,15 @@ internal static class TouchInputInjector
     private static extern IntPtr GetMessageExtraInfo();
 
     [DllImport("user32.dll")]
+    private static extern int GetMessageTime();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT_MESSAGE_SOURCE { public uint deviceType, originId; }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCurrentInputMessageSource(out INPUT_MESSAGE_SOURCE source);
+
+    [DllImport("user32.dll")]
     private static extern short GetKeyState(int nVirtKey);
 
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int nVirtKey);
@@ -150,14 +159,33 @@ internal static class TouchInputInjector
     /// "这是悬浮层发的"还是"这是 Windows 由手指合成的"：前者放行，后者吞掉。
     /// 没有这个标记，钩子会把我们自己注入的点击也一起吃掉，整个悬浮层直接失灵。
     /// </summary>
-    public const ulong InjectedSignature = 0x58434C32; // 'X''C''L''2'
+    public const ulong InjectedSignature = LegacyTouchMousePolicy.InjectedSignature; // 'X''C''L''2'
 
+    private static int _lookSequence;
     private static IntPtr Signature => (IntPtr)unchecked((long)InjectedSignature);
 
-    public static bool IsInjectedMouseMessage => GetMessageExtraInfo() == Signature;
+    public static bool IsInjectedMouseMessage => LegacyTouchMousePolicy.IsInjected(unchecked((ulong)GetMessageExtraInfo().ToInt64()));
 
-    public static bool IsTouchPromotedMouseMessage
-        => (unchecked((ulong)GetMessageExtraInfo().ToInt64()) & 0xFFFFFF00UL) == 0xFF515700UL;
+    private static INPUT_MESSAGE_SOURCE ReadMouseMessageSource()
+    {
+        try { return GetCurrentInputMessageSource(out var source) ? source : default; }
+        catch (EntryPointNotFoundException) { return default; }
+    }
+
+    /// <summary>
+    /// 在原生入口只分类一次。来源缺失时，只有低级钩子记录过的同类型、同坐标、
+    /// 同消息时间输入可恢复身份；后续转发不再读取可能被嵌套消息改变的线程来源。
+    /// </summary>
+    public static LegacyMouseMessageKind ClassifyMouseMessage(IntPtr overlay, IntPtr game, int message, IntPtr lParam)
+    {
+        var extra = unchecked((ulong)GetMessageExtraInfo().ToInt64());
+        var messageTime = unchecked((uint)GetMessageTime());
+        var source = ReadMouseMessageSource();
+        if (!TryGetMouseMessagePosition(overlay, message, lParam, out var x, out var y))
+            return LegacyMouseMessageKind.Rejected;
+        return TouchMousePromotionFilter.ClassifyMessage(game, overlay, message, x, y, messageTime,
+            extra, source.deviceType, source.originId);
+    }
 
     public static bool IsMouseMessage(int message) => message >= 0x0200 && message <= 0x020E;
 
@@ -172,26 +200,30 @@ internal static class TouchInputInjector
         return ok;
     }
 
-    /// <summary>把被悬浮层截获的原生鼠标消息交给游戏，避免模拟点击再次触发悬浮层。
-    /// 不再注入一次相对位移：游戏已收到 SendInput 的 Raw Input，重复注入会加倍转动。</summary>
-    public static void ForwardMouseMessage(IntPtr source, IntPtr game, int message, IntPtr wParam, IntPtr lParam)
+    /// <summary>把被悬浮层截获的传统鼠标消息交给游戏，避免模拟点击再次触发悬浮层。
+    /// 只转交当前消息，不二次注入相对位移；此路径不保证产生游戏可消费的 Raw Input。</summary>
+    public static void ForwardMouseMessage(IntPtr source, IntPtr game, int message, IntPtr wParam, IntPtr lParam,
+        LegacyMouseMessageKind kind)
     {
-        if (game == IntPtr.Zero || !TryGetMouseMessagePosition(source, message, lParam, out var x, out var y)) return;
+        if (game == IntPtr.Zero || kind == LegacyMouseMessageKind.Rejected || GetForegroundWindow() != game ||
+            !TryGetMouseMessagePosition(source, message, lParam, out var x, out var y)) return;
         var point = new POINT { x = x, y = y };
         if (message is not (0x020A or 0x020E) && !ScreenToClient(game, ref point)) return;
         var packed = unchecked((int)((uint)(ushort)point.x | ((uint)(ushort)point.y << 16)));
-        PostMessage(game, (uint)message, wParam, new IntPtr(packed));
+        if (PostMessage(game, (uint)message, wParam, new IntPtr(packed)))
+            TouchMousePromotionFilter.RecordForwarded(game, message);
     }
 
     /// <summary>菜单采用屏幕绝对位置：同时更新系统指针和 GLFW 的窗口消息坐标。
     /// 只投递 WM_MOUSEMOVE 会使读取 GetCursorPos 的后端仍看到旧坐标。
     /// 松开游戏遗留的局部约束后定位；游戏视角路径绝不调用此方法。</summary>
     public static bool MenuPointerMove(IntPtr game, int screenX, int screenY, bool leftDown,
-        bool worldJoined = false, LegacyTouchCursorEvidence? cursorEvidence = null)
+        bool worldJoined = false, LegacyTouchCursorEvidence? cursorEvidence = null, bool forceMenu = false)
     {
         if (game == IntPtr.Zero || GetForegroundWindow() != game) return false;
-        // 旧游戏仍明确抓取鼠标时，禁止菜单绝对定位把视角拉到手指位置。
-        if (ReadGameMenuMode(game, worldJoined: worldJoined, cursorEvidence: cursorEvidence) == false) return false;
+        // 自动模式仍保护真实抓取；只有用户明确选择旧版“手动菜单”时覆盖此判断。
+        // LWJGL 全屏菜单也可能保留局部约束，手动选择不能再被相同原生猜测否决。
+        if (!forceMenu && ReadGameMenuMode(game, worldJoined: worldJoined, cursorEvidence: cursorEvidence) == false) return false;
         ClipCursor(IntPtr.Zero);
         if (!SetCursorPos(screenX, screenY)) return false;
         return PostMenuMouseMessage(game, 0x0200, screenX, screenY, leftDown);
@@ -306,12 +338,20 @@ internal static class TouchInputInjector
         SendInput(1, in input, InputSize);
     }
 
-    public static bool TryMouseMoveRelative(int dx, int dy)
+    public static bool TryMouseMoveRelative(int dx, int dy, IntPtr game)
     {
+        if (dx == 0 && dy == 0) return true;
+        var signature = LegacyTouchMousePolicy.LookSignature(Interlocked.Increment(ref _lookSequence));
+        // Register before SendInput: its native message can be dispatched reentrantly before return.
+        // Do not depend on WH_MOUSE_LL being installed or still alive to authorize our own movement.
+        if (!TouchMousePromotionFilter.RegisterLook(game, signature)) return false;
         var input = new INPUT { type = INPUT_MOUSE,
             u = new INPUTUNION { mi = new MOUSEINPUT { dx = dx, dy = dy,
-                dwFlags = MOUSEEVENTF_MOVE | 0x2000u, dwExtraInfo = Signature } } };
-        return SendInput(1, in input, InputSize) == 1;
+                dwFlags = MOUSEEVENTF_MOVE | 0x2000u,
+                dwExtraInfo = new IntPtr(unchecked((long)signature)) } } };
+        var sent = SendInput(1, in input, InputSize) == 1;
+        if (!sent) TouchMousePromotionFilter.CancelLook(game, signature);
+        return sent;
     }
 
     /// <summary>滚轮：用于切换快捷栏物品。notches 为正=向上滚（上一格）。</summary>
@@ -389,7 +429,8 @@ internal static class TouchInputInjector
     /// true=菜单，false=游戏视角，null=状态不明确，调用方保留已确认的模式。
     /// </summary>
     public static bool? ReadGameMenuMode(IntPtr gameHwnd, bool allowFullscreenCapture = false,
-        bool worldJoined = false, LegacyTouchCursorEvidence? cursorEvidence = null)
+        bool worldJoined = false, LegacyTouchCursorEvidence? cursorEvidence = null, TouchCaptureRecovery? recovery = null,
+        LegacyTouchWorldPhase phase = LegacyTouchWorldPhase.Unknown, bool menuRequested = false)
     {
         if (!TryGetClientAreaOnScreen(gameHwnd, out var left, out var top, out var right, out var bottom) ||
             right <= left || bottom <= top || !GetClipCursor(out var clip)) return null;
@@ -404,10 +445,36 @@ internal static class TouchInputInjector
         var info = new CURSORINFO { cbSize = Marshal.SizeOf<CURSORINFO>() };
         if (!GetCursorInfo(ref info)) return null;
         var centerX = left + (right - left) / 2; var centerY = top + (bottom - top) / 2;
-        var showing = (info.flags & CURSOR_SHOWING) != 0;
-        var suppressed = (info.flags & CURSOR_SUPPRESSED) != 0;
-        var recentered = cursorEvidence?.Observe(info.ptScreenPos.x, info.ptScreenPos.y, centerX, centerY,
-            showing, suppressed, Environment.TickCount64) == true;
+        // LWJGL2 的全透明光标仍可带 SHOWING；不能因此把世界视角当作菜单。
+        // 仅绘制确认为透明的形状提供独立隐藏证据，普通箭头的触摸抑制仍是未知状态。
+        var visiblePixels = LegacyTouchCursorVisibility.HasVisiblePixels(info.hCursor);
+        var cursorState = LegacyTouchCursorVisibilityPolicy.Resolve(
+            (info.flags & CURSOR_SHOWING) != 0, (info.flags & CURSOR_SUPPRESSED) != 0,
+            info.hCursor != IntPtr.Zero, visiblePixels);
+        var showing = cursorState.Showing;
+        var suppressed = cursorState.Suppressed;
+        var backendHidden = info.hCursor == IntPtr.Zero || visiblePixels == false;
+        var recentered = false;
+        if (cursorEvidence != null)
+        {
+            // 纯触屏操作时，即便 GLFW 已 SetCursor(NULL)，Windows 仍可能报告 SUPPRESSED。
+            // 先允许独立的后端隐藏信号观察真实回中，只有离中心菜单锚点后的持续回中
+            // 已成立，才解除该样本的抑制。隐藏/居中/等待加载本身都不会制造抓取证据。
+            var observed = cursorEvidence.ObserveBackendCursor(info.ptScreenPos.x, info.ptScreenPos.y,
+                centerX, centerY, showing, suppressed,
+                backendHidden, Environment.TickCount64);
+            recentered = observed.Captured;
+            suppressed = observed.Suppressed;
+        }
+        var centeredNow = Math.Abs(info.ptScreenPos.x - (left + right) / 2) <= 3 &&
+            Math.Abs(info.ptScreenPos.y - (top + bottom) / 2) <= 3;
+        var recovered = recovery?.ObserveBackendCursor(showing, suppressed, backendHidden, centeredNow,
+            phase == LegacyTouchWorldPhase.Loading, phase == LegacyTouchWorldPhase.Outside,
+            menuRequested, Environment.TickCount64) == true;
+        if (menuRequested && showing && !suppressed && info.hCursor != IntPtr.Zero) return true;
+        // Only independently confirmed backend hiding can recover through touch suppression.
+        // An ordinary arrow hidden by Windows remains an unknown sample.
+        if (recovered && !showing && (!suppressed || backendHidden)) return false;
         // 旧后端抓取光标时仍可能留下 WPF 箭头，客户区约束优先于箭头句柄。
         // 不调用 ClipCursor/ShowCursor/CenterCursor 来推测视角模式。
         return TouchInputModePolicy.Classify(confined, wholeDesktop, info.hCursor != IntPtr.Zero,

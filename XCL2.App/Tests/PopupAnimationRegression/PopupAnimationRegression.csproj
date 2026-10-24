@@ -10,5 +10,6 @@
   <ItemGroup>
     <Compile Include="../../Services/UiAnimationHelper.cs" Link="Services/UiAnimationHelper.cs" />
     <Compile Include="../../Services/UiRenderScheduler.cs" Link="Services/UiRenderScheduler.cs" />
+    <Compile Include="../../Services/PageTransitionBehavior.cs" Link="Services/PageTransitionBehavior.cs" />
   </ItemGroup>
 </Project>

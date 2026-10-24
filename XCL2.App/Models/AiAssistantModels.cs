@@ -351,20 +351,29 @@ public enum AiReasoningLevel { Off, Low, Medium, High, VeryHigh, Max, Fast }
 /// <summary>Build 保持已有授权执行行为；Plan 只分析规划及使用已授权的只读工具。</summary>
 public enum AiWorkMode { Build = 0, Plan = 1, Agent = 2, Chat = 3 }
 
+public enum AiApiProtocol { OpenAI = 0, Anthropic = 1 }
+
 public sealed class AiApiEndpoint
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "自定义接口";
+    public AiApiProtocol Protocol { get; set; } = AiApiProtocol.OpenAI;
     public string BaseUrl { get; set; } = "";
     public List<string> ApiKeys { get; set; } = new();
     public bool Enabled { get; set; } = true;
-    public AiApiEndpoint Clone() => new() { Id = Id, Name = Name, BaseUrl = BaseUrl,
+    public AiApiEndpoint Clone() => new() { Id = Id, Name = Name, BaseUrl = BaseUrl, Protocol = Protocol,
         ApiKeys = ApiKeys?.ToList() ?? new(), Enabled = Enabled };
     public override string ToString() => Name;
 }
 
 public class AiAssistantConfig
 {
+    public AiApiProtocol ApiProtocol { get; set; } = AiApiProtocol.OpenAI;
+    public bool AutoSaveSettings { get; set; } = true;
+    public Dictionary<string, AiModelRequestProfile> ModelRequestProfiles { get; set; } = new();
+    public string DiagnosticModelKey { get; set; } = "";
+    public bool DisableSettingsSearchHint { get; set; }
+
     public bool Enabled { get; set; } = true;
     public AiWorkMode WorkMode { get; set; } = AiWorkMode.Build;
     public string BaseUrl { get; set; } = "https://openrouter.ai/api/v1";
@@ -413,6 +422,9 @@ public class AiAssistantConfig
     public bool RequestUsageMetadata { get; set; } = true;
     /// <summary>单次请求（含重试）的最长等待秒数，0 表示不限时；最长可设 24 小时。</summary>
     public int RequestTimeoutSeconds { get; set; } = 86400;
+
+    /// <summary>Total wall-clock budget for one AI turn, including requests, tools and approvals.</summary>
+    public int MaxRunMinutes { get; set; } = 15;
     public int LongWaitHintSeconds { get; set; } = 45;
     public string LongWaitDescription { get; set; } = "模型仍在处理，请稍候；你可以随时停止生成。";
     /// <summary>按实际模型 ID 保存上下文容量与每百万 token 单价。留空表示未知，不猜测模型价格。</summary>
@@ -615,4 +627,27 @@ public class AiRequestUsage
     public int ReservedOutputTokens { get; set; }
     public decimal? EstimatedCostUsd { get; set; }
     public AiRequestUsage Clone() => (AiRequestUsage)MemberwiseClone();
+}
+
+/// <summary>Explicit per-model request documentation and validated request rules. No credentials.</summary>
+public sealed class AiModelRequestProfile
+{
+    public string Documentation { get; set; } = "";
+    // inherit: omit unspecified reasoning; thinking: {type:enabled/disabled}; enable_thinking: bool.
+    public string ThinkingProtocol { get; set; } = "inherit";
+    public string[] SupportedEfforts { get; set; } = Array.Empty<string>();
+    public List<AiParameterRule> Rules { get; set; } = new();
+    public AiModelRequestProfile Clone() => new()
+    {
+        Documentation = Documentation, ThinkingProtocol = ThinkingProtocol,
+        SupportedEfforts = SupportedEfforts?.ToArray() ?? Array.Empty<string>(), Rules = Rules?.Where(r => r != null).Select(r => r with { }).ToList() ?? new()
+    };
+}
+
+public sealed record AiParameterRule
+{
+    public string Parameter { get; init; } = "";
+    public string Action { get; init; } = "omit";
+    public string Value { get; init; } = "";
+    public string When { get; init; } = "any";
 }

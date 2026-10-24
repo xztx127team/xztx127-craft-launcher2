@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+    <Compile Include="../../Models/AppConfig.UxPresentation.cs" Link="AppConfig.UxPresentation.cs" />
+    <Compile Include="../../Services/WindowPlacementGeometry.cs" Link="WindowPlacementGeometry.cs" />
+    <Compile Include="../../Services/WindowPlacementService.cs" Link="WindowPlacementService.cs" />
+    <Compile Include="../../Services/WindowChromeService.cs" Link="WindowChromeService.cs" />
+  </ItemGroup>
+</Project>

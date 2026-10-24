@@ -12,7 +12,7 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <StackPanel Margin="24" MaxWidth="640">
         <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-            <TextBlock Text="✖" FontSize="26" FontFamily="Segoe UI Emoji" VerticalAlignment="Top"
+            <TextBlock x:Name="DiagnosticIcon" Text="✖" FontSize="26" FontFamily="Segoe UI Emoji" VerticalAlignment="Top"
                        Margin="0,0,12,0" Foreground="{DynamicResource DangerBrush}"/>
             <TextBlock x:Name="TitleText" Text="游戏崩溃了" FontSize="16" FontWeight="Bold"
                        VerticalAlignment="Center" TextWrapping="Wrap"/>
@@ -49,6 +49,14 @@
             </StackPanel>
         </Border>
 
+        <Expander x:Name="MoreErrorsExpander" Header="显示更多报错与警告 · 深度日志扫描" Margin="0,14,0,0" Expanded="MoreErrors_Expanded">
+            <StackPanel>
+                <TextBlock Text="按日志等级列出线索并附修复建议；游戏仍运行时全部作为警告。相同消息会合并。" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,8"/>
+                <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="MoreErrorsText" FontSize="12" TextWrapping="Wrap" LineHeight="19"/>
+                </ScrollViewer>
+            </StackPanel>
+        </Expander>
         <Grid Margin="0,12,0,0">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

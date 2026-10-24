@@ -5,11 +5,14 @@ public enum LauncherCapacityUnit { Automatic, MB, GB }
 
 public sealed class LauncherWindowPlacement
 {
+    public const double DefaultWidth = 500;
+    public const double DefaultHeight = 320;
+
     public string Monitor { get; set; } = "";
     public double HorizontalPosition { get; set; } = 0.5;
     public double VerticalPosition { get; set; } = 0.5;
-    public double Width { get; set; } = 1000;
-    public double Height { get; set; } = 640;
+    public double Width { get; set; } = DefaultWidth;
+    public double Height { get; set; } = DefaultHeight;
     public bool Maximized { get; set; }
 }
 

@@ -12,6 +12,21 @@
          背景。结果下层列表面板里还留着的搜索框、分页按钮、未收起的滚动条等内容会直接透过这些
          透明区域和当前详情页内容混在一起显示，就是所谓的"穿模"。
          修复：根 Grid 补上跟随主题的 PanelBrush 不透明背景，整页覆盖时彻底遮住下层内容。 -->
+    <UserControl.Resources>
+        <Style x:Key="ResourceFileCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="16,14"/>
+            <Setter Property="Margin" Value="0,4"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
     <Grid Background="{DynamicResource PanelBrush}" services:PageTransitionBehavior.AnimateOnVisible="True">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -22,7 +37,7 @@
              取代之前的"列表原地手风琴展开"。点返回箭头回到进入详情页之前的列表状态
              （由宿主页面/窗口在构造本控件时传入 onBack 回调，回调内部负责恢复筛选条件、
              搜索关键词、滚动位置、当前分页页码——本控件自己不关心"回哪"，只负责触发返回）。 -->
-        <Border Grid.Row="0" Background="{DynamicResource SoftHeaderBrush}" CornerRadius="14,14,0,0" Padding="18,14">
+        <Border Grid.Row="0" Background="{DynamicResource SoftHeaderBrush}" CornerRadius="14" Padding="14,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -37,28 +52,32 @@
         </Border>
 
         <!-- ===== 主体内容：滚动区域，依次是"简介卡片"和"版本分组列表"。 ===== -->
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="14,14,14,0" services:ScrollWheelBehavior.EnableFastWheel="True">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,16,0,0" services:ScrollWheelBehavior.EnableFastWheel="True">
             <StackPanel Margin="0,0,0,10">
 
                 <!-- 简介卡片：图标 + 标题 + 简介 + 元信息一行，下面是操作按钮行
                      （转到 Modrinth/CurseForge 原页、复制名称、以及一键开服清单模式下的
                      "加入清单"提示）。 -->
-                <Border Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" CornerRadius="14" Padding="20" Margin="0,0,0,16">
+                <Border Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" CornerRadius="16" Padding="24" Margin="0,0,0,18">
                     <StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0" Width="64" Height="64" CornerRadius="12" Margin="0,0,14,0"
+                            <Border Grid.Column="0" Width="80" Height="80" CornerRadius="16" Margin="0,0,20,0"
                                     Background="{DynamicResource PanelBrush}" VerticalAlignment="Top">
-                                <Image x:Name="IconImage" Width="64" Height="64" Stretch="UniformToFill"/>
+                                <Image x:Name="IconImage" Width="72" Height="72" Stretch="UniformToFill"/>
                             </Border>
                             <StackPanel Grid.Column="1">
-                                <TextBlock x:Name="NameText" FontSize="18" FontWeight="Bold" TextWrapping="Wrap"/>
-                                <TextBlock x:Name="DescriptionText" FontSize="13" TextWrapping="Wrap" Margin="0,4,0,0"
+                                <Border Background="{DynamicResource GlowSoftBrush}" CornerRadius="5" Padding="8,3"
+                                        HorizontalAlignment="Left" Margin="0,0,0,8">
+                                    <TextBlock x:Name="SourceLabelText" FontSize="11" Foreground="{DynamicResource AccentBrush}"/>
+                                </Border>
+                                <TextBlock x:Name="NameText" FontSize="24" FontWeight="Bold" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="DescriptionText" FontSize="13" LineHeight="21" TextWrapping="Wrap" Margin="0,8,0,0"
                                            Foreground="{DynamicResource TextSecondaryBrush}"/>
-                                <TextBlock x:Name="MetaText" FontSize="12" Margin="0,8,0,0"
+                                <TextBlock x:Name="MetaText" FontSize="12" TextWrapping="Wrap" Margin="0,12,0,0"
                                            Foreground="{DynamicResource TextSecondaryBrush}"/>
                             </StackPanel>
                         </Grid>
@@ -106,14 +125,17 @@
                      预览版按钮：只在 Mod 场景（isMod=true）且这批版本里确实存在预览版时才显示，
                      见 ModDetailPage.xaml.cs 里 isMod 参数和 UpdatePreviewToggleVisibility 的注释——
                      资源包/数据包/光影包/地图详情页不显示这个按钮，维持之前"去掉这些按钮"的现状。 -->
-                <Grid Margin="0,0,0,16" Background="{DynamicResource SideBrush}">
+                <Grid Margin="0,0,0,16">
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="{DynamicResource Str_Ui_Versions}"
-                               Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="12,10,0,8"/>
+                    <StackPanel Grid.Row="0" Grid.Column="0" Margin="2,0,0,12">
+                        <TextBlock Text="选择版本与文件" FontSize="17" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="VersionSummaryText" Text="按游戏版本与加载器选择适用文件，下载将在后台继续。"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,6,0,0"/>
+                    </StackPanel>
                     <WrapPanel x:Name="VersionFilterPanel" Grid.Row="1" Grid.Column="0" Margin="12,0,0,4" Visibility="Collapsed"/>
                     <Button x:Name="PreviewToggleButton" Grid.Row="1" Grid.Column="1" Content="{DynamicResource Str_Ui_Show_Pre_Releases}"
                             Style="{StaticResource SecondaryButton}" Padding="12,5" FontSize="12"
@@ -186,8 +208,7 @@
                                         <ItemsControl ItemsSource="{Binding Entries}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate DataType="{x:Type models:InlineVersionEntry}">
-                                                    <Border Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"
-                                                            CornerRadius="8" Margin="0,4" Padding="14,12">
+                                                    <Border Style="{StaticResource ResourceFileCard}">
                                                         <Grid>
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="*"/>
@@ -195,7 +216,7 @@
                                                             </Grid.ColumnDefinitions>
                                                             <StackPanel>
                                                                 <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,12,4"/>
-                                                                <TextBlock FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}">
+                                                                <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,0,12,0" Foreground="{DynamicResource TextSecondaryBrush}">
                                                                     <Run Text="{Binding VersionNumber, Mode=OneWay}"/>
                                                                     <Run Text="{DynamicResource Str_Ui_Supports}"/><Run Text="{Binding GameVersionsText, Mode=OneWay}"/>
                                                                 </TextBlock>

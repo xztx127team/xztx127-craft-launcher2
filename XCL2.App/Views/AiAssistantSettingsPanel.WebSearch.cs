@@ -16,6 +16,7 @@ public partial class AiAssistantSettingsPanel
             return;
         }
 
+        using var pause = SuspendAutoSave();
         _confirmingWebSearch = true;
         try
         {

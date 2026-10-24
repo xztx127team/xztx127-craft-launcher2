@@ -27,14 +27,15 @@ namespace XCL2.App.Services;
 /// - 单个 Session 上下文估算超过 CompressionTokenThreshold（默认 18000）时自动压缩：
 ///   调用一次 API 把较早的消息总结成一段摘要，替换掉原始上下文，后续请求只带"摘要 + 最近消息"。
 /// </summary>
-public partial class AiAssistantService
+public partial class AiAssistantService : IDisposable
 {
+    public void Dispose() => _http.Dispose();
     private readonly HttpClient _http;
     private readonly string _storageDir;
+    internal static readonly AsyncLocal<CancellationToken> RequestCancellation = new();
     private AiAssistantConfig _config;
     private bool _persistUsage;
-    private readonly AiProviderParameterMemory _parameterMemory;
-    private readonly HashSet<string> _reasoningDisabled = new(StringComparer.OrdinalIgnoreCase);
+    private readonly AiModelParameterMemory _modelParameterMemory;
     private readonly Dictionary<string, string> _preferredKeys = new(StringComparer.OrdinalIgnoreCase);
 
     // Auto 路由复杂度判定。原来是"命中任一关键词就走专家档"的粗暴规则，问题是：
@@ -112,7 +113,7 @@ public partial class AiAssistantService
             var route = ChooseModel(userText, isCrashLogContext, forcedModel: null);
             var candidates = AiEndpointRouting.GetCandidates(_config, route.ModelId);
             if (candidates.Count == 0) return "所选模型的接口尚未配置，请在右上角 AI 设置中配置接口和模型。";
-            AiEndpointRouting.BuildChatCompletionsUrl(candidates[0].BaseUrl);
+            AiEndpointRouting.BuildCompletionUrl(candidates[0]);
             // Empty custom credentials are valid for local, unauthenticated compatible servers.
             // A remote service that requires a key will return its own authentication error.
             return null;
@@ -216,7 +217,7 @@ public partial class AiAssistantService
         _config = config;
         _persistUsage = ReferenceEquals(config, ConfigService.Active?.Config.AiAssistant);
         _http = http;
-        _parameterMemory = new AiProviderParameterMemory(xcl2DataDir);
+        _modelParameterMemory = new AiModelParameterMemory(xcl2DataDir);
         _storageDir = Path.Combine(xcl2DataDir, "ai_chat");
         Directory.CreateDirectory(_storageDir);
     }
@@ -371,6 +372,46 @@ public partial class AiAssistantService
     /// webSearch: 是否启用联网搜索
     /// </summary>
     public async Task<AiChatMessage> SendMessageAsync(
+        AiChatSession session,
+        string userText,
+        bool isCrashLogContext = false,
+        string? forcedModel = null,
+        bool deepThinking = false,
+        bool webSearch = false,
+        CancellationToken ct = default,
+        IProgress<AiAssistantActivity>? progress = null,
+        IProgress<string>? textProgress = null,
+        IProgress<AiRequestUsage>? usageProgress = null,
+        AiReasoningLevel? reasoningLevel = null,
+        Func<AiQuestionSet, CancellationToken, Task<AiQuestionAnswer?>>? askQuestionAsync = null,
+        IReadOnlyList<AiAttachment>? attachments = null,
+        Func<AiWorkMode>? currentWorkMode = null)
+    {
+        var cancellation = ct;
+        var minutes = Math.Clamp(_config.MaxRunMinutes, 1, 1440);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(minutes));
+        using var combined = CancellationTokenSource.CreateLinkedTokenSource(cancellation, deadline.Token);
+        // Capture a deliberate selection before awaiting anything. Later edits in another
+        // settings surface cannot silently replace this turn's model.
+        if (string.IsNullOrWhiteSpace(forcedModel) && (_config.RoutingMode == AiRoutingMode.SpecificModel
+            || _config.RoutingMode == AiRoutingMode.Auto && !_config.AutoModelRouting))
+            forcedModel = _config.SelectedModel;
+        var previousCancellation = RequestCancellation.Value;
+        RequestCancellation.Value = combined.Token;
+        try
+        {
+            return await SendMessageCoreAsync(session, userText, isCrashLogContext, forcedModel,
+                deepThinking, webSearch, combined.Token, progress, textProgress, usageProgress,
+                reasoningLevel, askQuestionAsync, attachments, currentWorkMode);
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !cancellation.IsCancellationRequested)
+        {
+            throw new TimeoutException($"本轮 AI 任务已达到 {minutes} 分钟运行时限，已停止并保留收到的内容。");
+        }
+        finally { RequestCancellation.Value = previousCancellation; }
+    }
+
+    private async Task<AiChatMessage> SendMessageCoreAsync(
         AiChatSession session,
         string userText,
         bool isCrashLogContext = false,
@@ -552,7 +593,7 @@ public partial class AiAssistantService
                     ? Math.Max(2000, _config.CompressionTokenThreshold / 2)
                     : _config.CompressionTokenThreshold;
                 if (workMode.EffectiveMode != AiWorkMode.Chat && EstimateSessionTokens(session) > effectiveThreshold)
-                    await CompressSessionAsync(session, ct, OnUsage);
+                    await CompressSessionAsync(session, ct, OnUsage, forcedModel);
 
                 var route = ChooseModel(userText, isCrashLogContext, forcedModel);
                 modelUsed = route.ModelId;
@@ -577,7 +618,8 @@ public partial class AiAssistantService
                         + AgentPlanStatusPrompt(session, workMode.EffectiveMode));
                     return CallChatCompletionAsync(route.ModelId, accessConversation,
                         deepThinking, webSearch && workMode.EffectiveMode != AiWorkMode.Chat, ct, Report, contentProgress: OnText, usageProgress: OnUsage,
-                        reasoningLevel: reasoningLevel, onTarget: SelectTarget);
+                        reasoningLevel: reasoningLevel, onTarget: SelectTarget,
+                        exactTarget: route.RouteUsed == AiRoutingMode.SpecificModel);
                 }
                 var currentReply = await ContinueReplyAsync();
                 var toolActionBudget = new AiToolActionBudget(_config.MaxToolActionsPerTurn);
@@ -891,7 +933,7 @@ public partial class AiAssistantService
     /// 用来验证这个模型（在当前配置的接口/Key 下）到底能不能正常用，不影响正常聊天会话/历史。
     /// 返回 (是否成功, 给用户看的结果说明)；失败时的说明复用 CallChatCompletionAsync 里
     /// 已经写好的那些"人话"错误提示（网络设置/换模型/密钥地址是否正确等），不用重新包装。</summary>
-    public async Task<(bool Ok, string Message)> TestModelAsync(string modelId, CancellationToken ct = default)
+    public async Task<(bool Ok, string Message)> TestModelAsync(string modelId, CancellationToken ct = default, bool exactTarget = true)
     {
         if (string.IsNullOrWhiteSpace(modelId))
             return (false, "模型 ID 为空。");
@@ -906,7 +948,7 @@ public partial class AiAssistantService
             var testedDisplay = ModelDisplayName(modelId);
             var reply = await CallChatCompletionAsync(modelId, messages,
                 deepThinking: false, webSearch: false, ct: ct, affectsContext: false, activitySource: "模型测试",
-                reasoningLevel: AiReasoningLevel.Off, onTarget: target => testedDisplay = target.ProviderName + " · " + target.ModelId);
+                reasoningLevel: AiReasoningPolicy.EffectiveLevel(_config), onTarget: target => testedDisplay = target.ProviderName + " · " + target.ModelId, exactTarget: exactTarget);
 
             var preview = string.IsNullOrWhiteSpace(reply) ? "(空)" : reply.Trim();
             if (preview.Length > 60) preview = preview.Substring(0, 60) + "…";
@@ -1075,7 +1117,7 @@ public partial class AiAssistantService
     /// 从而把下一次请求的上下文体积打下来。省 Token 模式下保留的原始消息更少（4 条而不是 6 条）、
     /// 摘要要求更短（100 字而不是 200 字），压得更狠一些。
     /// </summary>
-    private async Task CompressSessionAsync(AiChatSession session, CancellationToken ct, Action<AiRequestUsage>? usageProgress = null)
+    private async Task CompressSessionAsync(AiChatSession session, CancellationToken ct, Action<AiRequestUsage>? usageProgress = null, string? forcedModel = null)
     {
         var tokenSaver = _config.EffectiveTokenSaverMode;
         var keepRecent = tokenSaver ? 4 : 6;
@@ -1105,8 +1147,9 @@ public partial class AiAssistantService
 
         try
         {
-            var summaryModel = ChooseModel("对话上下文摘要", forceComplex: false, forcedModel: null).ModelId;
+            var summaryModel = ChooseModel("对话上下文摘要", forceComplex: false, forcedModel: forcedModel).ModelId;
             var summary = await CallChatCompletionAsync(summaryModel, summarizeRequest, ct: ct,
+                exactTarget: !string.IsNullOrWhiteSpace(forcedModel) || _config.RoutingMode == AiRoutingMode.SpecificModel,
                 usageProgress: usageProgress, activitySource: "上下文压缩", affectsContext: false, reasoningLevel: AiReasoningLevel.Off);
             session.SummaryOfOlderMessages = summary.Trim();
             session.SummarizedUpToIndex = end - 1;
@@ -1130,7 +1173,8 @@ public partial class AiAssistantService
         bool deepThinking = false, bool webSearch = false, CancellationToken ct = default,
         Action<AiAssistantActivity>? report = null, string? activitySource = null, Action<string>? contentProgress = null,
         Action<AiRequestUsage>? usageProgress = null, bool affectsContext = true,
-        AiReasoningLevel? reasoningLevel = null, Action<AiRequestTarget>? onTarget = null)
+        AiReasoningLevel? reasoningLevel = null, Action<AiRequestTarget>? onTarget = null,
+        bool exactTarget = false, bool allowCompatibility = true)
     {
         // One deadline covers credentials, endpoints and optional-parameter compatibility retries.
         var config = _config;
@@ -1146,7 +1190,7 @@ public partial class AiAssistantService
         const int maximumAttempts = 48;
         try
         {
-            foreach (var target in candidates.Take(16))
+            foreach (var target in candidates.Take(exactTarget ? 1 : 16))
             {
                 ct.ThrowIfCancellationRequested();
                 List<string> keys;
@@ -1172,14 +1216,18 @@ public partial class AiAssistantService
                 lock (_preferredKeys)
                     if (config.EnableApiKeyFailover && _preferredKeys.TryGetValue(credentialScope, out var preferred)
                         && keys.Remove(preferred)) keys.Insert(0, preferred);
-                var level = AiReasoningPolicy.ResolveLevel(requestedLevel, target.SupportsFastMode);
-                var reasoningScope = target.ProviderId + "|" + target.BaseUrl.TrimEnd('/') + "|" + target.ModelId;
-                lock (_reasoningDisabled)
-                    if (_reasoningDisabled.Contains(reasoningScope)) level = AiReasoningLevel.Off;
+                var profile = AiModelParameterPolicy.Profile(config, target.ModelKey).Clone();
+                var validation = AiModelParameterPolicy.Validate(profile);
+                if (validation != null) throw new AiParameterAdaptationException(target, validation, Array.Empty<AiParameterRule>());
+                var level = AiModelParameterPolicy.ResolveLevel(AiReasoningPolicy.ResolveLevel(requestedLevel, target.SupportsFastMode), profile);
+                var scope = AiModelParameterMemory.Scope(target, level, profile, config.StreamResponses, webSearch);
+                var learned = _modelParameterMemory.Get(scope).ToList();
                 var parameterRetries = new HashSet<string>(StringComparer.Ordinal);
+                var adaptations = new List<AiParameterRule>();
                 if (requestedLevel == AiReasoningLevel.Fast && !target.SupportsFastMode)
-                    ToastService.ShowWarning($"{target.ProviderName} · {target.ModelId} 未声明支持极速推理，本次已使用 off 模式。");
+                    ToastService.ShowWarning($"{target.ProviderName} · {target.ModelId} 未声明支持极速推理，本次不发送极速推理档位。");
                 var nextEndpoint = false;
+                var alternateSearch = false;
                 for (var keyIndex = 0; keyIndex < keys.Count && !nextEndpoint; keyIndex++)
                 {
                     var transientRetries = 0;
@@ -1191,30 +1239,37 @@ public partial class AiAssistantService
                         try
                         {
                             var answer = await SendCompletionAttemptAsync(config, target, keys[keyIndex], messages, level,
-                                webSearch, ct, report, activitySource, contentProgress, usageProgress, affectsContext, onTarget);
+                                webSearch, ct, report, activitySource, contentProgress, usageProgress, affectsContext, onTarget, profile, learned, alternateSearch);
                             lock (_preferredKeys) _preferredKeys[credentialScope] = keys[keyIndex];
+                            if (adaptations.Count > 0)
+                            {
+                                _modelParameterMemory.Remember(scope, AiModelParameterMemory.ModelScope(target), learned);
+                                ToastService.ShowInfo($"{target.ProviderName} · {target.ModelId} 参数适配成功：" +
+                                    string.Join("；", adaptations.Select(AiParameterAdaptationException.Describe)));
+                                if (_modelParameterMemory.PersistenceWarning is { } warning) ToastService.ShowWarning(warning);
+                            }
                             return answer;
                         }
                         catch (AiProviderRequestException ex)
                         {
                             lastError = ex;
-                            var rejectedParameter = AiUnsupportedParameterPolicy.GetRejectedParameter(
-                                ex.Status, ex.ProviderDetail, ex.SentParameters);
-                            if (rejectedParameter != null && parameterRetries.Add(rejectedParameter))
+                            if (webSearch && AiRequestExecutionPolicy.IsWebSearchCompatibilityFailure(ex.Status, ex.ProviderDetail))
                             {
-                                RememberRejectedParameter(target, rejectedParameter);
-                                continue; // Same endpoint, model and key; each rejected field only once.
+                                if (!alternateSearch)
+                                {
+                                    alternateSearch = true;
+                                    ToastService.ShowInfo("当前接口不接受联网搜索参数，正在尝试另一种搜索请求格式。");
+                                    continue;
+                                }
+                                throw new InvalidOperationException("你打开了联网搜索，但当前模型或接口不支持；已尝试另一种搜索请求格式，建议在 AI 设置中关闭联网搜索后重试。", ex);
                             }
-                            // An unsupported reasoning VALUE is model-specific, not proof that
-                            // this provider rejects the field. Keep the old local off fallback
-                            // without persisting a provider-wide restriction for a value error.
-                            if (level != AiReasoningLevel.Off && ex.SentParameters.Contains("reasoning_effort")
-                                && AiReasoningPolicy.IsUnsupportedReasoningError(
-                                    (System.Net.HttpStatusCode)ex.Status, ex.ProviderDetail))
+                            var repair = allowCompatibility ? AiModelParameterPolicy.Learn(ex.Status, ex.ProviderDetail, ex.SentPayload) : null;
+                            if (repair != null && adaptations.Count < 4 && parameterRetries.Add(JsonSerializer.Serialize(repair)) &&
+                                !profile.Rules.Any(r => r.Parameter == repair.Parameter && (r.When == "any" || r.When == (level == AiReasoningLevel.Off ? "off" : "thinking"))))
                             {
-                                level = AiReasoningLevel.Off;
-                                lock (_reasoningDisabled) _reasoningDisabled.Add(reasoningScope);
-                                ToastService.ShowWarning($"{target.ProviderName} · {target.ModelId} 不支持所选推理等级，已改为 off 模式重试。");
+                                learned.RemoveAll(r => r.Parameter == repair.Parameter);
+                                learned.Add(repair);
+                                adaptations.Add(repair);
                                 continue;
                             }
                             var failure = AiRequestExecutionPolicy.Classify(ex.Status, ex.ProviderDetail);
@@ -1246,7 +1301,9 @@ public partial class AiAssistantService
                                 nextEndpoint = true;
                                 break;
                             }
-                            throw; // Other 4xx/parameter failures must not burn through credentials.
+                            if (ex.Status is 400 or 422)
+                                throw new AiParameterAdaptationException(target, ex.Message, adaptations, ex);
+                            throw; // Authentication, quota and transport errors are not parameter repairs.
                         }
                         catch (HttpRequestException ex)
                         {
@@ -1264,7 +1321,7 @@ public partial class AiAssistantService
                         }
                     }
                 }
-                if (nextEndpoint && config.EnableEndpointFailover && target != candidates.Last())
+                if (!exactTarget && nextEndpoint && config.EnableEndpointFailover && target != candidates.Last())
                     ToastService.ShowInfo($"{target.ProviderName} 的模型暂不可用，正在尝试其他接口的同模型或同等级模型。");
             }
             throw lastError ?? new InvalidOperationException("当前没有可用的模型接口，请先在 AI 设置中配置模型。");
@@ -1279,12 +1336,13 @@ public partial class AiAssistantService
         string apiKey, List<(string role, object content)> messages, AiReasoningLevel level, bool webSearch,
         CancellationToken ct, Action<AiAssistantActivity>? report, string? activitySource,
         Action<string>? contentProgress, Action<AiRequestUsage>? usageProgress, bool affectsContext,
-        Action<AiRequestTarget>? onTarget)
+        Action<AiRequestTarget>? onTarget, AiModelRequestProfile profile, IReadOnlyList<AiParameterRule> learned, bool alternateSearch = false)
     {
         ct.ThrowIfCancellationRequested();
         var inputEstimate = (int)Math.Min(int.MaxValue, messages.Sum(m => (long)EstimateRequestContent(m.content) + 4) + 3);
         var prices = AiUsageAccounting.Settings(CurrentAccountingConfig, target.ModelKey).Clone();
         var reservedOutput = ReservedOutputTokens(config, prices, inputEstimate);
+        if (target.Protocol == AiApiProtocol.Anthropic && reservedOutput == 0) reservedOutput = 4096;
         var limitError = AiUsageAccounting.CheckLimits(CurrentAccountingConfig, target.ModelKey, inputEstimate, reservedOutput);
         if (limitError != null) throw new InvalidOperationException(limitError);
         var body = new ChatCompletionRequest
@@ -1298,7 +1356,7 @@ public partial class AiAssistantService
             MaxTokens = reservedOutput > 0 ? reservedOutput : null,
             Tools = webSearch ? new List<object> { new { type = "web_search" } } : null
         };
-        var payload = BuildCompatiblePayload(body, target, reservedOutput);
+        var payload = BuildCompatiblePayload(body, target, reservedOutput, profile, level, learned, alternateSearch);
         var usage = new AiRequestUsage
         {
             Model = target.ModelId, ModelKey = target.ModelKey, ProviderId = target.ProviderId,
@@ -1342,12 +1400,22 @@ public partial class AiAssistantService
             try { report?.Invoke(activity); } catch { }
         }
         PublishUsage(force: true);
+        var visibleParameters = payload.Where(p => p.Key is "temperature" or "reasoning_effort" or "thinking" or "enable_thinking"
+            or "max_tokens" or "max_completion_tokens" or "stream" or "stream_options").ToDictionary(p => p.Key, p => p.Value);
+        ReportActivity(new AiAssistantActivity
+        {
+            Id = "request-parameters-" + AiModelParameterMemory.ModelScope(target),
+            Kind = AiActivityKind.RequestParameters, Status = AiActivityStatus.Completed,
+            Title = "实际请求参数 · " + displayModel,
+            Details = "按此模型规则构建；自动修正成功后才记住。省略思考字段时由服务端决定。\n" +
+                JsonSerializer.Serialize(visibleParameters, new JsonSerializerOptions { WriteIndented = true }),
+            Model = displayModel, CompletedUtc = DateTime.UtcNow
+        });
         try { onTarget?.Invoke(target); } catch { }
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post, AiEndpointRouting.BuildChatCompletionsUrl(target.BaseUrl));
-            if (!string.IsNullOrWhiteSpace(apiKey))
-                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            using var req = new HttpRequestMessage(HttpMethod.Post, AiEndpointRouting.BuildCompletionUrl(target));
+            AiEndpointRouting.ApplyAuthentication(req, apiKey, target.Protocol);
             req.Content = new StringContent(JsonSerializer.Serialize(payload,
                 new JsonSerializerOptions { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull }), Encoding.UTF8, "application/json");
             sent = true;
@@ -1364,7 +1432,7 @@ public partial class AiAssistantService
                         PublishUsage();
                     }, ct, TrackUsage,
                     providerError: root => throw ProviderError(AiRequestExecutionPolicy.StreamErrorStatus(root), ScrubProviderText(root.ToString(), config, apiKey)),
-                    responseStarted: () => receivedOutput = true);
+                    responseStarted: () => receivedOutput = true, anthropic: target.Protocol == AiApiProtocol.Anthropic);
                 foreach (var item in new[] { thoughtActivity, summaryActivity })
                     if (item.Details.Length > 0) { item.Status = AiActivityStatus.Completed; item.CompletedUtc = DateTime.UtcNow; ReportActivity(item); }
                 latestOutput = answer;
@@ -1390,8 +1458,33 @@ public partial class AiAssistantService
             if (returnedUsage != null) TrackUsage(returnedUsage);
             if (responseRoot.TryGetProperty("error", out _))
                 throw ProviderError(AiRequestExecutionPolicy.StreamErrorStatus(responseRoot), ScrubProviderText(respText, config, apiKey));
-            if (!responseRoot.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0
-                || choices[0].ValueKind != JsonValueKind.Object || !choices[0].TryGetProperty("message", out var message)
+            JsonElement message;
+            if (target.Protocol == AiApiProtocol.Anthropic)
+            {
+                if (!responseRoot.TryGetProperty("content", out var blocks) || blocks.ValueKind != JsonValueKind.Array)
+                    throw new InvalidOperationException("AI 接口未返回有效的 Anthropic Messages 回答，请检查接口格式。");
+                if (blocks.EnumerateArray().Any(b => b.ValueKind == JsonValueKind.Object
+                    && b.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "web_search_tool_result"
+                    && b.TryGetProperty("content", out var result) && result.ValueKind == JsonValueKind.Object
+                    && result.TryGetProperty("type", out var resultType) && resultType.ValueKind == JsonValueKind.String
+                    && resultType.GetString() == "web_search_tool_result_error"))
+                {
+                    receivedOutput = true; // A server tool ran; never replay a charged operation.
+                    TrackOutput(AiStreamingCompletion.VisibleText(AiCompletionContentParser.Parse(responseRoot).Content));
+                    throw new InvalidOperationException("联网搜索执行失败。当前模型或接口可能不支持搜索，建议在 AI 设置中关闭联网搜索后重试。");
+                }
+                if (responseRoot.TryGetProperty("stop_reason", out var reason) && reason.ValueKind == JsonValueKind.String
+                    && reason.GetString() is "max_tokens" or "pause_turn" or "tool_use")
+                {
+                    var partial = AiCompletionContentParser.Parse(responseRoot);
+                    receivedOutput = partial.Content.Length > 0 || partial.Reasoning.Length > 0;
+                    TrackOutput(AiStreamingCompletion.VisibleText(partial.Content));
+                    throw new InvalidOperationException("Anthropic 回答尚未完成，已保留内容；请增加输出上限或关闭联网搜索后重试。未执行不完整指令。");
+                }
+                message = responseRoot;
+            }
+            else if (!responseRoot.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0
+                || choices[0].ValueKind != JsonValueKind.Object || !choices[0].TryGetProperty("message", out message)
                 || message.ValueKind != JsonValueKind.Object)
                 throw new InvalidOperationException("AI 接口未返回有效回答，请检查该接口的 Chat Completions 兼容性。");
             var parsed = AiCompletionContentParser.Parse(message);
@@ -1416,6 +1509,7 @@ public partial class AiAssistantService
         catch (AiProviderRequestException ex)
         {
             ex.SentParameters = payload.Keys.ToArray();
+            ex.SentPayload = payload;
             usage.WasRejected = !(usage.HasReportedInput || usage.HasReportedOutput || usage.HasReportedTotal);
             if (usage.WasRejected) { usage.InputTokens = usage.OutputTokens = usage.TotalTokens = 0; usage.IsEstimated = false; }
             throw;
@@ -1474,8 +1568,13 @@ public partial class AiAssistantService
         return output ?? 0;
     }
 
-    private AiAssistantConfig CurrentAccountingConfig =>
-        _persistUsage ? ConfigService.Active?.Config.AiAssistant ?? _config : _config;
+    // Independent floating conversations keep their own work mode, while usage and local limits
+    // still belong to the current main configuration. Never persist the floating config snapshot.
+    internal Func<AiAssistantConfig>? SharedAccountingConfigProvider { get; set; }
+    internal Action? SaveSharedAccounting { get; set; }
+
+    private AiAssistantConfig CurrentAccountingConfig => SharedAccountingConfigProvider?.Invoke()
+        ?? (_persistUsage ? ConfigService.Active?.Config.AiAssistant ?? _config : _config);
 
     private void RecordCompletedUsage(string modelKey, AiRequestUsage usage)
     {
@@ -1484,7 +1583,8 @@ public partial class AiAssistantService
             // Read the current config at completion; saving a settings dialog during a request
             // must not be undone by writing the request's stale configuration snapshot.
             AiUsageAccounting.RecordUsage(CurrentAccountingConfig, modelKey, usage);
-            if (_persistUsage) { try { ConfigService.Active?.Save(); } catch { } }
+            if (SharedAccountingConfigProvider != null) { try { SaveSharedAccounting?.Invoke(); } catch { } }
+            else if (_persistUsage) { try { ConfigService.Active?.Save(); } catch { } }
         }
         try
         {
@@ -1515,6 +1615,7 @@ public partial class AiAssistantService
         internal int Status { get; }
         internal string ProviderDetail { get; }
         internal IReadOnlyCollection<string> SentParameters { get; set; } = Array.Empty<string>();
+        internal IReadOnlyDictionary<string, JsonElement> SentPayload { get; set; } = new Dictionary<string, JsonElement>();
         internal AiProviderRequestException(int status, string detail, string message) : base(message)
         { Status = status; ProviderDetail = detail; }
     }

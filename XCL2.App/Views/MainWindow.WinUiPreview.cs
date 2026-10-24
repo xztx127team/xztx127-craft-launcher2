@@ -126,6 +126,7 @@ public partial class MainWindow
         MaximizeRestoreButton.Visibility = Visibility.Visible;
         if (!WindowChromeService.IsFullScreen) ResizeMode = ResizeMode.CanResize;
         UpdatePreviewNavigationSelection();
+        ApplyResponsiveLayout();
     }
 
     private IEnumerable<(string Page, Button Button)> PreviewBuiltInNavigation()
@@ -212,7 +213,7 @@ public partial class MainWindow
         finally { _updatingPreviewNavigation = false; }
     }
 
-    private void NavPlugins_Click(object sender, RoutedEventArgs e) => OverlayDialogService.ShowModal(new PluginManagerDialog(this));
+    private void NavPlugins_Click(object sender, RoutedEventArgs e) => OpenPluginManager();
     private void RaisePreviewStateChanged()
     {
         if (NativePreviewStateChanged is not { } handlers) return;

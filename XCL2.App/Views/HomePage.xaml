@@ -97,7 +97,7 @@
     </UserControl.Resources>
 
     <Border x:Name="HomeSurface" Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="24,20,24,16">
-        <Grid>
+        <Grid x:Name="HomeLayoutGrid">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
@@ -216,9 +216,9 @@
             </local:RightAlignedWrapPanel>
 
         <ScrollViewer x:Name="HomeScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel VerticalAlignment="Center">
+        <StackPanel x:Name="HomeBodyPanel" VerticalAlignment="Center">
             <TextBlock Text="{DynamicResource Str_Home_Welcome}" FontSize="28" FontWeight="Bold" Foreground="{DynamicResource TextPrimaryBrush}"/>
-            <TextBlock Text="{DynamicResource Str_Home_Subtitle}" FontSize="14" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,24"/>
+            <TextBlock Text="{DynamicResource Str_Home_Subtitle}" TextWrapping="Wrap" FontSize="14" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,24"/>
 
             <Border x:Name="HomeContextHint" Visibility="Collapsed" Margin="0,0,0,16"
                     Padding="12" Background="{DynamicResource SideBrush}" CornerRadius="6">

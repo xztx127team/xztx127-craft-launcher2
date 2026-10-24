@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/BedrockVersionCatalog.cs" Link="BedrockVersionCatalog.cs" />
+    <Compile Include="../../Services/DownloadDisplayFormatting.cs" Link="DownloadDisplayFormatting.cs" />
+    <Compile Include="../../Models/DownloadDisplayUnit.cs" Link="DownloadDisplayUnit.cs" />
+    <None Include="../../Resources/Data/BedrockClientVersionsFallback.json" Link="fallback.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

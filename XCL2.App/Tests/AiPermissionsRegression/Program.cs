@@ -221,6 +221,47 @@ try
     currentMode = AiWorkMode.Chat;
     Check(approval != null && !approval.TryBeginExecution(approvalConfig, Mode(), default, out _),
         "The final admission check rejects a later Chat switch.");
+
+    // UAC is a second, bounded use of an already-approved exact command; it cannot replace admission.
+    currentMode = AiWorkMode.Build;
+    var retryMode = Mode();
+    approval = Request(mode: retryMode);
+    Check(approval != null && !approval.CanRequestElevatedRetry(approvalConfig, retryMode, default, out _),
+        "UAC cannot start a command that was never attempted with the normal one-time permit.");
+    Check(approval!.TryBeginExecution(approvalConfig, retryMode, default, out _), "Normal command attempt consumes its own permit.");
+    Check(approval.CanRequestElevatedRetry(approvalConfig, retryMode, default, out _)
+        && approval.CanRequestElevatedRetry(approvalConfig, retryMode, default, out _),
+        "Checks before a UAC dialog do not consume the post-consent retry permit.");
+    Check(approval.TryBeginElevatedRetry(approvalConfig, retryMode, default, out _)
+        && !approval.TryBeginElevatedRetry(approvalConfig, retryMode, default, out _),
+        "Post-UAC execution has exactly one retry, never an unlimited launch token.");
+    Check(approval.IsStillPermitted(approvalConfig, retryMode, out _), "Running retry can monitor permissions without consuming another launch.");
+    approvalConfig.CommandPermissions.ExactCommands[AiCommandPermissionService.GetCommandKey("powershell", "Get-Content readme.txt")] = false;
+    Check(!approval.IsStillPermitted(approvalConfig, retryMode, out _), "An exact prohibition revokes a running administrator retry.");
+    approvalConfig.CommandPermissions.ExactCommands.Clear();
+    retryMode = Mode(); approval = Request(mode: retryMode);
+    Check(approval != null && approval.TryBeginExecution(approvalConfig, retryMode, default, out _), "Prepare simulated pending-UAC command.");
+    currentMode = AiWorkMode.Plan;
+    Check(!approval!.TryBeginElevatedRetry(approvalConfig, retryMode, default, out _),
+        "Switching to Plan while UAC is pending blocks post-consent authorization.");
+    currentMode = AiWorkMode.Build;
+    Check(!approval.TryBeginElevatedRetry(approvalConfig, retryMode, default, out _),
+        "Switching back cannot upgrade the already-revoked running turn.");
+
+    Check(AiElevationPolicy.ShouldOffer(null, null, new System.ComponentModel.Win32Exception(740)), "Windows elevation-required launch failure can request consent.");
+    Check(AiElevationPolicy.ShouldOffer(1, "Access is denied."), "Actual failed access-denied output can request consent.");
+    Check(!AiElevationPolicy.ShouldOffer(0, "Access is denied."), "Successful output text alone cannot request UAC.");
+    Check(!AiElevationPolicy.ShouldOffer(null, null, new System.ComponentModel.Win32Exception(2)), "Missing executable is not an elevation problem.");
+    Check(!AiElevationPolicy.ShouldOffer(1, "PSSecurityException: running scripts is disabled; Access is denied"), "UAC must not bypass a PowerShell execution policy.");
+    Check(!AiElevationPolicy.ShouldOffer(1, "HTTP 403 Access is denied"), "A network authorization failure must not be treated as local elevation.");
+    Check(!AiElevationPolicy.ShouldOffer(1, "SyntaxError: Access is denied"), "Syntax errors do not request an administrator retry.");
+    var grants = new AiElevationSession();
+    var otherGrants = new AiElevationSession();
+    grants.Allow("same-permissions");
+    Check(grants.Allows("same-permissions") && !otherGrants.Allows("same-permissions") && !grants.Allows("changed-permissions"),
+        "Allow-all belongs only to the exact in-memory conversation and matching permission snapshot.");
+    grants.Clear();
+    Check(!grants.Allows("same-permissions"), "Session grants are revocable and never persisted to global settings.");
     Console.WriteLine($"PASS: {checks} AI permission regression checks");
 }
 finally

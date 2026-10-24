@@ -90,7 +90,7 @@ public static class DirectXRuntimeInstallService
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            throw new OperationCanceledException("未授予管理员权限，DirectX 安装已取消。", ex);
+            throw new DownloadUserCanceledException("未授予管理员权限，DirectX 安装已取消。", ex);
         }
         catch (Exception ex)
         {

@@ -13,7 +13,7 @@ public static class ServerPostInstallPrompt
 {
     public static void AskConfigurePort(MainWindow owner, ServerInstance instance, string headline)
     {
-        owner.EnsureVisibleForDialog();
+        if (!NativeApprovalService.ShouldUseNative) owner.EnsureVisibleForDialog();
         var port = ServerPortService.ReadPort(instance);
         var yes = MessageBoxDialog.ShowConfirm(
             $"{headline}\n\n当前服务器端口：{port}（默认，被占用时会自动避让）。\n" +
@@ -21,6 +21,7 @@ public static class ServerPostInstallPrompt
             "设置服务器端口");
         if (!yes) return;
 
+        owner.EnsureVisibleForDialog();
         var window = new ServerPropertiesWindow(instance, owner.ServerInstanceService, owner.ServerProcessManager);
         window.ShowDialog();
     }

@@ -15,13 +15,15 @@ public enum DownloadQueueItemStatus
     Completed,
     Failed,
     Canceled,
-    Waiting
+    Waiting,
+    Pausing,
+    Canceling
 }
 
 /// <summary>
 /// 标题栏统一任务。暂停会取消当前执行，等待写入和清理真正结束后才允许继续。
-/// 完整且校验通过的文件可复用；单流 .part 在服务端支持 Range 时可续传，
-/// 分片中间态和通用镜像暂存文件会按各自下载器规则清理，不虚称所有任务都能字节续传。
+/// 暂停／取消先确认当前执行停止，再后台清理本任务已登记的临时缓存。
+/// 继续执行复用完整且校验通过的文件，未完成片段重新下载，不删除实例或存档。
 /// </summary>
 public sealed class DownloadQueueItem : INotifyPropertyChanged
 {
@@ -42,12 +44,36 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     private string _taskExplanation = "";
     public string TaskExplanation { get => _taskExplanation; internal set { _taskExplanation = value; OnChanged(); } }
     private readonly System.Diagnostics.Stopwatch _executionWatch = new();
-    public string ActivityText => Status == DownloadQueueItemStatus.Waiting ? "等待执行；可右键调整顺序"
+    private string _stateReason = "";
+    /// <summary>在任务卡常驻显示的停止、失败、占用和重试原因，不依赖通知气泡。</summary>
+    public string StateReason { get => _stateReason; internal set { if (_stateReason == value) return; _stateReason = value; OnChanged(); } }
+    public bool IsStopping => Status is DownloadQueueItemStatus.Pausing or DownloadQueueItemStatus.Canceling;
+    private bool _isCleaningUp;
+    public bool IsCleaningUp
+    {
+        get => _isCleaningUp;
+        internal set { _isCleaningUp = value; OnChanged(); NotifyControls(); }
+    }
+    public string PauseResumeLabel => IsCleaningUp ? "清理中…" : Status switch
+    {
+        DownloadQueueItemStatus.Pausing => "正在暂停…",
+        DownloadQueueItemStatus.Canceling => "正在取消…",
+        DownloadQueueItemStatus.Paused => "继续",
+        DownloadQueueItemStatus.Failed => "重试",
+        _ => "暂停"
+    };
+    public string ActivityText => IsCleaningUp ? "执行已停止，正在清理本任务临时缓存"
+        : Status == DownloadQueueItemStatus.Waiting ? "等待执行；可右键调整顺序"
         : $"已用 {(int)_executionWatch.Elapsed.TotalMinutes}分{_executionWatch.Elapsed.Seconds:00}秒";
     internal void StartTiming() { _lastSampleTime = DateTime.MinValue; _unitsPerSecond = 0; _lastStage = null; _executionWatch.Start(); RefreshTiming(); }
     internal void StopTiming() { _executionWatch.Stop(); RefreshTiming(); }
-    public void RefreshTiming() { OnChanged(nameof(ActivityText)); OnChanged(nameof(TransferStageText)); }
-    public bool CanMoveWaiting => !IsRunning && Status == DownloadQueueItemStatus.Waiting;
+    public void RefreshTiming()
+    {
+        OnChanged(nameof(ActivityText)); OnChanged(nameof(TransferStageText));
+        if (IsRunning && Status == DownloadQueueItemStatus.Downloading)
+            StateReason = TransferObservation.CurrentReason;
+    }
+    public bool CanMoveWaiting => !IsRunning && !IsCleaningUp && Status == DownloadQueueItemStatus.Waiting;
     internal bool BypassScheduler;
 
 
@@ -75,7 +101,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     public DownloadQueueItemStatus Status
     {
         get => _status;
-        set { _status = value; OnChanged(); NotifyControls(); }
+        set { _status = value; OnChanged(); OnChanged(nameof(IsStopping)); NotifyControls(); }
     }
 
     /// <summary>该任务是否允许暂停。安装加载器这类不能安全中断后续传的任务设为 false，界面上不会出现暂停按钮。</summary>
@@ -99,12 +125,16 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
         internal set { _isRunning = value; OnChanged(); NotifyControls(); }
     }
     public bool CanPause => SupportsPause && IsRunning && Status == DownloadQueueItemStatus.Downloading;
-    public bool CanResume => !IsRunning && (Status == DownloadQueueItemStatus.Paused ||
+    public bool CanResume => !IsRunning && !IsCleaningUp && (Status == DownloadQueueItemStatus.Paused ||
         (SupportsRetry && Status == DownloadQueueItemStatus.Failed));
     public bool CanPauseOrResume => CanPause || CanResume;
-    public bool CanCancel => !IsRunning || (SupportsCancel && Status != DownloadQueueItemStatus.Canceled);
+    public bool CanCancel => !IsCleaningUp && !IsStopping && (!IsRunning || SupportsCancel);
     public string CancelLabel => IsRunning || Status == DownloadQueueItemStatus.Paused ? "取消" : "移除";
     internal bool PauseRequested;
+    internal bool CancelRequested;
+    internal string StopReason = "";
+    internal int ExplanationRevision;
+    internal Task CancellationDispatch = Task.CompletedTask;
     internal TaskCompletionSource<DownloadQueueItemStatus> CompletionSource = NewCompletionSource();
     internal static TaskCompletionSource<DownloadQueueItemStatus> NewCompletionSource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -129,7 +159,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     private void NotifyControls()
     {
         OnChanged(nameof(CanPause)); OnChanged(nameof(CanResume)); OnChanged(nameof(CanPauseOrResume));
-        OnChanged(nameof(CanCancel)); OnChanged(nameof(CancelLabel)); OnChanged(nameof(CanMoveWaiting)); OnChanged(nameof(ActivityText));
+        OnChanged(nameof(CanCancel)); OnChanged(nameof(CancelLabel)); OnChanged(nameof(CanMoveWaiting)); OnChanged(nameof(ActivityText)); OnChanged(nameof(PauseResumeLabel));
     }
 
     /// <summary>驱动本次下载的取消令牌源。暂停/取消都通过 Cancel() 它来打断当前
@@ -187,6 +217,7 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
         Name = name;
         Cts = cts;
         ResumeAction = resumeAction;
+        TransferObservation.Changed += () => DownloadQueueService.PostOnUi(RefreshTiming);
     }
 
     // ===== 下载详情（剩余时间/当前速度/大小），见 AppConfig.DownloadPopupShowDetailStats 注释 =====
@@ -203,6 +234,8 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     private double _unitsPerSecond;
     private string? _lastStage;
     private string _progressUnit = "项";
+    private int _detailDone, _detailTotal;
+    private string _currentProgressFile = "";
 
     private string _detailText = "";
     /// <summary>格式化好的详情行文本（剩余时间 · 当前速度 · 大小），按
@@ -216,6 +249,8 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
 
     private void UpdateDetail(int done, int total)
     {
+        _detailDone = done;
+        _detailTotal = total;
         var now = DateTime.UtcNow;
         if (_lastSampleTime != DateTime.MinValue)
         {
@@ -237,6 +272,29 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
             _lastSampleDone = done;
         }
 
+        RenderDetail(done, total);
+    }
+
+    /// <summary>单位设置改变后重新格式化，保留原始进度与速度采样，不伪造新采样。</summary>
+    public void RefreshDisplayUnits()
+    {
+        if (_lastStage == null) return;
+        RenderDetail(_detailDone, _detailTotal);
+        if (IsRunning && Status == DownloadQueueItemStatus.Downloading) RenderProgressStatus();
+    }
+
+    private void RenderProgressStatus()
+    {
+        var counts = _progressUnit == "KiB"
+            ? DownloadTransferPolicy.FormatCapacity((long)_detailDone * 1024) + "/" + DownloadTransferPolicy.FormatCapacity((long)_detailTotal * 1024)
+            : $"{_detailDone}/{_detailTotal}";
+        StatusText = _detailTotal > 0
+            ? $"{_lastStage} {counts}" + (string.IsNullOrEmpty(_currentProgressFile) ? "" : $" {_currentProgressFile}")
+            : _lastStage ?? "正在执行…";
+    }
+
+    private void RenderDetail(int done, int total)
+    {
         var remaining = Math.Max(0, total - done);
         var speedText = _unitsPerSecond > 0.05 ? $"{_unitsPerSecond:0.#} {_progressUnit}/秒" : "速度待计算";
         string etaText;
@@ -265,6 +323,9 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
             var remainingSize = DownloadTransferPolicy.FormatCapacity((long)remaining * 1024);
             sizeText = mode switch { 1 => $"已完成 {finishedSize}/{totalSize}", 2 => $"已完成 {finishedSize}/{totalSize}（剩余 {remainingSize}）", _ => $"剩余 {remainingSize}/{totalSize}" };
             suffix = "";
+            speedText = _unitsPerSecond > 0.05
+                ? DownloadTransferPolicy.FormatCapacity(DownloadDisplayFormatting.KiBToBytes(_unitsPerSecond)) + "/秒"
+                : "速度待计算";
         }
         DetailText = total > 0 ? $"本阶段预计剩余 {etaText} · {speedText} · {sizeText}{suffix}" : "当前阶段没有可计算的总量";
     }
@@ -276,25 +337,38 @@ public sealed class DownloadQueueItem : INotifyPropertyChanged
     /// 这类本来就接受 ProgressInfo 回调的方法（DownloadService、BedrockClientDownloadService、
     /// BedrockContentService 等全项目统一用的这个类型），不需要调用方自己再手写一遍
     /// "算百分比 + 切 UI 线程 + 更新 StatusText" 的样板代码。</summary>
-    public IProgress<ProgressInfo> CreateProgress() => new Progress<ProgressInfo>(info =>
+    public IProgress<ProgressInfo> CreateProgress()
     {
-        if (!IsRunning || Status != DownloadQueueItemStatus.Downloading) return;
-        if (_lastStage != info.Stage || info.Done < _lastSampleDone)
+        var attempt = Cts;
+        return new Progress<ProgressInfo>(info =>
         {
-            _lastStage = info.Stage;
-            _lastSampleTime = DateTime.MinValue;
-            _unitsPerSecond = 0;
-        }
-        _progressUnit = info.Unit;
-        RefreshTiming();
-        IsIndeterminate = info.Total <= 0;
-        var pct = info.Total > 0 ? (double)info.Done / info.Total * 100 : 0;
-        ProgressPercent = Math.Clamp(pct, 0, 100);
-        StatusText = info.Total > 0
-            ? $"{info.Stage} {info.Done}/{info.Total}" + (string.IsNullOrEmpty(info.CurrentFile) ? "" : $" {info.CurrentFile}")
-            : info.Stage;
-        UpdateDetail(info.Done, info.Total);
-    });
+            if (!AcceptProgress(attempt)) return;
+            if (_lastStage != info.Stage || info.Done < _lastSampleDone)
+            {
+                _lastStage = info.Stage;
+                _lastSampleTime = DateTime.MinValue;
+                _unitsPerSecond = 0;
+            }
+            _progressUnit = info.Unit;
+            TransferObservation.ClearIssue();
+            RefreshTiming();
+            IsIndeterminate = info.Total <= 0;
+            var pct = info.Total > 0 ? (double)info.Done / info.Total * 100 : 0;
+            ProgressPercent = Math.Clamp(pct, 0, 100);
+            _currentProgressFile = info.CurrentFile;
+            UpdateDetail(info.Done, info.Total);
+            RenderProgressStatus();
+        });
+    }
+    /// <summary>命令行下载器同样按执行轮次过滤排队中的旧输出。</summary>
+    public IProgress<string> CreateTextProgress()
+    {
+        var attempt = Cts;
+        return new Progress<string>(text => { if (AcceptProgress(attempt)) StatusText = text; });
+    }
+    private bool AcceptProgress(CancellationTokenSource attempt) => ReferenceEquals(Cts, attempt)
+        && IsRunning && Status == DownloadQueueItemStatus.Downloading && !attempt.IsCancellationRequested;
+
 }
 
 /// <summary>
@@ -325,7 +399,7 @@ public sealed partial class DownloadQueueService
     /// <summary>只保留本会话最近的完成任务，供用户主动定位文件；不落盘路径或操作记录。</summary>
     public ObservableCollection<DownloadQueueItem> RecentCompleted { get; } = new();
 
-    public bool HasActive => Items.Any(i => i.IsRunning || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting);
+    public bool HasActive => Items.Any(i => i.IsRunning || i.IsCleaningUp || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting);
 
     /// <summary>
     /// 找出"正在下载/安装 <paramref name="versionId"/> 这个版本"的队列条目，没有就返回 null。
@@ -343,7 +417,7 @@ public sealed partial class DownloadQueueService
         if (string.IsNullOrWhiteSpace(versionId)) return null;
 
         return Items.FirstOrDefault(i =>
-            (i.IsRunning || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting) &&
+            (i.IsRunning || i.IsCleaningUp || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting) &&
             i.TargetsVersion(versionId) &&
             (string.IsNullOrWhiteSpace(i.TargetFolderPath) || string.IsNullOrWhiteSpace(folderPath) ||
              string.Equals(NormalizeFolder(i.TargetFolderPath), NormalizeFolder(folderPath), StringComparison.OrdinalIgnoreCase)));
@@ -418,46 +492,82 @@ public sealed partial class DownloadQueueService
         var completion = item.CompletionSource;
         var previousItem = _currentItem.Value;
         _currentItem.Value = item;
-        RunOnUi(() => { item.Status = DownloadQueueItemStatus.Downloading; item.StatusText = "正在执行…"; });
+        var outcome = DownloadQueueItemStatus.Completed;
+        Exception? failure = null;
+        RunOnUi(() => { item.Status = DownloadQueueItemStatus.Downloading; item.StatusText = "正在执行…"; item.StateReason = ""; });
         try
         {
             await item.ResumeAction(item, attemptCts.Token);
             attemptCts.Token.ThrowIfCancellationRequested();
-            RunOnUi(() =>
-            {
-                item.Status = DownloadQueueItemStatus.Completed;
-                item.StatusText = item.CompletionText ?? "已完成";
-                item.ProgressPercent = 100;
-                item.IsIndeterminate = false;
-            });
         }
-        catch (OperationCanceledException)
+        catch (DownloadUserCanceledException ex)
         {
-            RunOnUi(() =>
-            {
-                item.Status = item.PauseRequested ? DownloadQueueItemStatus.Paused : DownloadQueueItemStatus.Canceled;
-                item.StatusText = item.PauseRequested ? "已暂停" : "已取消";
-            });
+            outcome = DownloadQueueItemStatus.Canceled;
+            item.StopReason = ex.Message;
+        }
+        catch (OperationCanceledException) when (attemptCts.IsCancellationRequested || item.PauseRequested || item.CancelRequested)
+        {
+            outcome = item.PauseRequested ? DownloadQueueItemStatus.Paused : DownloadQueueItemStatus.Canceled;
+        }
+        catch (OperationCanceledException ex)
+        {
+            // 只有确认的 HttpClient 超时才说超时；未知 OCE 保留原始停止原因，不能虚构用户取消。
+            outcome = DownloadQueueItemStatus.Failed;
+            failure = ex is TaskCanceledException && ex.InnerException is TimeoutException
+                ? new TimeoutException("连接或传输超时，下载已停止。请检查网络或下载源后重试。 " + ex.Message, ex)
+                : new InvalidOperationException("任务意外停止，下载未完成：" + ex.Message, ex);
         }
         catch (Exception ex)
         {
-            RunOnUi(() =>
-            {
-                item.LastError = ex;
-                item.Status = DownloadQueueItemStatus.Failed;
-                item.StatusText = $"失败：{ex.Message}";
-            });
+            if (attemptCts.IsCancellationRequested || item.PauseRequested || item.CancelRequested)
+                outcome = item.PauseRequested ? DownloadQueueItemStatus.Paused : DownloadQueueItemStatus.Canceled;
+            else { outcome = DownloadQueueItemStatus.Failed; failure = ex; }
         }
         finally
         {
-            var explanation = await Task.Run(item.TransferObservation.Summary);
-            RunOnUi(() => { item.TaskExplanation = explanation; item.StopTiming(); item.IsRunning = false; item.IsIndeterminate = false; PersistRecovery(); });
+            // CancelAsync 的回调也属于本次执行，必须真实收尾后才能允许下一轮写入。
+            await item.CancellationDispatch;
+            if (item.PauseRequested || item.CancelRequested)
+                outcome = item.PauseRequested ? DownloadQueueItemStatus.Paused : DownloadQueueItemStatus.Canceled;
+            var stopped = outcome is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Canceled;
+            RunOnUi(() =>
+            {
+                item.LastError = failure;
+                item.Status = outcome;
+                item.StopTiming();
+                if (stopped && string.IsNullOrWhiteSpace(item.StopReason))
+                    item.StopReason = outcome == DownloadQueueItemStatus.Paused ? "用户请求暂停" : "用户请求取消";
+                item.IsCleaningUp = stopped;
+                item.IsRunning = false;
+                item.IsIndeterminate = false;
+                if (outcome == DownloadQueueItemStatus.Completed)
+                {
+                    item.StatusText = item.CompletionText ?? "已完成";
+                    item.StateReason = "";
+                    item.ProgressPercent = 100;
+                }
+                else if (outcome == DownloadQueueItemStatus.Failed)
+                {
+                    item.StatusText = "下载失败，执行已停止";
+                    item.StateReason = FailureReason(failure);
+                }
+                else
+                {
+                    item.StatusText = outcome == DownloadQueueItemStatus.Paused ? "已暂停 · 正在清理临时缓存" : "已取消 · 正在清理临时缓存";
+                    item.StateReason = item.StopReason +
+                        "；下载和写入已经停止，正在后台清理本任务临时缓存。完整且校验通过的文件保留。";
+                }
+                PersistRecovery();
+                PumpWaiting(); // 无关任务不必等待本任务的缓存扫描。
+            });
+            if (stopped) await CleanupStoppedItemAsync(item);
+            else _ = RefreshFileExplanationAsync(item, attemptCts);
             _currentItem.Value = previousItem;
-            completion.TrySetResult(item.Status);
+            completion.TrySetResult(outcome);
             attemptCts.Dispose();
             RunOnUi(PumpWaiting);
         }
-        if (item.Status == DownloadQueueItemStatus.Completed)
+        if (outcome == DownloadQueueItemStatus.Completed)
         {
             RunOnUi(() =>
             {
@@ -487,8 +597,8 @@ public sealed partial class DownloadQueueService
             // 取消回调不能同步等待 UI；否则 UI Dispose(registration) 与 Dispatcher.Invoke 会互等。
             var dispatcher = Application.Current?.Dispatcher;
             if (dispatcher != null && !dispatcher.CheckAccess())
-                dispatcher.BeginInvoke(new Action(() => Cancel(item)));
-            else Cancel(item);
+                dispatcher.BeginInvoke(new Action(() => CancelFromCaller(item)));
+            else CancelFromCaller(item);
         }) : default;
         var status = await item.Completion;
         ct.ThrowIfCancellationRequested();
@@ -562,13 +672,22 @@ public sealed partial class DownloadQueueService
         {
             entry.Status = DownloadQueueItemStatus.Paused;
             entry.StatusText = "排队已暂停，本次执行尚未开始";
+            entry.StopReason = "用户请求暂停排队";
+            entry.StateReason = "用户请求暂停排队；正在清理本任务此前记录的临时缓存，完整文件保留。";
             entry.IsIndeterminate = false;
-            entry.CompletionSource.TrySetResult(DownloadQueueItemStatus.Paused);
+            entry.IsCleaningUp = true;
+            _ = CompleteWaitingPauseAsync(entry);
         }
         var entries = Items.Where(item => item.CanPause).ToArray();
         foreach (var entry in entries) Pause(entry);
         PersistRecovery();
         return waiting.Length + entries.Length;
+    }
+    private async Task CompleteWaitingPauseAsync(DownloadQueueItem item)
+    {
+        var completion = item.CompletionSource;
+        await CleanupStoppedItemAsync(item);
+        completion.TrySetResult(DownloadQueueItemStatus.Paused);
     }
     public int CancelSelectedWaiting(IEnumerable<DownloadQueueItem> selected)
     {
@@ -580,9 +699,38 @@ public sealed partial class DownloadQueueService
     public void Pause(DownloadQueueItem item)
     {
         if (!item.CanPause) return;
-        item.PauseRequested = true;
-        item.StatusText = "正在暂停...";
-        item.Cts.Cancel();
+        RequestStop(item, pause: true);
+    }
+
+    private static void RequestStop(DownloadQueueItem item, bool pause)
+    {
+        item.PauseRequested = pause;
+        item.CancelRequested = !pause;
+        item.StopReason = pause ? "用户请求暂停" : "用户请求取消";
+        item.Status = pause ? DownloadQueueItemStatus.Pausing : DownloadQueueItemStatus.Canceling;
+        item.StatusText = pause ? "正在暂停…" : "正在取消…";
+        item.StateReason = (pause ? "用户请求暂停" : "用户请求取消") +
+            "；正在停止当前连接和写入，确认停止后会自动清理本任务临时缓存。";
+        item.IsIndeterminate = false;
+        // .NET 8 CancelAsync 立即设置令牌状态，在后台执行取消回调，避免 UI 同步卡在 socket/插件清理中。
+        var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        item.CancellationDispatch = dispatched.Task;
+        _ = DispatchCancellationAsync(item.Cts, dispatched);
+    }
+    private static async Task DispatchCancellationAsync(CancellationTokenSource source, TaskCompletionSource completion)
+    {
+        try { await source.CancelAsync().ConfigureAwait(false); }
+        catch (Exception ex) { LauncherLogService.AppendLine("[下载停止] 取消回调异常：" + ex.GetType().Name); }
+        finally { completion.TrySetResult(); }
+    }
+    private static string FailureReason(Exception? failure)
+    {
+        if (failure == null) return "任务发生错误，下载已停止。";
+        var messages = new List<string>();
+        for (var current = failure; current != null && messages.Count < 20; current = current.InnerException)
+            if (!string.IsNullOrWhiteSpace(current.Message) && !messages.Contains(current.Message)) messages.Add(current.Message);
+        if (messages.Count > 4) messages = messages.Take(2).Concat(messages.TakeLast(2)).ToList();
+        return string.Join("；原因：", messages);
     }
 
     public void Resume(DownloadQueueItem item)
@@ -591,10 +739,13 @@ public sealed partial class DownloadQueueService
         var active = FindActiveForVersion(item.TargetFolderPath, item.TargetVersionId);
         if (active != null && active != item)
         {
-            ToastService.ShowInfo("该版本已有下载或补全任务，请等待它结束后重试。");
+            item.StateReason = "该版本已有其他下载或补全任务；请等待该任务结束后继续。";
             return;
         }
         item.PauseRequested = false;
+        item.CancelRequested = false;
+        item.StopReason = "";
+        item.CancellationDispatch = Task.CompletedTask;
         item.LastError = null;
         item.CompletionText = null;
         item.Cts.Dispose();
@@ -602,76 +753,119 @@ public sealed partial class DownloadQueueService
         item.CompletionSource = DownloadQueueItem.NewCompletionSource();
         item.Status = DownloadQueueItemStatus.Waiting;
         item.StatusText = "等待执行";
+        item.StateReason = "";
+        item.TransferObservation.ClearIssue();
         PersistRecovery();
         PumpWaiting();
     }
 
+    private void CancelFromCaller(DownloadQueueItem item)
+    {
+        if (item.IsRunning && !item.SupportsCancel && !item.IsStopping)
+        {
+            RequestStop(item, pause: false);
+            item.StopReason = "调用方已取消；系统安装程序不能安全强制中止，已等待其真实退出";
+            item.StateReason = "调用方已取消；系统安装程序不能安全强制中止，正在等待它真实退出，再清理临时缓存。";
+            PersistRecovery();
+        }
+        else Cancel(item);
+    }
     public void Cancel(DownloadQueueItem item)
     {
         if (!item.CanCancel) return;
-        if (!item.IsRunning)
+        if (item.IsRunning) { RequestStop(item, pause: false); PersistRecovery(); return; }
+        if (item.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting)
         {
-            if (item.Status == DownloadQueueItemStatus.Paused)
-            {
-                // 暂停已经结束了上次执行。取消只放弃后续继续，已有文件保留。
-                item.PauseRequested = false;
-                item.Status = DownloadQueueItemStatus.Canceled;
-                item.StatusText = "已取消后续下载；已有文件保留";
-                item.TaskExplanation = "已取消后续下载，未删除已有文件。\n" + item.TaskExplanation;
-                item.CompletionSource.TrySetResult(DownloadQueueItemStatus.Canceled);
-                item.Cts.Dispose();
-                PersistRecovery();
-                _ = RefreshCanceledFileExplanationAsync(item);
-                // 保留说明和清理入口；下一次点击「移除」才收起该行。
-                return;
-            }
-            if (item.Status == DownloadQueueItemStatus.Waiting)
-            {
-                // 「本次」排队尚未执行；此前暂停/重试留下的文件仍可能存在。
-                item.Status = DownloadQueueItemStatus.Canceled;
-                item.StatusText = "已取消排队；本次执行尚未开始";
-                item.TaskExplanation = "本次排队未执行，未新增文件；此前已有的文件不会因取消而删除。\n" + item.TaskExplanation;
-                item.CompletionSource.TrySetResult(DownloadQueueItemStatus.Canceled);
-                item.Cts.Dispose();
-            }
-            // 完成、失败或已取消的行仅移出列表，保留原结果，避免额外记录一次「取消」。
-            Items.Remove(item);
+            var waiting = item.Status == DownloadQueueItemStatus.Waiting;
+            item.PauseRequested = false;
+            item.CancelRequested = true;
+            item.StopReason = "用户请求取消";
+            item.Status = DownloadQueueItemStatus.Canceled;
+            item.StatusText = waiting ? "已取消排队；本次执行尚未开始" : "已取消后续下载";
+            item.StateReason = "用户请求取消；执行已经停止，正在清理本任务记录的临时缓存。完整文件保留。";
+            item.IsCleaningUp = true;
+            item.Cts.Dispose();
+            // 已暂停轮次的 Completion 保留其原始结果；排队轮次会在缓存清理后完成。
+            _ = CompleteInactiveCancellationAsync(item);
             PersistRecovery();
             return;
         }
-        item.PauseRequested = false;
-        item.Status = DownloadQueueItemStatus.Canceled;
-        item.StatusText = "正在取消...";
-        item.Cts.Cancel();
+        // 已结束条目只移出列表，保留真实结果及已完成的 Completion。
+        Items.Remove(item);
+        PersistRecovery();
+    }
+    private async Task CompleteInactiveCancellationAsync(DownloadQueueItem item)
+    {
+        var completion = item.CompletionSource;
+        await CleanupStoppedItemAsync(item);
+        completion.TrySetResult(DownloadQueueItemStatus.Canceled);
+        RunOnUi(PumpWaiting);
     }
 
-    private static async Task RefreshCanceledFileExplanationAsync(DownloadQueueItem item)
+    private static async Task RefreshFileExplanationAsync(DownloadQueueItem item, CancellationTokenSource attempt)
     {
+        var revision = item.ExplanationRevision;
         var summary = await Task.Run(item.TransferObservation.Summary);
-        RunOnUi(() =>
-        {
-            if (item.Status == DownloadQueueItemStatus.Canceled)
-                item.TaskExplanation = "已取消后续下载，未删除已有文件。\n" + summary;
-        });
+        RunOnUi(() => { if (ReferenceEquals(item.Cts, attempt) && !item.IsCleaningUp && item.ExplanationRevision == revision) item.TaskExplanation = summary; });
     }
+    private Task CleanupStoppedItemAsync(DownloadQueueItem item) => CleanupItemCacheAsync(item);
 
     private bool _pumpingWaiting;
-    private bool _cleaningRecordedParts;
-    public async Task<int> CleanupRecordedPartsAsync(DownloadQueueItem item)
+    public Task<int> CleanupRecordedPartsAsync(DownloadQueueItem item)
     {
         RunOnUi(() =>
         {
-            if (_cleaningRecordedParts || HasActive) throw new InvalidOperationException("请先结束其他下载任务，再清理续传文件。");
-            _cleaningRecordedParts = true;
+            if (item.IsRunning || item.IsStopping || item.IsCleaningUp)
+                throw new InvalidOperationException("请先停止本任务并等待本任务的缓存清理完成。");
+            item.IsCleaningUp = true;
+            item.StateReason = "正在后台清理本任务记录的临时缓存；完整文件保留。";
         });
-        try { return await Task.Run(item.TransferObservation.DeleteResumableFiles); }
-        finally { RunOnUi(() => { _cleaningRecordedParts = false; PumpWaiting(); }); }
+        return CleanupItemCacheAsync(item);
+    }
+    private async Task<int> CleanupItemCacheAsync(DownloadQueueItem item)
+    {
+        var oldText = item.StatusText;
+        item.ExplanationRevision++;
+        try
+        {
+            var result = await Task.Run(async () =>
+            {
+                var cleaned = await item.TransferObservation.DeleteRecordedTemporaryFilesAsync().ConfigureAwait(false);
+                return (Cleaned: cleaned, Summary: item.TransferObservation.Summary());
+            });
+            RunOnUi(() =>
+            {
+                var label = item.Status == DownloadQueueItemStatus.Paused ? "已暂停" : item.Status == DownloadQueueItemStatus.Canceled ? "已取消" : oldText;
+                // 排队取消仍明确这次没有开始，不能因清理历史缓存改写事实。
+                if (oldText.Contains("本次执行尚未开始")) label = oldText;
+                item.StatusText = label;
+                item.StateReason = (item.Status == DownloadQueueItemStatus.Failed ? FailureReason(item.LastError) + "；" :
+                    string.IsNullOrWhiteSpace(item.StopReason) ? "" : item.StopReason + "；") +
+                    $"已清理本任务临时文件 {result.Cleaned.Deleted} 个；完整文件保留。" +
+                    (result.Cleaned.Retained == 0 ? "" : $"另有 {result.Cleaned.Retained} 个临时文件未清理：{result.Cleaned.Reason}");
+                item.TaskExplanation = item.StateReason + "\n" + result.Summary;
+            });
+            return result.Cleaned.Deleted;
+        }
+        catch (Exception ex)
+        {
+            RunOnUi(() =>
+            {
+                item.StatusText = item.Status == DownloadQueueItemStatus.Paused ? "已暂停" : item.Status == DownloadQueueItemStatus.Canceled ? "已取消" : oldText;
+                item.StateReason = (item.Status == DownloadQueueItemStatus.Failed ? FailureReason(item.LastError) + "；" :
+                    string.IsNullOrWhiteSpace(item.StopReason) ? "" : item.StopReason + "；") +
+                    "执行已停止，临时缓存清理未完成：" + ex.Message + "；完整文件保留，可稍后重试清理。";
+                item.TaskExplanation = item.StateReason;
+            });
+            return 0;
+        }
+        finally { RunOnUi(() => { item.IsCleaningUp = false; PersistRecovery(); PumpWaiting(); }); }
     }
     /// <summary>只改变尚未开始的任务；运行中任务、单文件并发数和安装阶段不受排序影响。</summary>
     public void RefreshScheduling() => RunOnUi(PumpWaiting);
     private void PumpWaiting()
     {
-        if (_pumpingWaiting || _cleaningRecordedParts) return;
+        if (_pumpingWaiting) return;
         _pumpingWaiting = true;
         try
         {
@@ -703,6 +897,12 @@ public sealed partial class DownloadQueueService
         return failed.Length;
     }
 
+    internal static void PostOnUi(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher != null && !dispatcher.CheckAccess()) dispatcher.BeginInvoke(action);
+        else action();
+    }
     private static void RunOnUi(Action action)
     {
         var app = Application.Current;

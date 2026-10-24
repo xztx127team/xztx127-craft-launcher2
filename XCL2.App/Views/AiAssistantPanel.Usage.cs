@@ -36,7 +36,8 @@ public partial class AiAssistantPanel
             AiRoutingMode.Expert => _config.ExpertModelId,
             _ => _config.NormalModelId
         } : string.IsNullOrWhiteSpace(current.ModelKey) ? current.Model : current.ModelKey;
-        var settings = AiUsageAccounting.Settings(_config, currentModelKey);
+        var accountingConfig = IsFloatingBetaView ? ConfigService.Active?.Config.AiAssistant ?? _config : _config;
+        var settings = AiUsageAccounting.Settings(accountingConfig, currentModelKey);
         QuotaUsageText.Text = "模型本地配额：" + (settings.TokenQuota is long quota
             ? $"{settings.UsedTokens:N0} / {quota:N0} token，剩余 {Math.Max(0, quota - settings.UsedTokens):N0}"
             : "未设置 Token 配额") + "\n美元预算：" + (settings.BudgetUsd is decimal budget

@@ -15,9 +15,13 @@ internal static class AiUsageAccounting
         if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("usage", out var usage)
             || usage.ValueKind != JsonValueKind.Object) return null;
         var input = Read(usage, "prompt_tokens") ?? Read(usage, "input_tokens");
+        var cacheRead = Read(usage, "cache_read_input_tokens");
+        var cacheCreation = Read(usage, "cache_creation_input_tokens");
+        if (input.HasValue && (cacheRead.HasValue || cacheCreation.HasValue))
+            input += (cacheRead ?? 0) + (cacheCreation ?? 0);
         var output = Read(usage, "completion_tokens") ?? Read(usage, "output_tokens");
         var total = Read(usage, "total_tokens");
-        long? cached = Read(usage, "prompt_cache_hit_tokens");
+        long? cached = Read(usage, "prompt_cache_hit_tokens") ?? cacheRead;
         foreach (var key in new[] { "prompt_tokens_details", "input_tokens_details" })
             if (usage.TryGetProperty(key, out var details) && details.ValueKind == JsonValueKind.Object)
                 cached ??= Read(details, "cached_tokens");

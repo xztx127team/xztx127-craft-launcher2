@@ -29,7 +29,7 @@ static async Task Until(Func<bool> predicate, string message)
 }
 static Task Download(DownloadService service, string path, string sha1, CancellationToken ct = default) =>
     (Task)typeof(DownloadService).GetMethod("DownloadFileAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
-        .Invoke(service, new object[] { "https://downloads.example.org/file.bin", path, sha1, ct, true })!;
+        .Invoke(service, new object[] { "https://fixture-" + Guid.NewGuid().ToString("N") + ".example.org/file.bin", path, sha1, ct, true })!;
 static async Task ExpectCanceled(Task operation)
 {
     try { await operation.WaitAsync(TimeSpan.FromSeconds(5)); }
@@ -128,7 +128,9 @@ try
             var head = Bytes(Array.Empty<byte>()); head.Content.Headers.ContentLength = payload.Length;
             head.Headers.AcceptRanges.Add("bytes"); return Task.FromResult(head);
         }
-        var requested = request.Headers.Range!.Ranges.Single();
+        // 没有来源哈希时必须保留单流，也要检测 HEAD 宣称的大文件被截断。
+        if (request.Headers.Range == null) return Task.FromResult(Bytes(new byte[1]));
+        var requested = request.Headers.Range.Ranges.Single();
         var from = requested.From!.Value; var to = requested.To!.Value;
         var truncated = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new ByteArrayContent(new byte[1]) };
         truncated.Content.Headers.ContentRange = new ContentRangeHeaderValue(from, to, payload.Length);
@@ -155,9 +157,9 @@ try
         }
         if (request.Headers.Range != null)
         {
-            var partial = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new UnknownLengthContent(payload[16..20]) };
-            partial.Content.Headers.ContentRange = new ContentRangeHeaderValue(16, payload.Length - 1, payload.Length);
-            return Task.FromResult(partial);
+            var partialResponse = new HttpResponseMessage(HttpStatusCode.PartialContent) { Content = new UnknownLengthContent(payload[16..20]) };
+            partialResponse.Content.Headers.ContentRange = new ContentRangeHeaderValue(16, payload.Length - 1, payload.Length);
+            return Task.FromResult(partialResponse);
         }
         return Task.FromResult(Bytes(payload));
     })))
@@ -270,6 +272,8 @@ try
         releaseProbe.Set();
         await Until(() => Volatile.Read(ref finishedProbes) == 1, "Canceled monitor retained its completed process probe.");
     }
+    await DownloadBatchCases.RunAsync(root);
+    await DownloadAccelerationCases.RunAsync(root);
     Console.WriteLine("DownloadFileRegression passed: actual transfer fallback, target ownership, cancellation, child process, periodic game state.");
 }
 finally { Directory.Delete(root, recursive: true); }

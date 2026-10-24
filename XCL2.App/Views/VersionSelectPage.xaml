@@ -113,22 +113,38 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" Text="{DynamicResource Str_Ui_Installed_Versions}" FontSize="18" FontWeight="Bold" VerticalAlignment="Center" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                        <Button Grid.Column="1" Content="筛选" Padding="10,6" Margin="0,0,8,0" ToolTip="按名称、备注、标签或收藏筛选实例" Click="ToggleInstanceFilter_Click"/>
-                        <Button Grid.Column="2" Content="{DynamicResource Str_Ui_Install_New_Version}" Style="{StaticResource PrimaryButton}"
+                        <Button Grid.Column="1" Content="{DynamicResource Str_Ui_Install_New_Version}" Style="{StaticResource PrimaryButton}"
                                 Padding="12,6" Click="InstallNewVersion_Click"/>
                     </Grid>
 
-                    <Grid x:Name="InstanceFilterRow" DockPanel.Dock="Top" Margin="0,0,0,10" Visibility="Collapsed">
+                    <!-- 实例搜索始终可见，和顶部的“搜索功能”明确分开。 -->
+                    <Grid x:Name="InstanceFilterRow" DockPanel.Dock="Top" Margin="0,0,0,10">
                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="112"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                        <TextBox x:Name="InstanceFilterBox" MinWidth="80" MinHeight="32" VerticalContentAlignment="Center" Margin="0,0,8,0"
-                                 ToolTip="搜索实例名称、版本、标签和备注" AutomationProperties.Name="搜索实例名称、版本、标签和备注" TextChanged="InstanceFilter_Changed"/>
+                        <Grid Margin="0,0,8,0">
+                            <TextBox x:Name="InstanceFilterBox" MinWidth="80" MinHeight="32" VerticalContentAlignment="Center"
+                                     ToolTip="在当前文件夹中搜索实例名称、实例 ID、版本、标签和备注；按 Esc 清除搜索"
+                                     AutomationProperties.Name="搜索实例名称或实例 ID" TextChanged="InstanceFilter_Changed" PreviewKeyDown="InstanceFilterBox_PreviewKeyDown"/>
+                            <TextBlock Text="搜索实例名称或版本…" Margin="10,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       Foreground="{DynamicResource TextSecondaryBrush}" IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Text, ElementName=InstanceFilterBox}" Value="">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
                         <ComboBox x:Name="InstanceScopeBox" Grid.Column="1" MinHeight="32" SelectedIndex="0" ToolTip="显示全部、收藏或最近启动的实例" AutomationProperties.Name="实例筛选范围" SelectionChanged="InstanceFilter_Changed">
                             <ComboBoxItem Content="全部实例"/><ComboBoxItem Content="已收藏"/><ComboBoxItem Content="最近使用"/>
                         </ComboBox>
-                        <Button Grid.Column="2" Content="清除" Margin="8,0,0,0" Padding="10,5" ToolTip="清除筛选条件" Click="ClearInstanceFilter_Click"/>
+                        <Button x:Name="ClearInstanceFilterButton" Grid.Column="2" Content="清除" Margin="8,0,0,0" Padding="10,5"
+                                IsEnabled="False" ToolTip="清除搜索词和筛选条件" AutomationProperties.Name="清除实例搜索和筛选" Click="ClearInstanceFilter_Click"/>
                     </Grid>
                     <TextBlock x:Name="InstanceEmptyMessage" DockPanel.Dock="Top" Visibility="Collapsed" TextWrapping="Wrap"
                                Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,12"/>

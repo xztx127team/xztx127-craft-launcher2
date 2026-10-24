@@ -28,7 +28,7 @@ public partial class SettingsPage
             Name = "AprilFoolsCodeButton", Content = "输入彩蛋码",
             HorizontalAlignment = HorizontalAlignment.Left,
             Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(0, 0, 0, 12),
-            ToolTip = "验证彩蛋码后，在本次关闭窗口中跳过文字游戏和闯关"
+            ToolTip = "直接打开闯关窗口中的彩蛋码输入区；右侧可查看本次启动密码"
         };
         codeButton.SetResourceReference(StyleProperty, "SecondaryButton");
         codeButton.Click += (_, _) => RequestAprilFoolsClose(promptForCode: true);
@@ -53,22 +53,23 @@ public partial class SettingsPage
         try
         {
             if (!IsLoaded || _suppressDirtyTracking) return;
-            string? easterEggCode = null;
-            if (promptForCode)
-            {
-                var input = new AprilFoolsCodeDialog(_owner);
-                if (await OverlayDialogService.ShowModalAsync(input) != true || !IsLoaded) return;
-                easterEggCode = input.Code;
-            }
-            using var challenge = new AprilFoolsExitChallengeDialog(_owner, easterEggCode);
+            using var challenge = new AprilFoolsExitChallengeDialog(_owner, focusCodeEntry: promptForCode);
             if (await OverlayDialogService.ShowModalAsync(challenge) != true || !IsLoaded) return;
+            var cfg = _owner.ConfigService.Config;
+            var previous = cfg.EnableAprilFoolsEasterEggs;
+            cfg.EnableAprilFoolsEasterEggs = false;
+            _uxSavingSettings = true;
+            try { _owner.ConfigService.Save(); }
+            catch { cfg.EnableAprilFoolsEasterEggs = previous; throw; }
+            finally { _uxSavingSettings = false; }
             _applyingAprilFoolsClose = true;
             try { RunWithoutDirtyTracking(() => _aprilFoolsToggle!.IsChecked = false); }
             finally { _applyingAprilFoolsClose = false; }
+            MarkAprilFoolsCloseAsSaved();
             AprilFoolsService.DismissForToday();
             UpdateUxChangeSummary();
             OnSettingsEdited();
-            ToastService.ShowSuccess("本次整蛊已停止。关闭总开关的更改将按当前设置的保存方式生效。");
+            ToastService.ShowSuccess("愚人节彩蛋已关闭并保存，本次整蛊已停止。");
         }
         catch (Exception ex)
         {
@@ -78,48 +79,31 @@ public partial class SettingsPage
         finally { _aprilFoolsCloseFlowOpen = false; }
     }
 
-    private sealed class AprilFoolsCodeDialog : OverlayDialogControl
+    private void MarkAprilFoolsCloseAsSaved()
     {
-        internal string? Code { get; private set; }
-
-        internal AprilFoolsCodeDialog(MainWindow owner)
+        // Only this explicit close action is committed; other settings drafts and their rollback
+        // state keep following the user's chosen manual/automatic saving behavior.
+        var name = _aprilFoolsToggle!.Name;
+        var current = BuildSettingsUiFingerprint();
+        bool Affected(string line)
         {
-            Width = Math.Min(480, Math.Max(300, owner.ActualWidth - 100));
-            MaxHeight = Math.Max(260, owner.ActualHeight - 90);
-            var panel = new StackPanel { Margin = new Thickness(22) };
-            panel.Children.Add(new TextBlock { Text = "输入彩蛋码", FontSize = 20, FontWeight = FontWeights.SemiBold });
-            panel.Children.Add(new TextBlock
-            {
-                Text = "验证成功后将打开关闭确认窗口，可直接关闭愚人节彩蛋。本次取消后需重新输入。",
-                TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 12)
-            });
-            var input = new TextBox { MaxLength = 64, Padding = new Thickness(8), MinHeight = 32 };
-            System.Windows.Automation.AutomationProperties.SetName(input, "彩蛋码");
-            var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0), Visibility = Visibility.Collapsed };
-            error.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
-            void Verify()
-            {
-                if (!AprilFoolsExitChallengeState.IsShortcutCode(input.Text))
-                {
-                    error.Text = "彩蛋码不正确，请重新输入。";
-                    error.Visibility = Visibility.Visible;
-                    input.SelectAll(); input.Focus();
-                    return;
-                }
-                Code = input.Text.Trim();
-                CloseWith(true);
-            }
-            input.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; Verify(); } };
-            panel.Children.Add(input); panel.Children.Add(error);
-            var actions = new WrapPanel { Margin = new Thickness(0, 14, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
-            var cancel = new Button { Content = "取消", Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(0, 0, 8, 0) };
-            var confirm = new Button { Content = "验证并打开关闭窗口", Padding = new Thickness(12, 6, 12, 6) };
-            cancel.SetResourceReference(StyleProperty, "SecondaryButton");
-            confirm.SetResourceReference(StyleProperty, "PrimaryButton");
-            cancel.Click += (_, _) => CloseWith(false); confirm.Click += (_, _) => Verify();
-            actions.Children.Add(cancel); actions.Children.Add(confirm); panel.Children.Add(actions);
-            Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            Loaded += (_, _) => input.Focus();
+            var fields = line.Split('|');
+            return fields.Length > 1 && fields[1] == name;
         }
+        _lastSavedUiFingerprint = string.Join("\n", _lastSavedUiFingerprint.Split('\n').Where(line => !Affected(line))
+            .Concat(current.Split('\n').Where(Affected)).OrderBy(line => line, StringComparer.Ordinal));
+        _lastPolledFingerprint = current;
+        if (_preAutoSaveSnapshotJson != null)
+        {
+            var snapshot = System.Text.Json.JsonSerializer.Deserialize<XCL2.App.Models.AppConfig>(_preAutoSaveSnapshotJson);
+            if (snapshot != null)
+            {
+                snapshot.EnableAprilFoolsEasterEggs = false;
+                _preAutoSaveSnapshotJson = System.Text.Json.JsonSerializer.Serialize(snapshot);
+            }
+        }
+        _hasUnsavedChanges = !string.Equals(current, _lastSavedUiFingerprint, StringComparison.Ordinal);
+        if (!_hasUnsavedChanges) ToastService.DismissActionPrompt("settings-dirty");
+        SyncUxExternallySavedControls(new[] { name });
     }
 }

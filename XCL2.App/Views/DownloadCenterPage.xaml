@@ -167,6 +167,13 @@
                         <TextBlock Text="{DynamicResource Str_Ui_Game_Version}" Margin="8,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                 </RadioButton>
+                <RadioButton x:Name="CatBedrock" Style="{StaticResource DownloadCategoryButton}"
+                             Checked="Category_Checked" Tag="bedrock">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="▦" VerticalAlignment="Center"/>
+                        <TextBlock Text="基岩版" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </RadioButton>
                 <RadioButton x:Name="CatMod" Style="{StaticResource DownloadCategoryButton}"
                              Checked="Category_Checked" Tag="mod">
                     <StackPanel Orientation="Horizontal">
@@ -649,6 +656,25 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
+                            <StackPanel x:Name="BedrockFavoritesPanel" Margin="0,16,0,0" Visibility="Collapsed">
+                                <TextBlock Text="基岩版版本" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                <ItemsControl x:Name="BedrockFavoritesList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource SideBrush}" CornerRadius="10" Padding="14" Margin="0,0,0,8">
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" Content="选择版本" Tag="{Binding}" Click="OpenBedrockFavorite_Click"
+                                                            Style="{StaticResource SecondaryButton}" Margin="12,0,0,0"/>
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </StackPanel>
                     </ScrollViewer>
 
@@ -656,6 +682,9 @@
                                FontSize="13" Foreground="{DynamicResource TextSecondaryBrush}"
                                HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                 </Grid>
+
+                <ContentControl x:Name="BedrockDownloadHost" Visibility="Collapsed"
+                                HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/>
 
                 <!-- ===== 地图分类：接入 CurseForge（Modrinth 没有对应分类） ===== -->
                 <Grid x:Name="MapPanel" services:PageTransitionBehavior.AnimateOnVisible="True" DockPanel.Dock="Top" Visibility="Collapsed" Background="{DynamicResource PanelBrush}">

@@ -569,6 +569,9 @@ public partial class App : Application
         // ShutdownMode=OnExplicitShutdown"而退出。
         splash.SetStatus("正在构建主界面…");
         var mainWindow = new Views.MainWindow();
+        // WPF 会把最先创建的启动提示窗记作 MainWindow；关闭它不会自动改为启动器。
+        // 在任何 Loaded/ContentRendered 回调前切换宿主，避免页面的主窗口检查静默返回。
+        MainWindow = mainWindow;
 
         // 不再在 OnStartup 这条同步 UI 调用栈里强制 mainWindow.UpdateLayout() +
         // Dispatcher.Invoke(Render)。那种“为了保证首帧而强制同步渲染”的做法会让整个主窗口

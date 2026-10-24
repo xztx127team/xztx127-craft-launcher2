@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using XCL2.App.Services;
@@ -36,6 +37,7 @@ public partial class StickyNoteWindow : Window, IGlobalWindowTreatmentExempt
     private readonly string _filePath;
     private readonly DispatcherTimer _saveTimer;
     private bool _suppressSave;
+    private bool _dirty;
     private string _styleKey = "Yellow";
 
     public string FilePath => _filePath;
@@ -69,16 +71,72 @@ public partial class StickyNoteWindow : Window, IGlobalWindowTreatmentExempt
 
         _suppressSave = true;
         try { ContentBox.Text = File.Exists(filePath) ? File.ReadAllText(filePath) : ""; }
-        catch { ContentBox.Text = ""; }
+        catch (Exception ex)
+        {
+            ContentBox.Text = "";
+            ContentBox.IsReadOnly = true;
+            TitleText.ToolTip = "便签读取失败，已暂停编辑以保护原文件：" + ex.Message;
+            ToastService.ShowWarning("便签读取失败，未覆盖原文件：" + ex.Message);
+        }
         _suppressSave = false;
 
         ApplyStyle(string.IsNullOrWhiteSpace(styleKey) ? ReadStyleKey(filePath) : styleKey!, persist: false);
+        NoteCard.ContextMenu = CreateNoteMenu(includeEditing: false);
+        ContentBox.ContextMenu = CreateNoteMenu(includeEditing: true);
+        TitleBar.ToolTip = "按住标题栏拖动；右键可直接选择便签配色、设置置顶或保存。正文输入会自动保存。";
+        ContentBox.ToolTip = "停笔后自动保存。右键可剪切、复制、粘贴，或在同一菜单中配置便签外观。";
+        ToolTipService.SetShowDuration(ContentBox, 10000);
+        UpdatePinHint();
 
         OpenWindows.Add(this);
         Closed += (_, _) => OpenWindows.Remove(this);
     }
 
     private static string StylePath(string notePath) => notePath + ".style";
+
+    private ContextMenu CreateNoteMenu(bool includeEditing)
+    {
+        var menu = new ContextMenu();
+        void Populate()
+        {
+            menu.Items.Clear();
+            if (includeEditing)
+            {
+                foreach (var (title, command) in new[]
+                {
+                    ("撤销", ApplicationCommands.Undo), ("剪切", ApplicationCommands.Cut),
+                    ("复制", ApplicationCommands.Copy), ("粘贴", ApplicationCommands.Paste),
+                    ("全选", ApplicationCommands.SelectAll)
+                })
+                    menu.Items.Add(new MenuItem { Header = title, Command = command, CommandTarget = ContentBox });
+                menu.Items.Add(new Separator());
+            }
+            var styles = new MenuItem { Header = "便签配色", ToolTip = "选择后立即应用，并随这份便签保存。" };
+            foreach (var palette in Palettes)
+            {
+                var item = new MenuItem { Header = GetStyleDisplayName(palette.Key), IsCheckable = true,
+                    IsChecked = string.Equals(_styleKey, palette.Key, StringComparison.OrdinalIgnoreCase) };
+                item.Click += (_, _) => ApplyStyle(palette.Key);
+                styles.Items.Add(item);
+            }
+            menu.Items.Add(styles);
+            var pin = new MenuItem { Header = "固定在最上层", IsCheckable = true, IsChecked = Topmost,
+                ToolTip = "控制当前便签是否显示在其他普通窗口上方。" };
+            pin.Click += PinBtn_Click;
+            menu.Items.Add(pin);
+            menu.Items.Add(new Separator());
+            var save = new MenuItem { Header = "立即保存", IsEnabled = !ContentBox.IsReadOnly,
+                ToolTip = "将正文保存到本地便签文件；保存失败时保留窗口和内容。" };
+            save.Click += (_, _) => { if (Save()) ToastService.ShowSuccess("便签已保存。"); };
+            menu.Items.Add(save);
+            var close = new MenuItem { Header = "保存并关闭便签", ToolTip = "先保存正文，再关闭窗口。保存失败时会保留便签供你处理。" };
+            close.Click += CloseBtn_Click;
+            menu.Items.Add(close);
+        }
+        menu.Opened += (_, _) => Populate();
+        Populate();
+        return menu;
+    }
 
     /// <summary>关闭 Windows 11 给无标题栏顶层窗口自动加的云母/亚克力背景材质。
     /// 失败（比如系统版本更老、dwmapi.dll 里没有这个属性）就直接忽略——
@@ -122,7 +180,11 @@ public partial class StickyNoteWindow : Window, IGlobalWindowTreatmentExempt
             Directory.CreateDirectory(Path.GetDirectoryName(notePath)!);
             File.WriteAllText(StylePath(notePath), normalized);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            LauncherLogService.AppendLine("[桌面便签] 保存配色失败：" + ex.Message);
+            ToastService.ShowWarning("便签配色暂未保存：" + ex.Message);
+        }
     }
 
     public void ApplyStyle(string styleKey, bool persist = true)
@@ -148,7 +210,7 @@ public partial class StickyNoteWindow : Window, IGlobalWindowTreatmentExempt
         NoteResizeGrip.Foreground = B(palette.Grip);
 
         if (persist) WriteStyleKey(_filePath, _styleKey);
-        StyleBtn.ToolTip = $"切换便签样式（当前：{GetStyleDisplayName(_styleKey)}）";
+        StyleBtn.ToolTip = $"点击切换下一种配色；右键可直接选择。当前：{GetStyleDisplayName(_styleKey)}。";
     }
 
     private static string GetStyleDisplayName(string key) => key switch
@@ -178,35 +240,50 @@ public partial class StickyNoteWindow : Window, IGlobalWindowTreatmentExempt
     private void PinBtn_Click(object sender, RoutedEventArgs e)
     {
         Topmost = !Topmost;
+        UpdatePinHint();
+    }
+
+    private void UpdatePinHint()
+    {
         PinBtn.Content = Topmost ? "📌" : "📍";
-        PinBtn.ToolTip = Topmost ? "点击取消置顶" : "点击置顶";
+        PinBtn.ToolTip = Topmost ? "当前便签已置顶。点击后允许其他窗口覆盖便签。" : "点击让当前便签保持在其他普通窗口上方。";
     }
 
     private void CloseBtn_Click(object sender, RoutedEventArgs e)
     {
-        Save();
         Close();
     }
 
     private void ContentBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
         if (_suppressSave || _saveTimer == null) return;
+        _dirty = true;
         _saveTimer.Stop();
         _saveTimer.Start();
     }
 
     private void ContentBox_LostFocus(object sender, RoutedEventArgs e) => Save();
-    private void StickyNoteWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e) => Save();
+    private void StickyNoteWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (!Save()) e.Cancel = true;
+    }
 
-    private void Save()
+    private bool Save()
     {
         _saveTimer.Stop();
-        if (_suppressSave) return;
+        if (_suppressSave || !_dirty || ContentBox.IsReadOnly) return true;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
             File.WriteAllText(_filePath, ContentBox.Text);
+            _dirty = false;
+            return true;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            LauncherLogService.AppendLine("[桌面便签] 保存失败：" + ex.Message);
+            ToastService.ShowWarning("便签未能保存，内容仍保留在窗口中：" + ex.Message);
+            return false;
+        }
     }
 }

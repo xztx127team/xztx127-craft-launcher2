@@ -27,9 +27,9 @@ Check(ThemeSelectionPolicy.IsSameChoice("Blue", "#4C9AFF", "Blue", "#22C55E"),
 Check(!ThemeSelectionPolicy.IsSameChoice("Blue", null, "Forest", null),
     "changing preset themes is always a settings edit");
 
-var expected = new[] { "Sakura", "Forest", "SeaSalt", "Coffee", "Grape", "Berry", "Dune", "Midnight" };
+var expected = new[] { "Sakura", "Forest", "SeaSalt", "Coffee", "Grape", "Berry", "Dune", "Midnight", "Jade", "Coral", "Ocean", "Lavender", "Slate", "Sunflower" };
 var catalog = ThemePaletteCatalog.Palettes;
-Check(catalog.Count == expected.Length * 2, "all eight new themes have both light and dark palettes");
+Check(catalog.Count == expected.Length * 2, "all catalog themes have both light and dark palettes");
 var fields = typeof(Palette).GetProperties();
 Check(fields.Length == 23, "each palette provides every theme resource, not just the accent");
 

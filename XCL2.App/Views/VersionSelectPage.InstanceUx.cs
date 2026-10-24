@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -69,20 +70,21 @@ public partial class VersionSelectPage
         {
             InstanceFilterBox.Text = state?.Query ?? "";
             InstanceScopeBox.SelectedIndex = Math.Clamp(state?.Scope ?? 0, 0, 2);
-            InstanceFilterRow.Visibility = !string.IsNullOrEmpty(state?.Query) || state?.Scope > 0 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateInstanceSearchControls();
         }
         finally { _restoringInstanceBrowse = false; }
     }
 
-    private void ToggleInstanceFilter_Click(object sender, RoutedEventArgs e)
+    private void UpdateInstanceSearchControls()
     {
-        if (InstanceFilterRow.Visibility == Visibility.Visible)
-            InstanceFilterRow.Visibility = Visibility.Collapsed;
-        else
-        {
-            InstanceFilterRow.Visibility = Visibility.Visible;
-            InstanceFilterBox.Focus();
-        }
+        ClearInstanceFilterButton.IsEnabled = InstanceFilterBox.Text.Length > 0 || InstanceScopeBox.SelectedIndex > 0;
+    }
+
+    private void InstanceFilterBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || InstanceFilterBox.Text.Length == 0) return;
+        InstanceFilterBox.Clear();
+        e.Handled = true;
     }
 
     private void ClearInstanceFilter_Click(object sender, RoutedEventArgs e)
@@ -91,6 +93,7 @@ public partial class VersionSelectPage
         try { InstanceFilterBox.Clear(); InstanceScopeBox.SelectedIndex = 0; }
         finally { _restoringInstanceBrowse = false; }
         ApplyInstanceFilter(); SaveInstanceBrowseState(0);
+        InstanceFilterBox.Focus();
     }
 
     private void InstanceFilter_Changed(object sender, RoutedEventArgs e)
@@ -102,6 +105,7 @@ public partial class VersionSelectPage
     private void ApplyInstanceFilter(bool restoreScroll = false, string? selectedId = null)
     {
         if (!_instanceUxReady) return;
+        UpdateInstanceSearchControls();
         var cfg = _owner.ConfigService.Config;
         var folder = GetSelectedFolderPath() ?? "";
         var offset = FindInstanceScroller(InstalledListBox)?.VerticalOffset ?? 0;
@@ -122,7 +126,7 @@ public partial class VersionSelectPage
         }
         var query = InstanceFilterBox.Text.Trim();
         IEnumerable<GameVersion> matching = _installed;
-        if (query.Length > 0) matching = matching.Where(v => (v.Id + " " + v.Details + " " + v.MetadataSummary + " " + v.PersonalNotes)
+        if (query.Length > 0) matching = matching.Where(v => (v.DisplayTitle + " " + v.Id + " " + v.Details + " " + v.MetadataSummary + " " + v.PersonalNotes)
             .Contains(query, StringComparison.OrdinalIgnoreCase));
         if (InstanceScopeBox.SelectedIndex == 1) matching = matching.Where(v => v.IsFavorite);
         if (InstanceScopeBox.SelectedIndex == 2)
@@ -145,7 +149,8 @@ public partial class VersionSelectPage
         }
         finally { _refreshingItems = refreshing; }
         RefreshBackgroundTaskOwnership();
-        InstanceEmptyMessage.Text = _installed.Count == 0 ? "这个文件夹还没有实例。可以安装新版本，或从左侧导入已有实例。" :
+        InstanceEmptyMessage.Text = string.IsNullOrWhiteSpace(folder) ? "还没有游戏文件夹。请先在左侧添加已有文件夹。" :
+            _installed.Count == 0 ? "这个文件夹还没有实例。可以安装新版本，或从左侧导入已有实例。" :
             InstanceScopeBox.SelectedIndex == 2 && !cfg.EnableRecentInstanceHistory ? "最近使用记录默认关闭。可以在设置中开启；开启前的启动不会补记。" :
             "没有符合条件的实例。可以修改关键词或点击“清除”。";
         InstanceEmptyMessage.Visibility = shown.Count == 0 ? Visibility.Visible : Visibility.Collapsed;

@@ -311,8 +311,7 @@ public partial class PluginManagerDialog : OverlayDialogControl
     {
         try
         {
-            CloseWith(null);
-            if (Application.Current.MainWindow is MainWindow owner) owner.NavigateToApiDocumentation();
+            OverlayDialogService.ShowNonModal(new PluginApiDocumentationDialog());
         }
         catch (Exception ex) { MessageBoxDialog.ShowWarning($"打开 API 接口说明失败：{ex.Message}", "启动器 API 接入说明"); }
     }

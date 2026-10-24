@@ -12,7 +12,7 @@ namespace XCL2.App.Views;
 
 /// <summary>
 /// 26.3 第 4 快照以前的 GLFW/LWJGL 兼容层。
-/// 系统触摸提升被拦截，视角只取触点增量，不回中、不使用绝对定位。
+/// 原生输入层在触摸提升前接管，视角只取触点增量，不回中、不使用绝对定位。
 /// 菜单与视角在落指时确定，手势中途不会因为触摸隐藏光标而切换模式。
 /// </summary>
 public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, ITouchOverlayWindow
@@ -21,6 +21,16 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern bool GetCursorInfo(ref ModeCursorInfo info);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ModeCursorInfo
+    {
+        public int Size;
+        public int Flags;
+        public IntPtr Cursor;
+        public int X;
+        public int Y;
+    }
     [DllImport("user32.dll", SetLastError = true)] private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll", SetLastError = true)] private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(
@@ -40,13 +50,17 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     private IntPtr _gameHwnd;
     private readonly int _gamePid;
     private readonly Func<bool> _canTakeOver;
+    private readonly bool _forceTouchpad;
     private readonly LegacyTouchWorldEvidence _worldEvidence;
     private LegacyTouchWorldPhase _lastObservedWorldPhase;
     private IntPtr _overlayHwnd;
     private HwndSource? _source;
+    private LegacyTouchInputSurface? _inputSurface;
+    private LegacyMouseMessageKind? _surfaceMouseKind;
     private readonly DispatcherTimer _followTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
-    // 输入不能依赖透明静态窗口是否产生下一次渲染帧；有待发输入才启动，发送后立即停止。
-    private readonly DispatcherTimer _inputTimer = new(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(8) };
+    // 合并当前消息批次后尽快发送，不用 WM_TIMER 的 8ms 等待叠加到触摸设备帧间隔。
+    // 最多一个待执行操作，透明窗口没有渲染帧时也能投递。
+    private DispatcherOperation? _inputFlushOperation;
     private readonly HashSet<ushort> _heldKeys = new();
     private readonly HashSet<TouchInputInjector.MouseButton> _heldButtons = new();
     private readonly Dictionary<ushort, int> _keyReferences = new();
@@ -58,15 +72,20 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     private long _explicitModeUntil;
     private long _menuTransitionUntil;
     private readonly Dictionary<int, (TouchDevice Device, Border Key)> _touchKeys = new();
+    // 保护所有触点，包括按键、触摸板以及尚未被子控件捕获的第一帧。
+    private readonly HashSet<int> _promotionContacts = new();
     private readonly List<Border> _keys = new();
     private Border? _mouseKey;
     private (int Left, int Top, int Width, int Height)? _lastClientBounds;
     private long _foregroundMissingSince = -1;
 
-    // 仅读取本地 Win32 状态，不向游戏发送同步消息，不创建每次采样的线程池任务。
+    // GLFW 光标形状刷新有节流与严格超时；其余状态通过本地 Win32 读取。
+    private readonly LegacyGameCursorProbe _gameCursorProbe = new();
     private long _nextCursorProbeAt;
     private LegacyTouchInputBridge _legacyInput;
     private readonly TouchModeStability _modeStability = new();
+    private readonly LegacyTouchModeRecoveryPolicy _modeRecovery = new();
+    private long _windowStableSince = -1;
     private long _modeChangeAllowedAfter;
     private const int GameModeStabilityMilliseconds = 100;
     private const int MenuModeStabilityMilliseconds = 150;
@@ -86,34 +105,45 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     private const double MenuDragThreshold = 12;
     private const int MenuPickUpHoldMilliseconds = 350;
     private bool _menuMode = true;
+    private readonly TouchCaptureRecovery _captureRecovery = new();
     private bool _hidden;
     private bool _closingDown;
     private double _sensitivity;
 
-    private bool HasActiveContact => _viewTouch != null || _padTouch != null || _touchKeys.Count != 0 || _mouseKey != null;
+    private bool HasActiveContact => _inputSurface?.HasContacts == true || _promotionContacts.Count != 0 ||
+        _viewTouch != null || _padTouch != null || _touchKeys.Count != 0 || _mouseKey != null;
+
+    private bool HasActiveMenuGesture => (_viewTouch != null && _viewDragIsMenu) ||
+        (_padTouch != null && _padIsMenu) || _menuPointerDown;
 
     private bool IsGameForeground => !_closingDown && _canTakeOver() && _gameHwnd != IntPtr.Zero &&
         GetForegroundWindow() == _gameHwnd && !IsIconic(_gameHwnd);
 
     public TouchOverlayWindow(IntPtr gameHwnd, double buttonScale, double opacityPercent, double sensitivity,
-        int gamePid, Func<bool> canTakeOver)
-        : this(gameHwnd, buttonScale, opacityPercent, sensitivity, gamePid, canTakeOver, new LegacyTouchWorldEvidence()) { }
+        int gamePid, Func<bool> canTakeOver, bool forceTouchpad = false)
+        : this(gameHwnd, buttonScale, opacityPercent, sensitivity, gamePid, canTakeOver, new LegacyTouchWorldEvidence(), forceTouchpad) { }
 
     internal TouchOverlayWindow(IntPtr gameHwnd, double buttonScale, double opacityPercent, double sensitivity, int gamePid,
-        Func<bool> canTakeOver, LegacyTouchWorldEvidence worldEvidence)
+        Func<bool> canTakeOver, LegacyTouchWorldEvidence worldEvidence, bool forceTouchpad = false)
     {
         InitializeComponent();
         _gameHwnd = gameHwnd;
         _legacyInput = new LegacyTouchInputBridge(gameHwnd, worldEvidence);
         _gamePid = gamePid;
         _canTakeOver = canTakeOver;
+        _forceTouchpad = forceTouchpad;
         _worldEvidence = worldEvidence;
+        _lastObservedWorldPhase = worldEvidence.Phase;
+        _modeRecovery.ResetContext(_lastObservedWorldPhase);
         _sensitivity = sensitivity <= 0 ? 1.4 : sensitivity;
         _buttonScale = !double.IsFinite(buttonScale) || buttonScale <= 0 ? 1.0 : buttonScale;
         RootGrid.Opacity = Math.Clamp(opacityPercent <= 0 ? 85 : opacityPercent, 20, 100) / 100.0;
 
         RestoreKey.Tag = new TouchControlDefinition { Id = "restore", Mode = TouchControlMode.Command, Binding = "SHOW" };
         HookKey(RestoreKey);
+        ModeKey.Tag = new TouchControlDefinition { Id = "legacy-mode", Mode = TouchControlMode.Command,
+            Binding = "MODE", Visibility = TouchControlVisibility.Always };
+        HookKey(ModeKey);
         RebuildControls();
         ControlCanvas.SizeChanged += (_, _) => PositionControls();
         TouchControlSettingsService.Changed += OnControlsChanged;
@@ -122,12 +152,39 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         ViewPad.TouchUp += ViewPad_TouchUp;
         ViewPad.LostTouchCapture += ViewPad_LostTouchCapture;
         TouchpadPad.TouchDown += TouchpadPad_TouchDown;
+        TouchOverlaySettingsShortcut.Attach(TouchpadPad, OpenTouchSettings, "触摸并拖动以移动指针或调整游戏视角。");
         TouchpadPad.TouchMove += TouchpadPad_TouchMove;
         TouchpadPad.TouchUp += TouchpadPad_TouchUp;
         TouchpadPad.LostTouchCapture += TouchpadPad_LostTouchCapture;
+        AddHandler(PreviewTouchDownEvent, new EventHandler<TouchEventArgs>((_, e) =>
+        {
+            if (_hidden || !IsGameForeground) return;
+            _promotionContacts.Add(e.TouchDevice.Id);
+            TouchMousePromotionFilter.ProtectContacts(_overlayHwnd, true);
+        }), handledEventsToo: true);
+        AddHandler(PreviewTouchUpEvent, new EventHandler<TouchEventArgs>((_, e) =>
+        {
+            _promotionContacts.Remove(e.TouchDevice.Id);
+            TouchMousePromotionFilter.ProtectContacts(_overlayHwnd, _promotionContacts.Count > 0);
+        }), handledEventsToo: true);
+        AddHandler(PreviewTouchMoveEvent, new EventHandler<TouchEventArgs>((_, e) =>
+        {
+            if (_promotionContacts.Contains(e.TouchDevice.Id))
+                TouchMousePromotionFilter.ProtectContacts(_overlayHwnd, true);
+        }), handledEventsToo: true);
+        AddHandler(LostTouchCaptureEvent, new EventHandler<TouchEventArgs>((_, e) =>
+        {
+            var device = e.TouchDevice;
+            // ViewPad 会在同一轮输入后恢复意外丢失的捕获；等恢复机会结束再清理。
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
+            {
+                if (device.Captured is DependencyObject captured && ReferenceEquals(GetWindow(captured), this)) return;
+                if (_promotionContacts.Remove(device.Id))
+                    TouchMousePromotionFilter.ProtectContacts(_overlayHwnd, _promotionContacts.Count > 0);
+            }));
+        }), handledEventsToo: true);
         ApplyOverlayVisibility();
 
-        _inputTimer.Tick += FlushPendingInput;
         _followTimer.Tick += (_, _) => FollowGameWindow();
         Loaded += (_, _) =>
         {
@@ -143,32 +200,105 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         _overlayHwnd = new WindowInteropHelper(this).Handle;
         var ex = GetWindowLong(_overlayHwnd, GWL_EXSTYLE);
         SetWindowLong(_overlayHwnd, GWL_EXSTYLE, ex | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_LAYERED);
-        _source = HwndSource.FromHwnd(_overlayHwnd);
-        _source?.AddHook(WindowProc);
+        _source = HwndSource.FromHwnd(_overlayHwnd)
+            ?? throw new InvalidOperationException("旧版触屏窗口初始化失败。");
+        _source.AddHook(WindowProc);
+        _inputSurface = new LegacyTouchInputSurface(this, _source,
+            () => !_hidden && !_settingsOpen && IsVisible && IsGameForeground,
+            OnSurfaceMouseMessage, ReleaseMouseKey, ShutdownOverlay);
+        LauncherLogService.AppendLine("[旧版触屏] 已启用原生触摸入口（WM_POINTER），触点不再提升为系统鼠标移动。");
     }
 
-    /// <summary>被动观察游戏的鼠标约束；不向尚在启动/加载中的游戏发送光标控制消息。</summary>
-    private bool? ReadGameCursorMode()
+    private void OnSurfaceMouseMessage(int message, IntPtr wParam, IntPtr lParam)
     {
+        var kind = TouchInputInjector.ClassifyMouseMessage(_overlayHwnd, _gameHwnd, message, lParam);
+        if (kind == LegacyMouseMessageKind.Rejected) return;
+        // Physical clicks on virtual keys retain native mouse capture. They must not also reach
+        // the game's attack binding, even when the pointer leaves the key before release.
+        if (kind == LegacyMouseMessageKind.Physical && message == 0x0202 && _mouseKey != null)
+        {
+            ReleaseMouseKey();
+            return;
+        }
+        var previousKind = _surfaceMouseKind;
+        _surfaceMouseKind = kind;
+        try
+        {
+            var handled = false;
+            WindowProc(_overlayHwnd, message, wParam, lParam, ref handled);
+            if (handled || kind != LegacyMouseMessageKind.Physical || message is not (0x0201 or 0x0203) ||
+                _hidden || !IsGameForeground ||
+                !TouchInputInjector.TryGetMouseMessagePosition(_overlayHwnd, message, lParam, out var x, out var y)) return;
+            if (InputHitTest(PointFromScreen(new Point(x, y))) is not Border key || !_keys.Contains(key)) return;
+            ReleaseMouseKey();
+            ResetModeCandidate();
+            _mouseKey = key;
+            if (_inputSurface?.CaptureMouse() != true) { _mouseKey = null; return; }
+            if (!KeyHasTouch(key)) OnKeyPressed(key, true);
+        }
+        finally { _surfaceMouseKind = previousKind; }
+    }
+
+    private void ObserveWorldPhase()
+    {
+        var phase = _worldEvidence.Phase;
+        if (phase == _lastObservedWorldPhase) return;
+        var resetMode = _modeRecovery.ObservePhase(phase, Environment.TickCount64);
+        if (phase == LegacyTouchWorldPhase.Outside) { _legacyInput.CursorEvidence.Reset(); _captureRecovery.Reset(); }
+        else if (phase == LegacyTouchWorldPhase.Loading) { _legacyInput.CursorEvidence.ClearCapture(); _captureRecovery.BeginLoading(); }
+        _lastObservedWorldPhase = phase;
+        if (resetMode)
+        {
+            ReleaseHeld();
+            _menuMode = true;
+            _explicitModeUntil = _menuRequestedUntil = 0;
+            ApplyOverlayVisibility();
+        }
+    }
+
+    private bool TryReadVisibleGameCursor(out bool visible)
+    {
+        var info = new ModeCursorInfo { Size = Marshal.SizeOf<ModeCursorInfo>() };
+        visible = false;
+        if (!GetCursorInfo(ref info)) return false;
+        var state = LegacyTouchCursorVisibilityPolicy.Resolve((info.Flags & 1) != 0,
+            (info.Flags & 2) != 0, info.Cursor != IntPtr.Zero,
+            LegacyTouchCursorVisibility.HasVisiblePixels(info.Cursor));
+        visible = state.Showing && !state.Suppressed;
+        return true;
+    }
+
+    /// <summary>观察原生约束和后端光标；只在真实 Joined 过渡后允许一次有限恢复。</summary>
+    private bool? ReadGameCursorMode(out bool nativeLookConfirmed, out bool joinedRecoveryConfirmed)
+    {
+        nativeLookConfirmed = false;
+        joinedRecoveryConfirmed = false;
         if (!IsGameForeground) return null;
         var phase = _worldEvidence.Phase;
-        if (phase != _lastObservedWorldPhase)
-        {
-            if (phase == LegacyTouchWorldPhase.Outside) _legacyInput.CursorEvidence.Reset();
-            else if (phase == LegacyTouchWorldPhase.Loading) _legacyInput.CursorEvidence.ClearCapture();
-            _lastObservedWorldPhase = phase;
-        }
+        var now = Environment.TickCount64;
+        // 覆盖层截获 WM_SETCURSOR 后，全局光标图像可能已过时。只请 GLFW 应用其
+        // 当前模式的光标，不移动指针、不模拟点击，也不把发送成功当成游戏抓取。
+        _gameCursorProbe.TryRefresh(_gameHwnd);
         var mode = TouchInputInjector.ReadGameMenuMode(_gameHwnd, worldJoined: phase == LegacyTouchWorldPhase.Joined,
-            cursorEvidence: _legacyInput.CursorEvidence);
+            cursorEvidence: _legacyInput.CursorEvidence, recovery: _captureRecovery, phase: phase,
+            menuRequested: now < _menuRequestedUntil);
+        // 保留证据来源：稳定的一次性 Joined 恢复只可保留按键触点，不能抢走菜单拖动。
+        nativeLookConfirmed = mode == false;
+        if (!_menuMode) _modeRecovery.CancelJoinedRecovery();
+        var cursorKnown = TryReadVisibleGameCursor(out var cursorVisible);
+        joinedRecoveryConfirmed = _modeRecovery.ShouldRecoverLook(cursorKnown, cursorVisible,
+            _windowStableSince >= 0 && now - _windowStableSince >= 400,
+            now < _menuRequestedUntil, now);
+        if (joinedRecoveryConfirmed) mode = false;
         // Loading 仍阻止单纯隐藏光标；无日志路径已被真实回中确认时，触摸抑制应保留模式。
         if (!mode.HasValue && (phase == LegacyTouchWorldPhase.Outside ||
-            (phase == LegacyTouchWorldPhase.Loading && !_legacyInput.CursorEvidence.Captured))) mode = true;
+            (phase == LegacyTouchWorldPhase.Loading && !_legacyInput.CursorEvidence.Captured && !_captureRecovery.Captured))) mode = true;
         return IsGameForeground ? mode : null;
     }
 
-    private void FlushPendingInput(object? sender, EventArgs e)
+    private void FlushPendingInput()
     {
-        _inputTimer.Stop();
+        _inputFlushOperation = null;
         if (_closingDown || _hidden || !IsGameForeground)
         {
             _legacyInput.Reset(); _legacyInput.CursorEvidence.Reset(); return;
@@ -179,8 +309,16 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
 
     private void ScheduleInputFlush()
     {
-        if (!_inputTimer.IsEnabled && !_closingDown && !_hidden && IsGameForeground)
-            _inputTimer.Start();
+        if (_inputFlushOperation?.Status == DispatcherOperationStatus.Pending || _closingDown || _hidden || !IsGameForeground) return;
+        // BeginInvoke remains asynchronous. Input priority can itself be deferred while native
+        // touch messages remain queued; this bounded, non-repeating flush must not wait for idle.
+        _inputFlushOperation = Dispatcher.BeginInvoke(DispatcherPriority.Send, new Action(FlushPendingInput));
+    }
+
+    private void CancelInputFlush()
+    {
+        _inputFlushOperation?.Abort();
+        _inputFlushOperation = null;
     }
 
     private IntPtr WindowProc(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -193,37 +331,46 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         }
         if (message == WM_SETCURSOR)
         {
-            // 原生光标决定权仍属于游戏；异步转发，不能由 WPF 的旧箭头阻止识别视角模式。
-            if (!_hidden && IsGameForeground)
-                GlfwMouseMessageRelay.Forward(hwnd, _gameHwnd, message, wParam, lParam);
+            // 不让 WPF 覆盖游戏的光标，也不把覆盖层的系统光标更新重复投递给游戏。
+            // 光标是否真正可见由旧路径的形状检测判断，不依赖重放 WM_SETCURSOR。
             handled = true;
             return new IntPtr(1);
         }
         if (!TouchInputInjector.IsMouseMessage(message)) return IntPtr.Zero;
 
-        // 低级钩子尚未就绪时仍拦住触摸提升消息，防止一个触点又被当成鼠标点一次。
-        if (TouchInputInjector.IsTouchPromotedMouseMessage)
+        // 旧后端在调用 SetCursorPos 时已经更新基线。触摸同步、刷新和回中产生的
+        // 无来源移动再次异步投递，会被误算成手指到中心的巨大视角差值。
+        // 已认证注入即使在此处丢失来源，也可通过一次性消息凭证恢复；只分类一次。
+        var messageKind = _surfaceMouseKind ?? TouchInputInjector.ClassifyMouseMessage(hwnd, _gameHwnd, message, lParam);
+        if (messageKind == LegacyMouseMessageKind.Rejected)
         {
             handled = true;
             return IntPtr.Zero;
         }
 
-        // GLFW/LWJGL 的回中消息没有注入签名。视角模式必须完整转交这些移动，
-        // 即使回中点碰巧位于虚拟按键上，否则旧后端的相对坐标基线会停止更新。
+        // 只转交自身注入和明确的硬件鼠标输入，虚拟键触摸不产生视角位移。
         if (!_hidden && !_menuMode && IsGameForeground && message == 0x0200)
         {
-            GlfwMouseMessageRelay.Forward(hwnd, _gameHwnd, message, wParam, lParam);
+            if (LegacyTouchMousePolicy.CanForwardGameplayMove(messageKind,
+                HasActiveContact || TouchMousePromotionFilter.ContactsProtected(_overlayHwnd)))
+                GlfwMouseMessageRelay.Forward(hwnd, _gameHwnd, message, wParam, lParam, messageKind);
             handled = true;
             return IntPtr.Zero;
         }
 
-        var injected = TouchInputInjector.IsInjectedMouseMessage;
+        // An already-issued camera packet that outlived a mode switch is never a menu pointer.
+        if (messageKind == LegacyMouseMessageKind.Look)
+        {
+            handled = true;
+            return IntPtr.Zero;
+        }
+        var injected = messageKind == LegacyMouseMessageKind.Injected;
         if (injected)
         {
             // SendInput 鼠标输入也会命中置顶的悬浮层。必须在 WPF 处理前截住并转给游戏，
             // 否则一次模拟点击会再次触发虚拟键/拖动，形成重复点击甚至输入循环。
             if (IsGameForeground)
-                TouchInputInjector.ForwardMouseMessage(hwnd, _gameHwnd, message, wParam, lParam);
+                TouchInputInjector.ForwardMouseMessage(hwnd, _gameHwnd, message, wParam, lParam, messageKind);
             handled = true;
         }
         else if (!_hidden && IsGameForeground &&
@@ -231,7 +378,7 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
             ReferenceEquals(InputHitTest(PointFromScreen(new Point(x, y))), ViewPad))
         {
             // 外接鼠标在画面区域直接使用原来的鼠标消息，不把鼠标移动再模拟成第二份视角位移。
-            TouchInputInjector.ForwardMouseMessage(hwnd, _gameHwnd, message, wParam, lParam);
+            TouchInputInjector.ForwardMouseMessage(hwnd, _gameHwnd, message, wParam, lParam, messageKind);
             // 同样接受真实鼠标的离中心菜单移动；游戏自己的回中消息不能覆盖该锚点。
             if (_menuMode && message == 0x0200 && _lastClientBounds is { } bounds &&
                 (Math.Abs(x - (bounds.Left + bounds.Width / 2)) >= 16 ||
@@ -260,6 +407,11 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
                 _legacyInput = new LegacyTouchInputBridge(current, _worldEvidence);
                 _lastClientBounds = null;
                 _menuMode = true;
+                _captureRecovery.Reset();
+                _gameCursorProbe.Reset();
+                _lastObservedWorldPhase = _worldEvidence.Phase;
+                _modeRecovery.ResetContext(_lastObservedWorldPhase);
+                _windowStableSince = -1;
                 _explicitModeUntil = 0;
                 ApplyOverlayVisibility();
             }
@@ -267,6 +419,7 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         if (_gameHwnd == IntPtr.Zero || !IsWindow(_gameHwnd))
         {
             ReleaseHeld();
+            _inputSurface?.Hide();
             TouchMousePromotionFilter.Disable(_overlayHwnd);
             Visibility = Visibility.Hidden;
             return;
@@ -283,9 +436,19 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
 
         if (foreground != _gameHwnd || IsIconic(_gameHwnd))
         {
+            _inputSurface?.Hide();
             if (Visibility != Visibility.Hidden)
             {
                 ReleaseHeld();
+                _promotionContacts.Clear();
+                _captureRecovery.Reset();
+                _gameCursorProbe.Reset();
+                _lastObservedWorldPhase = _worldEvidence.Phase;
+                _modeRecovery.ResetContext(_lastObservedWorldPhase);
+                _menuMode = true;
+                _windowStableSince = -1;
+                _explicitModeUntil = _menuRequestedUntil = 0;
+                ApplyOverlayVisibility();
                 Visibility = Visibility.Hidden;
                 _lastClientBounds = null;
             }
@@ -301,15 +464,19 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         // 只在显示、尺寸/位置变化或置顶状态丢失时调整，避免每 100ms 两次重排整个分层窗口。
         var bounds = (Left: left, Top: top, Width: right - left, Height: bottom - top);
         var showing = Visibility != Visibility.Visible;
+        if (showing || _lastClientBounds != bounds) _windowStableSince = Environment.TickCount64;
         if (showing) Visibility = Visibility.Visible;
         if (showing || _lastClientBounds != bounds || (GetWindowLong(_overlayHwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0)
         {
+            if (_lastClientBounds.HasValue && _lastClientBounds != bounds) ReleaseHeld();
             if (SetWindowPos(_overlayHwnd, HWND_TOPMOST, left, top, bounds.Width, bounds.Height, SWP_NOACTIVATE))
                 _lastClientBounds = bounds;
         }
+        if (!_hidden) _inputSurface?.Show(left, top, bounds.Width, bounds.Height);
         if (_hidden) TouchMousePromotionFilter.Disable(_overlayHwnd);
         else TouchMousePromotionFilter.Enable(_gameHwnd, _overlayHwnd, OnPhysicalKeyDown);
         SyncInputMode();
+        TouchMousePromotionFilter.LogDiagnostics(_gameHwnd, _menuMode);
     }
 
     private void ResetModeCandidate()
@@ -320,9 +487,16 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
 
     private void SyncInputMode()
     {
+        // 即使手动模式阻止原生探测，新加载/退出世界仍必须撤销上一场景的手动选择。
+        if (IsGameForeground) ObserveWorldPhase();
         var now = Environment.TickCount64;
-        if (_closingDown || _hidden || !IsVisible || !IsGameForeground || HasActiveContact ||
-            now < _modeChangeAllowedAfter || now < _explicitModeUntil)
+        if (_closingDown || _hidden || !IsVisible || !IsGameForeground ||
+            _modeRecovery.MenuOverride.HasValue || now < _modeChangeAllowedAfter || now < _explicitModeUntil)
+        {
+            _modeStability.Reset();
+            return;
+        }
+        if (!TouchInputModePolicy.ShouldProbeLegacyMode(_menuMode, HasActiveContact))
         {
             _modeStability.Reset();
             return;
@@ -331,24 +505,74 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         _nextCursorProbeAt = now + 100;
         try
         {
-            var menu = ReadGameCursorMode();
+            var menu = ReadGameCursorMode(out var nativeLookConfirmed, out var joinedRecoveryConfirmed);
+            var preserveControls = TouchInputModePolicy.AllowLegacyLookDuringContact(_menuMode, menu,
+                nativeLookConfirmed, joinedRecoveryConfirmed, HasActiveMenuGesture);
             var confirmed = _modeStability.Observe(_menuMode, menu, HasActiveContact, now,
                 GameModeStabilityMilliseconds,
-                now < _menuRequestedUntil ? 100 : MenuModeStabilityMilliseconds);
+                now < _menuRequestedUntil ? 100 : MenuModeStabilityMilliseconds,
+                allowDuringContact: preserveControls);
             if (!confirmed.HasValue) return;
-            ReleaseHeld();
-            _menuMode = confirmed.Value;
+            if (preserveControls && !confirmed.Value) EnterLookPreservingControls();
+            else { ReleaseHeld(); _menuMode = confirmed.Value; }
+            _modeRecovery.CancelJoinedRecovery();
+            LauncherLogService.AppendLine($"[触屏模式] 后端={TouchGameWindow.Detect(_gameHwnd)}，状态={(_menuMode ? "菜单" : "游戏视角")}");
             ApplyOverlayVisibility();
         }
         catch { _modeStability.Reset(); }
     }
 
+    private void AdoptLookBeforeGesture()
+    {
+        var now = Environment.TickCount64;
+        if (!_menuMode || _modeRecovery.MenuOverride.HasValue || _viewTouch != null || _padTouch != null ||
+            now < _explicitModeUntil || now < _menuRequestedUntil || !IsGameForeground) return;
+        // 新落指前已有原生抓取，或 Joined 恢复已满足隐藏/窗口稳定期，直接沿用。
+        // 尚未建立的手势不能因原生触点先登记而错误地发送菜单绝对定位和点击。
+        var mode = ReadGameCursorMode(out var nativeLookConfirmed, out var joinedRecoveryConfirmed);
+        if (!TouchInputModePolicy.AllowLegacyLookDuringContact(_menuMode, mode,
+            nativeLookConfirmed, joinedRecoveryConfirmed, HasActiveMenuGesture)) return;
+        EnterLookPreservingControls();
+        _modeRecovery.CancelJoinedRecovery();
+        _modeStability.Reset();
+        ApplyOverlayVisibility();
+    }
+
+    private void EnterLookPreservingControls()
+    {
+        // MenuButton(false) normally flushes a queued absolute menu move. Once native capture
+        // is confirmed, discard that stale coordinate before releasing the menu button.
+        _legacyInput.ResetPendingInput();
+        ReleaseMenuPointer();
+        _menuCarryDrag = false;
+        // 世界在双指操作中获得抓取时，右指从当前坐标重新起算，左手按键继续保持。
+        // 标记已移动，抬指不再补发一次攻击/菜单点击。
+        if (_viewTouch is { } view)
+        {
+            _viewDragStart = _viewDragLast = view.GetTouchPoint(ViewPad).Position;
+            _viewDragIsMenu = false; _viewDragMoved = true;
+        }
+        if (_padTouch is { } pad)
+        {
+            _padStart = _padLast = pad.GetTouchPoint(TouchpadPad).Position;
+            _padIsMenu = false; _padMoved = true;
+            _padRemainderX = _padRemainderY = 0;
+        }
+        _menuMode = false;
+    }
+
     private void ApplyOverlayVisibility()
     {
+        ModeKeyText.Text = _modeRecovery.Selection switch
+        {
+            LegacyTouchModeSelection.Look => "手动 · 视角",
+            LegacyTouchModeSelection.Menu => "手动 · 菜单",
+            _ => _menuMode ? "自动 · 菜单" : "自动 · 视角"
+        };
         ViewPad.Visibility = _hidden ? Visibility.Collapsed : Visibility.Visible;
         ControlCanvas.Visibility = _hidden ? Visibility.Collapsed : Visibility.Visible;
-        // 触摸板默认隐藏，需在按键设置里开启。
-        var padVisible = !_hidden && TouchControlSettingsService.TouchpadEnabled;
+        // 游戏保持原显示设置；从窗口列表明确开启时直接显示触摸板。
+        var padVisible = !_hidden && (_forceTouchpad || TouchControlSettingsService.TouchpadEnabled);
         TouchpadPad.Visibility = padVisible ? Visibility.Visible : Visibility.Collapsed;
         if (!padVisible && _padTouch != null) CancelPadGesture();
         foreach (var key in _keys)
@@ -357,7 +581,9 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
             key.Visibility = c.Enabled && (c.Visibility == TouchControlVisibility.Always ||
                 (c.Visibility == TouchControlVisibility.Menu) == _menuMode) ? Visibility.Visible : Visibility.Collapsed;
         }
+        ModeKey.Visibility = _hidden ? Visibility.Collapsed : Visibility.Visible;
         RestoreKey.Visibility = _hidden ? Visibility.Visible : Visibility.Collapsed;
+        PositionControls();
     }
 
     private void OnControlsChanged()
@@ -371,7 +597,7 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     {
         ReleaseHeld();
         ControlCanvas.Children.Clear();
-        _keys.RemoveAll(k => !ReferenceEquals(k, RestoreKey));
+        _keys.RemoveAll(k => !ReferenceEquals(k, RestoreKey) && !ReferenceEquals(k, ModeKey));
         foreach (var control in TouchControlSettingsService.Load())
         {
             var key = new Border
@@ -395,6 +621,21 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         var width = ControlCanvas.ActualWidth;
         var height = ControlCanvas.ActualHeight;
         if (width <= 0 || height <= 0) return;
+        // Keep the selector near the top even in narrow/scaled windows. Reserve its row only
+        // when top-anchored controls would overlap it; persisted custom coordinates stay intact.
+        var modeBounds = new Rect(Math.Max(0, (width - ModeKey.Width) / 2), 8, Math.Min(width, ModeKey.Width), ModeKey.Height);
+        var topRowOffset = 0.0;
+        foreach (var c in ControlCanvas.Children.OfType<Border>()
+            .Where(k => k.Visibility == Visibility.Visible).Select(k => k.Tag).OfType<TouchControlDefinition>())
+        {
+            if (c.Anchor is not (TouchControlAnchor.TopLeft or TouchControlAnchor.TopRight)) continue;
+            var w = Math.Min(width, c.Width * _buttonScale);
+            var x = c.Anchor == TouchControlAnchor.TopRight ? width - c.X * _buttonScale - w : c.X * _buttonScale;
+            var keyBounds = new Rect(Math.Clamp(x, 0, Math.Max(0, width - w)), c.Y * _buttonScale,
+                w, Math.Min(height, c.Height * _buttonScale));
+            keyBounds.Inflate(4, 4);
+            if (keyBounds.IntersectsWith(modeBounds)) { topRowOffset = modeBounds.Bottom + 4; break; }
+        }
         foreach (var key in ControlCanvas.Children.OfType<Border>())
         {
             if (key.Tag is not TouchControlDefinition c) continue;
@@ -402,6 +643,7 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
             key.Height = Math.Min(height, c.Height * _buttonScale);
             var x = c.X * _buttonScale;
             var y = c.Y * _buttonScale;
+            if (c.Anchor is TouchControlAnchor.TopLeft or TouchControlAnchor.TopRight) y += topRowOffset;
             if (c.Anchor is TouchControlAnchor.TopRight or TouchControlAnchor.BottomRight) x = width - x - key.Width;
             else if (c.Anchor == TouchControlAnchor.BottomCenter) x += (width - key.Width) / 2;
             if (c.Anchor is TouchControlAnchor.BottomLeft or TouchControlAnchor.BottomRight or TouchControlAnchor.BottomCenter)
@@ -417,9 +659,11 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     private void HookKey(Border key)
     {
         _keys.Add(key);
+        TouchOverlaySettingsShortcut.Attach(key, OpenTouchSettings,
+            key.Tag is TouchControlDefinition control ? TouchOverlaySettingsShortcut.Describe(control) : "触屏虚拟按键。");
         key.TouchDown += Key_TouchDown;
         key.TouchUp += (_, e) => { e.Handled = true; ReleaseKeyTouch(e.TouchDevice.Id); };
-        key.LostTouchCapture += (_, e) => ReleaseKeyTouch(e.TouchDevice.Id);
+        key.LostTouchCapture += (_, e) => RecoverKeyTouch(e.TouchDevice, key);
         key.MouseLeftButtonDown += Key_MouseDown;
         key.MouseLeftButtonUp += (_, e) =>
         {
@@ -450,6 +694,17 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         if (!KeyHasTouch(touch.Key) && !ReferenceEquals(_mouseKey, touch.Key)) OnKeyPressed(touch.Key, false);
     }
 
+    private bool CanRecoverContact(TouchDevice touch)
+        => !_closingDown && !_hidden && !_settingsOpen && IsGameForeground &&
+           (!LegacyTouchInputSurface.IsNativeContact(touch) || _inputSurface?.OwnsContact(touch) == true);
+
+    private void RecoverKeyTouch(TouchDevice touch, Border key)
+    {
+        LegacyTouchContactRecovery.Schedule(touch, key,
+            () => _touchKeys.TryGetValue(touch.Id, out var held) && ReferenceEquals(held.Device, touch) && ReferenceEquals(held.Key, key),
+            () => CanRecoverContact(touch), () => ReleaseKeyTouch(touch.Id));
+    }
+
     private void Key_MouseDown(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
@@ -466,6 +721,7 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     {
         var key = _mouseKey;
         _mouseKey = null;
+        _inputSurface?.ReleaseMouse();
         if (key == null) return;
         ResetModeCandidate();
         if (key.IsMouseCaptured) key.ReleaseMouseCapture();
@@ -544,14 +800,19 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
 
     private void ApplyMenuAction(TouchMenuAction action)
     {
-        var menu = action == TouchMenuAction.Open || (action == TouchMenuAction.Toggle && !_menuMode);
         ReleaseHeld();
-        _menuMode = menu;
-        // 等待游戏处理刚注入的键；期间不发送绝对鼠标移动，以免变成视角跳转。
-        _menuTransitionUntil = Environment.TickCount64 + 180;
-        _explicitModeUntil = Environment.TickCount64 + 650;
-        _menuRequestedUntil = Environment.TickCount64 + 2000;
-        ApplyOverlayVisibility();
+        var manualMenu = _modeRecovery.ApplyMenuAction(action, _menuMode);
+        if (manualMenu.HasValue)
+        {
+            _menuMode = manualMenu.Value;
+            ApplyOverlayVisibility();
+        }
+        // 自动模式下按键意图仍不是抓取确认；手动模式按明确的菜单动作保持手动选择。
+        var now = Environment.TickCount64;
+        _menuTransitionUntil = now + 180;
+        _explicitModeUntil = now + 180;
+        _menuRequestedUntil = now + 2000;
+        _modeStability.Reset();
     }
 
     private void OnPhysicalKeyDown(ushort vk)
@@ -573,7 +834,22 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
             case "GRAB": if (_gameHwnd != IntPtr.Zero) SetForegroundWindow(_gameHwnd); break;
             case "HIDE": SetHidden(!_hidden); break;
             case "SHOW": SetHidden(false); break;
-            case "MENU": ApplyMenuAction(TouchMenuAction.Toggle); break;
+            case "MODE":
+                ReleaseHeld();
+                _modeRecovery.Cycle();
+                if (_modeRecovery.MenuOverride is { } selectedMenu) _menuMode = selectedMenu;
+                _captureRecovery.Reset();
+                _explicitModeUntil = _menuRequestedUntil = 0;
+                _menuTransitionUntil = Environment.TickCount64 + 180;
+                ApplyOverlayVisibility();
+                LauncherLogService.AppendLine($"[旧版触屏] 用户选择模式：{ModeKeyText.Text}");
+                break;
+            case "MENU":
+                ReleaseHeld(); _menuMode = !_menuMode; _captureRecovery.Reset();
+                _modeRecovery.Select(_menuMode ? LegacyTouchModeSelection.Menu : LegacyTouchModeSelection.Look);
+                _explicitModeUntil = _menuRequestedUntil = 0;
+                _menuTransitionUntil = Environment.TickCount64 + 180;
+                ApplyOverlayVisibility(); break;
             case "KEYBOARD":
                 ReleaseHeld();
                 try { ScreenKeyboardService.Show(); }
@@ -592,9 +868,20 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         if (_settingsOpen || _closingDown) return;
         _settingsOpen = true;
         ReleaseHeld();
+        _lastObservedWorldPhase = _worldEvidence.Phase;
+        _modeRecovery.ResetContext(_lastObservedWorldPhase);
+        _menuMode = true;
+        _windowStableSince = -1;
+        ApplyOverlayVisibility();
+        _inputSurface?.Hide();
         TouchMousePromotionFilter.Disable(_overlayHwnd);
         Visibility = Visibility.Hidden;
         try { new TouchControlsSettingsWindow { Topmost = true }.ShowDialog(); }
+        catch (Exception ex)
+        {
+            LauncherLogService.AppendLine("[触屏设置] 打开失败：" + ex.Message);
+            ToastService.ShowWarning("触屏设置打开失败：" + ex.Message);
+        }
         finally
         {
             _settingsOpen = false;
@@ -606,9 +893,13 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     private void SetHidden(bool hidden)
     {
         ReleaseHeld();
+        _promotionContacts.Clear();
         _hidden = hidden;
         ResetModeCandidate();
         ApplyOverlayVisibility();
+        if (hidden) _inputSurface?.Hide();
+        else if (IsGameForeground && _lastClientBounds is { } bounds)
+            _inputSurface?.Show(bounds.Left, bounds.Top, bounds.Width, bounds.Height);
         if (hidden || !IsGameForeground) TouchMousePromotionFilter.Disable(_overlayHwnd);
         else TouchMousePromotionFilter.Enable(_gameHwnd, _overlayHwnd, OnPhysicalKeyDown);
     }
@@ -620,6 +911,8 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         e.Handled = true;
         if (_hidden || _closingDown || !IsGameForeground || _viewTouch != null) return;
         if (Environment.TickCount64 < _menuTransitionUntil) return;
+        SyncInputMode();
+        AdoptLookBeforeGesture();
         // 落指沿用已确认模式。第二根手指不得重新探测并释放第一根手指的前进键。
         ResetModeCandidate();
         _viewTouch = e.TouchDevice;
@@ -628,7 +921,7 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         _viewDragMoved = false;
         _viewDragIsMenu = _menuMode;
         _menuCarryDrag = false;
-        if (_padTouch == null) _legacyInput.Reset();
+        if (_padTouch == null) _legacyInput.ResetPendingInput();
         if (!ViewPad.CaptureTouch(e.TouchDevice)) { _viewTouch = null; return; }
         if (_viewDragIsMenu)
         {
@@ -640,24 +933,8 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     {
         var touch = _viewTouch;
         if (touch == null || touch.Id != e.TouchDevice.Id) return;
-        // 游戏收到按下后可能取得原生鼠标捕获。等这一轮输入处理结束，仍在屏幕上的
-        // 同一个触点只恢复捕获，不补发按下，避免刚拿起物品就被提前松开。
-        _ = Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(() =>
-        {
-            if (!ReferenceEquals(_viewTouch, touch)) return;
-            try
-            {
-                if (_hidden || _closingDown || !IsGameForeground || !ViewPad.IsVisible ||
-                    touch.GetTouchPoint(ViewPad).Action == TouchAction.Up)
-                {
-                    CancelViewGesture();
-                    return;
-                }
-                if (!ReferenceEquals(touch.Captured, ViewPad) && !ViewPad.CaptureTouch(touch))
-                    CancelViewGesture();
-            }
-            catch (InvalidOperationException) { CancelViewGesture(); }
-        }));
+        LegacyTouchContactRecovery.Schedule(touch, ViewPad, () => ReferenceEquals(_viewTouch, touch),
+            () => CanRecoverContact(touch), CancelViewGesture);
     }
 
     private bool ContinueViewGesture(TouchDevice device)
@@ -734,8 +1011,9 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
     {
         var screen = ViewPad.PointToScreen(point);
         var x = (int)Math.Round(screen.X); var y = (int)Math.Round(screen.Y);
-        if (!(defer ? _legacyInput.QueueMenu(x, y, _menuPointerDown)
-            : _legacyInput.MoveMenu(x, y, _menuPointerDown))) return false;
+        var forceMenu = _modeRecovery.Selection == LegacyTouchModeSelection.Menu;
+        if (!(defer ? _legacyInput.QueueMenu(x, y, _menuPointerDown, forceMenu)
+            : _legacyInput.MoveMenu(x, y, _menuPointerDown, forceMenu))) return false;
         if (defer) ScheduleInputFlush();
         _menuPointerScreen = screen;
         return true;
@@ -784,6 +1062,8 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         e.Handled = true;
         if (_hidden || _closingDown || !IsGameForeground || _padTouch != null) return;
         if (Environment.TickCount64 < _menuTransitionUntil) return;
+        SyncInputMode();
+        AdoptLookBeforeGesture();
         ResetModeCandidate();
         _padTouch = e.TouchDevice;
         _padStart = _padLast = e.GetTouchPoint(TouchpadPad).Position;
@@ -851,7 +1131,10 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
 
     private void TouchpadPad_LostTouchCapture(object? sender, TouchEventArgs e)
     {
-        if (_padTouch?.Id == e.TouchDevice.Id) CancelPadGesture();
+        var touch = _padTouch;
+        if (touch?.Id != e.TouchDevice.Id) return;
+        LegacyTouchContactRecovery.Schedule(touch, TouchpadPad, () => ReferenceEquals(_padTouch, touch),
+            () => CanRecoverContact(touch), CancelPadGesture);
     }
 
     private void CancelPadGesture()
@@ -860,7 +1143,11 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         _padTouch = null;
         if (touch != null) ResetModeCandidate();
         _padRemainderX = _padRemainderY = 0;
-        if (_viewTouch == null) _legacyInput.Reset();
+        if (_viewTouch == null)
+        {
+            if (IsGameForeground && !_hidden) _legacyInput.ResetPendingInput();
+            else _legacyInput.Reset();
+        }
         if (touch != null && ReferenceEquals(touch.Captured, TouchpadPad)) TouchpadPad.ReleaseTouchCapture(touch);
     }
 
@@ -878,7 +1165,11 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         if (touch != null) ResetModeCandidate();
         ReleaseMenuPointer();
         _menuCarryDrag = false;
-        if (_padTouch == null) _legacyInput.Reset();
+        if (_padTouch == null)
+        {
+            if (IsGameForeground && !_hidden) _legacyInput.ResetPendingInput();
+            else _legacyInput.Reset();
+        }
         if (touch != null && ReferenceEquals(touch.Captured, ViewPad)) ViewPad.ReleaseTouchCapture(touch);
     }
 
@@ -886,9 +1177,13 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
 
     private void ReleaseHeld()
     {
-        _inputTimer.Stop();
+        CancelInputFlush();
         _legacyInput.Reset();
         if (_releasingHeld) return;
+        // 模式切换/失焦/隐藏会主动取消捕获，不保证还收到 PreviewTouchUp。
+        // 原触点仍在屏幕时，客户区几何过滤及短尾保护继续挡住合成鼠标事件。
+        _promotionContacts.Clear();
+        TouchMousePromotionFilter.ProtectContacts(_overlayHwnd, false);
         _releasingHeld = true;
         try
         {
@@ -918,11 +1213,12 @@ public partial class TouchOverlayWindow : Window, IGlobalWindowTreatmentExempt, 
         if (_closingDown) return;
         _closingDown = true;
         _followTimer.Stop();
-        _inputTimer.Stop();
-        _inputTimer.Tick -= FlushPendingInput;
+        CancelInputFlush();
         TouchControlSettingsService.Changed -= OnControlsChanged;
         ReleaseHeld();
         TouchMousePromotionFilter.Disable(_overlayHwnd);
+        _inputSurface?.Dispose();
+        _inputSurface = null;
         _source?.RemoveHook(WindowProc);
         _source = null;
     }

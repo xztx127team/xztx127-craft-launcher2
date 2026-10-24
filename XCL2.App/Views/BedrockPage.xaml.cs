@@ -26,9 +26,20 @@ public partial class BedrockPage : UserControl
     private readonly MainWindow _owner;
     private readonly BedrockContentService _bedrockService = new();
     private readonly BedrockClientDownloadService _clientDownloadService = new();
+    // 导航容器由后台持有，不依赖 WPF 临时项目生成新增的命名字段。
+    private readonly ContentControl _marketplaceHost = new()
+    {
+        Visibility = Visibility.Collapsed,
+        HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        VerticalContentAlignment = VerticalAlignment.Stretch
+    };
+    private FrameworkElement? _bedrockHomePanel;
 
     // 客户端版本列表（从 mc-w10-versiondb / 新版元数据库 / 本地兜底获取）
     private List<BedrockClientDownloadService.BedrockVersionInfo> _clientVersions = new();
+    private CancellationTokenSource? _clientVersionsCts;
+    private int _clientVersionsRevision;
+    private bool _clientSectionReady;
 
     // 客户端启动全局 10 秒冷却：顶部“启动基岩版”和“启动已安装客户端”共用，
     // 防止用户连点导致同一个 UWP/GDK 包被重复注册/重复唤起。
@@ -38,10 +49,56 @@ public partial class BedrockPage : UserControl
     private sealed record RunningBedrockProcessChoice(
         int ProcessId, string Label, string? ExecutablePath);
 
+    private void BedrockClientMarketplace_Click(object sender, RoutedEventArgs e)
+        => OpenMarketplace("客户端", sender as Button);
+
+    private void BedrockServerMarketplace_Click(object sender, RoutedEventArgs e)
+        => OpenMarketplace("服务端", sender as Button);
+
+    private void InitializeMarketplaceNavigation()
+    {
+        if (Content is not FrameworkElement homePanel)
+            throw new InvalidOperationException("基岩版页面内容未初始化。");
+        _bedrockHomePanel = homePanel;
+        // 先从 UserControl 移除原内容，再加入宿主，避免同一控件拥有两个父级。
+        Content = null;
+        var navigationHost = new Grid();
+        navigationHost.Children.Add(homePanel);
+        navigationHost.Children.Add(_marketplaceHost);
+        Content = navigationHost;
+    }
+
+    private void OpenMarketplace(string entryContext, Button? returnFocus)
+    {
+        if (_bedrockHomePanel is not { } homePanel || _marketplaceHost.Content != null) return;
+        _marketplaceHost.Content = new BedrockMarketplacePage(entryContext, () =>
+        {
+            _marketplaceHost.Visibility = Visibility.Collapsed;
+            _marketplaceHost.Content = null;
+            homePanel.Visibility = Visibility.Visible;
+            returnFocus?.Focus();
+        });
+        homePanel.Visibility = Visibility.Collapsed;
+        _marketplaceHost.Visibility = Visibility.Visible;
+    }
+
     public BedrockPage(MainWindow owner)
     {
         _owner = owner;
         InitializeComponent();
+        InitializeMarketplaceNavigation();
+        InitializeDownloadNavigation();
+        Unloaded += (_, _) =>
+        {
+            _clientVersionsRevision++;
+            _clientVersionsCts?.Cancel();
+            _clientVersionsCts?.Dispose();
+            _clientVersionsCts = null;
+        };
+        Loaded += (_, _) =>
+        {
+            if (_clientSectionReady && _clientVersionsCts == null) _ = LoadClientVersionsAsync();
+        };
 
         // 系统版本检测放在最前面、其他任何初始化之前——基岩版官方就不支持 Win10 以下系统，
         // 不支持的话后面所有检测/网络请求（版本列表、UWP 依赖检测等）都是白做，
@@ -706,7 +763,9 @@ public partial class BedrockPage : UserControl
         RefreshBedrockClientInstanceList();
         RefreshRunningBedrockProcesses();
 
-        // 页面加载时自动刷新一次版本列表
+        _clientSectionReady = true;
+        BedrockClientVersionCombo.SelectionChanged += (_, _) => UpdateClientVersionAvailability();
+        // 先展示本地索引，随后把本次在线刷新结果真正写回下拉框。
         _ = LoadClientVersionsAsync();
     }
 
@@ -715,119 +774,80 @@ public partial class BedrockPage : UserControl
             ? BedrockClientDownloadService.BedrockClientChannel.Preview
             : BedrockClientDownloadService.BedrockClientChannel.Stable;
 
-    private async Task LoadClientVersionsAsync()
+    private async Task LoadClientVersionsAsync(bool forceRefresh = false)
     {
-        // 之前的问题：下面这四行 UI 状态重置写在 try 之外——如果这个方法执行的时候
-        // 页面已经被切走/关掉（这是个 fire-and-forget 调用 `_ = LoadClientVersionsAsync()`，
-        // 没人 await 它，用户完全可能在它跑完之前就导航到别的页面），这几个命名控件的引用
-        // 可能已经不可用，直接访问会抛 NullReferenceException。因为没被 await/catch，
-        // 这个异常会变成"未观察的后台 Task 异常"，在终结器线程上被重新抛出，导致进程崩溃
-        // ——日志里的 `AggregateException...NullReferenceException...LoadClientVersionsAsync
-        // 第156行` 就是这么来的。现在把所有访问控件的代码都收进 try，统一兜底。
+        if (!_clientSectionReady) return;
+        _clientVersionsCts?.Cancel();
+        _clientVersionsCts?.Dispose();
+        var request = new CancellationTokenSource();
+        _clientVersionsCts = request;
+        var revision = ++_clientVersionsRevision;
+        // Read every WPF selection on the UI thread before awaiting network work.
+        var channel = GetSelectedClientChannel();
         try
         {
-            BedrockClientVersionCombo.IsEnabled = false;
-            BedrockClientDownloadBtn.IsEnabled = false;
-            BedrockClientVersionCombo.ItemsSource = null;
-            BedrockClientStatusText.Text = Loc.T("Str_Cs_Loading_Version_List", "正在加载版本列表...");
-
-            var channel = GetSelectedClientChannel();
-            _clientVersions = await _clientDownloadService.GetVersionListAsync(channel);
-            if (_clientVersions.Count == 0)
-            {
-                BedrockClientStatusText.Text = Loc.T("Str_Cs_No_Versions_Available", "无法获取版本列表，请检查网络后点击「刷新列表」重试。");
-            }
-            else
-            {
-                BedrockClientVersionCombo.ItemsSource = _clientVersions;
-                BedrockClientVersionCombo.DisplayMemberPath = "Name";
-                BedrockClientVersionCombo.SelectedIndex = 0;
-                BedrockClientDownloadBtn.IsEnabled = true;
-                BedrockClientStatusText.Text = $"该渠道已加载 {_clientVersions.Count} 个版本，可直接在下拉框里选择要下载的版本。";
-            }
-
-            BedrockClientVersionCombo.IsEnabled = _clientVersions.Count > 0;   // 多版本：列表可用时允许自由选择
+            var local = _clientDownloadService.GetLocalFallbackVersionList(channel);
+            ApplyClientVersionList(local, _clientDownloadService.VersionListSource);
+            BedrockClientStatusText.Text += " · 正在刷新在线索引…";
+            var versions = forceRefresh
+                ? await _clientDownloadService.RefreshVersionListAsync(channel, request.Token)
+                : await _clientDownloadService.GetVersionListAsync(channel, request.Token);
+            if (request.IsCancellationRequested || revision != _clientVersionsRevision) return;
+            ApplyClientVersionList(versions, _clientDownloadService.VersionListSource);
         }
-        catch (Exception ex) when (IsBenignPageGoneException(ex))
-        {
-            // 页面已经被切走/关掉，控件不可用：静默忽略，不是真正的错误，
-            // 不需要打扰用户也不需要记崩溃日志。
-        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested) { }
+        catch (Exception ex) when (IsBenignPageGoneException(ex)) { }
         catch (Exception ex)
         {
-            ErrorPresenter.LogFallback("加载基岩版客户端版本列表失败", ex);
-            try { BedrockClientStatusText.Text = Loc.T("Str_Cs_Version_List_Load_Failed", "版本列表加载失败，请检查网络后点击「刷新列表」重试。"); }
-            catch { /* 页面可能已经没了，忽略 */ }
+            if (revision != _clientVersionsRevision || request.IsCancellationRequested) return;
+            ErrorPresenter.LogFallback("加载基岩版客户端版本索引失败", ex);
+            ApplyClientVersionList(_clientDownloadService.GetLocalFallbackVersionList(channel),
+                _clientDownloadService.VersionListSource);
+        }
+        finally
+        {
+            if (ReferenceEquals(_clientVersionsCts, request)) _clientVersionsCts = null;
+            request.Dispose();
         }
     }
 
-    /// <summary>
-    /// 判断异常是不是"页面/窗口已经被拆掉，控件引用失效"这种良性情况（不是真正的 bug，
-    /// 不需要记录/上报）。目前主要覆盖 NullReferenceException（控件字段为空）——
-    /// WPF 没有一个统一的"页面已卸载"异常类型，只能按经验判断。
-    /// </summary>
+    private void ApplyClientVersionList(List<BedrockClientDownloadService.BedrockVersionInfo> versions, string source)
+    {
+        var previous = BedrockClientVersionCombo.SelectedItem as BedrockClientDownloadService.BedrockVersionInfo;
+        _clientVersions = versions;
+        BedrockClientVersionCombo.ItemsSource = versions;
+        BedrockClientVersionCombo.DisplayMemberPath = nameof(BedrockClientDownloadService.BedrockVersionInfo.DisplayName);
+        BedrockClientVersionCombo.SelectedItem = versions.FirstOrDefault(version => previous != null && version.Channel == previous.Channel &&
+            string.Equals(version.Name, previous.Name, StringComparison.OrdinalIgnoreCase))
+            ?? versions.FirstOrDefault(version => version.CanResolveDownload) ?? versions.FirstOrDefault();
+        BedrockClientVersionCombo.IsEnabled = versions.Count > 0;
+        ApplyRequestedClientFavorite();
+        UpdateClientVersionAvailability();
+        UpdateBedrockFavoriteButtons();
+        BedrockClientStatusText.Text = versions.Count > 0
+            ? $"{source} · 已加载 {versions.Count} 个版本，{versions.Count(version => version.CanResolveDownload)} 个具有可解析下载索引。"
+            : "该渠道暂时没有可用版本索引，请检查网络后刷新。";
+    }
+
+    private void UpdateClientVersionAvailability()
+    {
+        if (!_clientSectionReady) return;
+        var selected = BedrockClientVersionCombo.SelectedItem as BedrockClientDownloadService.BedrockVersionInfo;
+        BedrockClientDownloadBtn.IsEnabled = selected?.CanResolveDownload == true;
+        BedrockClientVersionCombo.ToolTip = selected?.CanResolveDownload == false
+            ? "这是上游已收录的真实 UWP 版本，但目前未提供可用的 Store 下载 ID。可选择其他版本、稍后刷新，或从 Microsoft Store 安装。"
+            : "选择要下载的具体版本；正式版与预览版分别显示。";
+    }
+
     private static bool IsBenignPageGoneException(Exception ex) => ex is NullReferenceException;
 
     private void BedrockClientChannelCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        // 渠道切换时自动刷新版本列表
-        _ = LoadClientVersionsAsync();
+        if (_clientSectionReady) _ = LoadClientVersionsAsync();
     }
 
     private void BedrockClientRefreshVersions_Click(object sender, RoutedEventArgs e)
-    {
-        // 强制从网络刷新
-        BedrockClientVersionCombo.IsEnabled = false;
-        BedrockClientVersionCombo.ItemsSource = new[] { Loc.T("Str_Cs_Loading_Version_List", "正在加载版本列表...") };
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                var channel = GetSelectedClientChannel();
-                var versions = await _clientDownloadService.RefreshVersionListAsync(channel);
-
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    _clientVersions = versions;
-                    if (versions.Count == 0)
-                    {
-                        BedrockClientVersionCombo.ItemsSource = new[] { Loc.T("Str_Cs_No_Versions_Available", "无法获取版本列表") };
-                        BedrockClientDownloadBtn.IsEnabled = false;
-                        BedrockClientStatusText.Text = Loc.T("Str_Cs_No_Versions_Available", "无法获取版本列表，请检查网络后点击「刷新列表」重试。");
-                    }
-                    else
-                    {
-                        BedrockClientVersionCombo.ItemsSource = versions;
-                        BedrockClientVersionCombo.DisplayMemberPath = "Name";
-                        BedrockClientVersionCombo.SelectedIndex = 0;
-                        BedrockClientDownloadBtn.IsEnabled = true;
-                        BedrockClientStatusText.Text = $"该渠道已加载 {versions.Count} 个版本，可直接在下拉框里选择要下载的版本。";
-                    }
-                    BedrockClientVersionCombo.IsEnabled = versions.Count > 0;   // 多版本：允许自由选择
-                });
-            }
-            catch (Exception ex)
-            {
-                // 即使强制网络刷新本身抛异常，也必须回到本地缓存/内置列表，不能把版本选择框留空。
-                var channel = GetSelectedClientChannel();
-                var fallback = _clientDownloadService.GetLocalFallbackVersionList(channel);
-                await Dispatcher.InvokeAsync(() =>
-                {
-                    ErrorPresenter.LogFallback("刷新基岩版客户端版本列表失败，已切换本地兜底", ex);
-                    _clientVersions = fallback;
-                    BedrockClientVersionCombo.ItemsSource = fallback;
-                    BedrockClientVersionCombo.DisplayMemberPath = "Name";
-                    BedrockClientVersionCombo.SelectedIndex = fallback.Count > 0 ? 0 : -1;
-                    BedrockClientDownloadBtn.IsEnabled = fallback.Count > 0;
-                    BedrockClientVersionCombo.IsEnabled = fallback.Count > 0;
-                    BedrockClientStatusText.Text = fallback.Count > 0
-                        ? $"无法直接获取在线版本列表，已使用本地兜底，共 {fallback.Count} 个版本。"
-                        : "在线版本列表和本地兜底均不可用。";
-                });
-            }
-        });
-    }
+        => _ = LoadClientVersionsAsync(forceRefresh: true);
 
     private void RefreshBedrockClientInstanceList()
     {
@@ -901,6 +921,12 @@ public partial class BedrockPage : UserControl
             return;
         }
 
+        if (!selectedVersion.CanResolveDownload)
+        {
+            MessageBoxDialog.ShowInfo("该版本的下载索引尚未同步，暂不能可靠解析 Store 下载链接。请选择其他版本、稍后刷新，或通过 Microsoft Store 安装。", "下载索引待同步");
+            return;
+        }
+
         var cfg = _owner.ConfigService.Config;
 
         // 在弹"选文件夹"之前先按版本号查已记录的实例：不管当年装在哪个目录，
@@ -909,7 +935,7 @@ public partial class BedrockPage : UserControl
         // 就会被当成"全新安装"重新下载一遍——哪怕本机其实已经有这个版本了。
         var existingRecord = cfg.BedrockClients.FirstOrDefault(r =>
             string.Equals(r.Version, selectedVersion.Name, StringComparison.OrdinalIgnoreCase)
-            && BedrockClientDownloadService.FindClientExe(r.Directory) != null);
+            && BedrockClientDownloadService.IsClientInstallationComplete(r.Directory));
 
         if (existingRecord != null)
         {
@@ -962,27 +988,30 @@ public partial class BedrockPage : UserControl
         // "所有需要下载的内容"共用的，不应该只有原版/整合包能用上）。
         DownloadQueueService.Instance.StartNew($"基岩版客户端 {selectedVersion.Name}", async (item, ct) =>
         {
+            ct.ThrowIfCancellationRequested();
             var progress = item.CreateProgress();
 
             // 先装运行库前置（VC++ / UWP 框架包，缺了客户端闪退）：一次性做完，
             // 这样游戏包下载完成之后直接解压启动，不会再有"下载完又下载一次"的错觉。
-            await BedrockContentService.EnsureSupportLibrariesInstalledAsync(progress);
+            await BedrockContentService.EnsureSupportLibrariesInstalledAsync(progress, ct);
 
             var finalDir = Path.Combine(baseDir, $"bedrock-client-{selectedVersion.Name}");
 
             // 已装过同版本（按目录判断，作为上面按版本号判断的兜底）：不再重复下载
-            if (Directory.Exists(finalDir) && BedrockClientDownloadService.FindClientExe(finalDir) != null)
+            if (Directory.Exists(finalDir) && BedrockClientDownloadService.IsClientInstallationComplete(finalDir))
             {
                 await _owner.Dispatcher.InvokeAsync(async () =>
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (MessageBoxDialog.ShowConfirm(
                             $"基岩版客户端 {selectedVersion.Name} 已经安装过了：\n{finalDir}\n\n无需重复下载，直接启动它吗？",
                             Loc.T("Str_Cs_Download_Complete", "已安装")))
                     {
+                        ct.ThrowIfCancellationRequested();
                         if (!TryBeginBedrockLaunchCooldown($"正在启动基岩版客户端 {selectedVersion.Name}...")) return;
                         try
                         {
-                            var proc = await BedrockClientDownloadService.LaunchClientAsync(finalDir);
+                            var proc = await BedrockClientDownloadService.LaunchClientAsync(finalDir, progress, ct);
                             var confirmed = await ConfirmBedrockLaunchAsync(proc, $"{selectedVersion.Name}：{finalDir}");
                             BedrockClientDownloadService.MonitorLaunchedProcess(proc, msg =>
                                 _owner.Dispatcher.InvokeAsync(() =>
@@ -991,6 +1020,7 @@ public partial class BedrockPage : UserControl
                                 ? $"已启动已安装的基岩版客户端 {selectedVersion.Name}：{finalDir}"
                                 : $"已发出启动指令，但暂未检测到进程：{finalDir}";
                         }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                         catch (Exception launchEx)
                         {
                             ErrorPresenter.ShowFriendlyError(
@@ -1002,15 +1032,17 @@ public partial class BedrockPage : UserControl
                             RefreshRunningBedrockProcesses();
                         }
                     }
-                });
+                }).Task.Unwrap();
                 return;
             }
 
             var extractDir = await _clientDownloadService.DownloadClientAsync(
-                selectedVersion, finalDir, progress);
+                selectedVersion, finalDir, progress, ct);
+            ct.ThrowIfCancellationRequested();
 
             await _owner.Dispatcher.InvokeAsync(async () =>
             {
+                ct.ThrowIfCancellationRequested();
                 var record = cfg.BedrockClients.FirstOrDefault(r => r.Directory.Equals(finalDir, StringComparison.OrdinalIgnoreCase));
                 if (record == null)
                 {
@@ -1034,6 +1066,7 @@ public partial class BedrockPage : UserControl
                 // 一条龙：下载+解压完成后直接自动启动游戏，不用再手动点「启动已安装在本地的客户端」，
                 // 也不需要自己去安装/注册任何东西（官方包解压出来就是完整可运行的游戏）。
                 // 启动失败不阻断流程：记录已保存，用户仍可点「启动已安装在本地的客户端」手动重试。
+                ct.ThrowIfCancellationRequested();
                 string launchNote;
                 if (!TryBeginBedrockLaunchCooldown($"下载完成，正在自动启动基岩版客户端 {selectedVersion.Name}..."))
                 {
@@ -1043,7 +1076,7 @@ public partial class BedrockPage : UserControl
                 {
                     try
                     {
-                        var proc = await BedrockClientDownloadService.LaunchClientAsync(finalDir, progress);
+                        var proc = await BedrockClientDownloadService.LaunchClientAsync(finalDir, progress, ct);
                         var confirmed = await ConfirmBedrockLaunchAsync(proc, $"{selectedVersion.Name}：{finalDir}");
                         BedrockClientDownloadService.MonitorLaunchedProcess(proc, msg =>
                             ErrorPresenter.LogFallback($"基岩版客户端 {selectedVersion.Name} 可能闪退", new Exception(msg)));
@@ -1054,6 +1087,7 @@ public partial class BedrockPage : UserControl
                             ? $"已下载并启动基岩版客户端 {selectedVersion.Name}：{finalDir}"
                             : $"已下载基岩版客户端 {selectedVersion.Name}，启动指令已发出：{finalDir}";
                     }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                     catch (Exception launchEx)
                     {
                         ErrorPresenter.LogFallback("自动启动已下载的基岩版客户端失败", launchEx);
@@ -1067,10 +1101,11 @@ public partial class BedrockPage : UserControl
                     }
                 }
 
+                ct.ThrowIfCancellationRequested();
                 MessageBoxDialog.ShowSuccess(
                     $"基岩版客户端 {selectedVersion.Name} 已下载并解压到：\n{finalDir}\n\n{launchNote}",
                     Loc.T("Str_Cs_Download_Complete", "下载完成"));
-            });
+            }).Task.Unwrap();
         });
     }
 
@@ -1180,21 +1215,26 @@ public partial class BedrockPage : UserControl
     private BdsChannel GetSelectedServerChannel()
         => BedrockServerChannelCombo.SelectedIndex == 1 ? BdsChannel.Preview : BdsChannel.Stable;
 
+    private int _serverVersionsRevision;
+
     private async Task LoadServerVersionsAsync()
     {
+        var revision = ++_serverVersionsRevision;
+        var channel = GetSelectedServerChannel();
         BedrockServerVersionCombo.IsEnabled = false;
         BedrockServerRefreshVersionsBtn.IsEnabled = false;
         BedrockServerVersionCombo.ItemsSource = null;
 
         try
         {
-            var channel = GetSelectedServerChannel();
             var versions = await _bedrockService.GetDedicatedServerVersionsAsync(channel);
+            if (revision != _serverVersionsRevision) return;
             if (versions.Count > 0)
             {
                 // 多版本：列表展示可选的正式版/预览版，用户可在下拉框里挑具体版本下载。
                 BedrockServerVersionCombo.ItemsSource = versions;
                 BedrockServerVersionCombo.SelectedIndex = 0;
+                ApplyRequestedServerFavorite();
                 BedrockServerStatusText.Text = $"该渠道已加载 {versions.Count} 个服务端版本，可直接在下拉框里选择要下载的版本。";
             }
             else
@@ -1204,13 +1244,18 @@ public partial class BedrockPage : UserControl
         }
         catch (Exception ex)
         {
+            if (revision != _serverVersionsRevision) return;
             ErrorPresenter.LogFallback("加载基岩版服务端版本列表失败", ex);
             BedrockServerStatusText.Text = "服务端版本列表获取失败，将下载该渠道的最新版。";
         }
         finally
         {
-            BedrockServerVersionCombo.IsEnabled = true;   // 多版本：允许自由选择
-            BedrockServerRefreshVersionsBtn.IsEnabled = true;
+            if (revision == _serverVersionsRevision)
+            {
+                BedrockServerVersionCombo.IsEnabled = true;
+                BedrockServerRefreshVersionsBtn.IsEnabled = true;
+                UpdateBedrockFavoriteButtons();
+            }
         }
     }
 

@@ -12,7 +12,7 @@ public sealed partial class DownloadQueueService
     }
     private DownloadRecoveryRecord[] CaptureRecoveryRecords() => Config?.RememberInterruptedDownloads == false
         ? Array.Empty<DownloadRecoveryRecord>() : Items.Where(item => item.RecoveryRequest != null &&
-            item.Status is not (DownloadQueueItemStatus.Completed or DownloadQueueItemStatus.Canceled) &&
+            item.Status is not (DownloadQueueItemStatus.Completed or DownloadQueueItemStatus.Canceled or DownloadQueueItemStatus.Canceling) &&
             _canRecover?.Invoke(item.RecoveryRequest) == true)
             .Select(item => new DownloadRecoveryRecord(item.RecoveryId, item.Name, item.RecoveryRequest!)).ToArray();
     public void PersistRecovery()
@@ -45,6 +45,7 @@ public sealed partial class DownloadQueueService
                     RecoveryId = record.Id, RecoveryRequest = request, OriginPage = "下载中心（上次任务恢复）",
                     TargetFolderPath = request.Folder, TargetVersionId = request.VersionId,
                     Status = DownloadQueueItemStatus.Paused, StatusText = "上次下载未完成，点击继续",
+                    StateReason = "启动器上次退出前任务未完成；确认后点击继续，已完成且校验通过的文件可复用。",
                     IsRunning = false, IsIndeterminate = false
                 };
                 Items.Add(entry); count++;

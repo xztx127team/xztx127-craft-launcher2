@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Services/LauncherReleaseInstructions.cs" Link="LauncherReleaseInstructions.cs" />
     <Compile Include="../../Services/LauncherUpdatePolicy.cs" Link="LauncherUpdatePolicy.cs" />
     <Compile Include="../../Services/LauncherUpdatePackage.cs" Link="LauncherUpdatePackage.cs" />
   </ItemGroup>

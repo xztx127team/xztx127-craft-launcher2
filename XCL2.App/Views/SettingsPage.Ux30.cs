@@ -138,6 +138,7 @@ public partial class SettingsPage
         ("UiZoomSlider", "UiZoomPercent"),
         ("WidthBox", "WindowWidth"),
         ("Win11EffectsCheck", "EnableWin11VisualEffects"),
+        ("NativeApprovalsCheck", "NativeBackgroundApprovals"),
         ("WinUi3DesignCheck", "EnableWinUi3Design"),
         ("WindowAnimationsCheck", "EnableUiAnimations"),
         ("WindowOpacitySlider", "WindowOpacityPercent"),
@@ -327,6 +328,7 @@ public partial class SettingsPage
         RegisterUxReset(DownloadNotifyModeCombo, () => DownloadNotifyModeCombo.SelectedIndex = defaults.DownloadNotifyMode);
         RegisterUxReset(DownloadPopupSizeModeCombo, () => DownloadPopupSizeModeCombo.SelectedIndex = defaults.DownloadPopupSizeDisplayMode);
         RegisterUxReset(LaunchHealthModeCombo, () => SelectComboByTag(LaunchHealthModeCombo, defaults.IntegrityCheckMode == IntegrityCheckMode.Strict ? "Strict" : "Simple"));
+        RegisterHardwarePerformanceResets(defaults);
         RegisterUxReset(PerformanceOverlayScopeCombo, () => SelectComboByTag(PerformanceOverlayScopeCombo, defaults.PerformanceOverlayAllInstances ? "All" : "Selected"));
         RegisterUxReset(UiZoomWheelCheck, () => UiZoomWheelCheck.IsChecked = defaults.UiZoomShortcutBindings.Contains(UiZoomShortcutMode.CtrlWheel));
         RegisterUxReset(UiZoomArrowCheck, () => UiZoomArrowCheck.IsChecked = defaults.UiZoomShortcutBindings.Contains(UiZoomShortcutMode.CtrlArrow));
@@ -544,6 +546,7 @@ public partial class SettingsPage
             if (!ReferenceEquals(slider, AccentRSlider) && !ReferenceEquals(slider, AccentGSlider) && !ReferenceEquals(slider, AccentBSlider)) Add(slider, Math.Round(slider.Value, 3), slider.Value.ToString("0.###", CultureInfo.CurrentCulture));
         foreach (var combo in FindSettingsControls<ComboBox>(SettingsRootPanel))
         {
+            if (ReferenceEquals(combo, PerformanceTemplateFieldCombo)) continue; // 插入字段工具，不是待保存设置。
             if (ReferenceEquals(combo, UiSkinCombo)) { Add(combo, _committedUiSkin, ThemeService.GetDisplayName(_committedUiSkin)); continue; }
             var value = combo.SelectedItem switch
             {

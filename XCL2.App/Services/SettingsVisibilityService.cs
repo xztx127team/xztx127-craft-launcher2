@@ -223,6 +223,16 @@ public static class SettingsVisibilityService
         },
         new SettingGroup
         {
+            Key = "SetGroup.Plugins",
+            GroupLabel = "插件与扩展",
+            SectionAnchors = new[] { "PluginSettingsHost" },
+            Items = new[]
+            {
+                new SettingItem { Key = "Set.Plugins.Management", Label = "插件管理、授权与扩展设置", Names = new[] { "PluginSettingsHost" }, WholeSection = true },
+            }
+        },
+        new SettingGroup
+        {
             Key = "SetGroup.Advanced",
             GroupLabel = "高级与危险操作",
             SectionAnchors = new[] { "AiAssistantSettingsBtn", "ExperimentalFeaturesBtn", "UseMachineWideRegistryCheck", "DisableRegistryBtn", "OpenHiddenItemsButton" },

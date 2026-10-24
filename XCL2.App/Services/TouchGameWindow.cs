@@ -3,8 +3,6 @@ using System.Text;
 
 namespace XCL2.App.Services;
 
-internal enum TouchGameBackend { Unknown, Glfw, Sdl, Lwjgl2 }
-
 /// <summary>按 PID 和原生窗口类识别后端，不依赖版本号、窗口标题或 Java 的启动窗口。</summary>
 internal static class TouchGameWindow
 {
@@ -46,7 +44,9 @@ internal static class TouchGameWindow
             if (!TouchInputInjector.TryGetClientAreaOnScreen(hwnd, out var l, out var t, out var r, out var b)
                 || r <= l || b <= t) return true;
             long score = (long)(r - l) * (b - t);
-            if (hwnd == preferred) score += 1L << 50;
+            // 已绑定且仍有效的渲染窗口优先，避免错误弹窗临时成为前台后触控层改绑弹窗，
+            // 关闭弹窗后残留错误的窗口尺寸与输入坐标。
+            if (hwnd == preferred) score += 1L << 56;
             if (hwnd == foreground) score += 1L << 55;
             if (score > bestScore) { best = hwnd; bestScore = score; }
             return true;

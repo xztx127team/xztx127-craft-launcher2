@@ -125,7 +125,7 @@ try {
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            throw new OperationCanceledException("未授予管理员权限，已取消驱动安装。", ex);
+            throw new DownloadUserCanceledException("未授予管理员权限，已取消驱动安装。", ex);
         }
         catch (Exception ex)
         {

@@ -38,6 +38,36 @@ public sealed class PerformanceOverlayService
 
     public static void ApplySettings() => _current?.Apply();
 
+    /// <summary>Share the overlay's persisted settings path with launcher shortcuts.</summary>
+    public static void UpdateSettings(Action<AppConfig> change)
+    {
+        var current = _current;
+        if (current == null || current._disposed) return;
+        if (!current._owner.Dispatcher.CheckAccess())
+        { current._owner.Dispatcher.BeginInvoke(new Action(() => UpdateSettings(change))); return; }
+        current.ChangeSettings(change);
+    }
+
+    public static void ResetWindowPosition()
+    {
+        var current = _current;
+        if (current == null || current._disposed) return;
+        if (!current._owner.Dispatcher.CheckAccess())
+        { current._owner.Dispatcher.BeginInvoke(new Action(ResetWindowPosition)); return; }
+        current.ChangeSettings(cfg => { cfg.PerformanceOverlayLeft = null; cfg.PerformanceOverlayTop = null; });
+        current._window?.ResetPosition(true);
+    }
+
+    /// <summary>Settings-page hardware draft only; no configuration mutation or persistence.</summary>
+    public static void PreviewHardwareSettings(AppConfig? draft)
+    {
+        var current = _current;
+        if (current == null || current._disposed) return;
+        if (!current._owner.Dispatcher.CheckAccess())
+        { current._owner.Dispatcher.BeginInvoke(new Action(() => PreviewHardwareSettings(draft))); return; }
+        current._window?.PreviewHardwareSettings(draft);
+    }
+
     private void Apply()
     {
         if (_disposed) return;
@@ -134,6 +164,7 @@ public sealed class PerformanceOverlayService
         _samplingCancellation?.Dispose();
         _samplingCancellation = null;
         LatestSnapshot = null;
+        _ = _metrics.ReleaseHardwareAsync();
     }
 
     private void Window_Closed(object? sender, EventArgs e)

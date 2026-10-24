@@ -85,7 +85,7 @@ internal sealed class WinUiPreviewHost : IDisposable
                         "worlds" => (Action)_owner.NavigateToWorlds, "instances" => _owner.NavigateToVersions,
                         "settings" => _owner.NavigateToSettings, "downloads" => _owner.NavigateToDownloadCenter,
                         "api" => _owner.NavigateToApiDocumentation,
-                        "ai" => _owner.NavigateToAiAssistant, "plugins" => () => OverlayDialogService.ShowModal(new PluginManagerDialog(_owner)),
+                        "ai" => _owner.NavigateToAiAssistant, "plugins" => _owner.OpenPluginManager,
                         "home" => _owner.NavigateToHome, _ => throw new ArgumentException("未知导航目标。")
                     };
                     _owner.Show(); _owner.Activate(); action(); return "已打开";

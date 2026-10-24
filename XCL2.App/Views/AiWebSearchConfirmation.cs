@@ -7,8 +7,8 @@ internal static class AiWebSearchConfirmation
 
     internal static bool ConfirmEnable()
     {
-        // ShowCustomYesNo 的实现将左按钮映射为 true；右侧“否”为默认选择。
-        return MessageBoxDialog.ShowCustomYesNo(Notice, "确认打开联网搜索", "确认打开", "否",
-            rightIsPrimary: true);
+        // 默认保留“否”；只有明确选择“确认打开”才启用联网搜索。
+        return MessageBoxDialog.ShowCustomYesNo(Notice, "确认打开联网搜索", "否", "确认打开",
+            rightIsPrimary: false);
     }
 }

@@ -267,12 +267,13 @@ queue.Config.DownloadTaskConcurrency = 0;
 // Dismissing a terminal row preserves its actual outcome and emits no second status/history event.
 foreach (var expected in new[] { DownloadQueueItemStatus.Completed, DownloadQueueItemStatus.Failed, DownloadQueueItemStatus.Canceled })
 {
-    var terminal = queue.StartNew("dismiss " + expected, (_, _) => expected switch
+    var terminal = queue.StartNew("dismiss " + expected, (_, token) => expected switch
     {
         DownloadQueueItemStatus.Failed => Task.FromException(new IOException("terminal failure")),
-        DownloadQueueItemStatus.Canceled => Task.FromException(new OperationCanceledException()),
+        DownloadQueueItemStatus.Canceled => Task.Delay(Timeout.Infinite, token),
         _ => Task.CompletedTask
     });
+    if (expected == DownloadQueueItemStatus.Canceled) queue.Cancel(terminal);
     Require(await terminal.Completion == expected, "Terminal dismissal fixture ended incorrectly");
     var originalText = terminal.StatusText;
     var originalCompletion = terminal.Completion;
@@ -323,7 +324,7 @@ try
     catch (DownloadDiskSpaceException) { }
     Require(File.ReadAllText(finalFile) == "complete", "Disk preflight modified target data");
 
-    // Canceling a paused writer retains its explanation, payload and temporary-file cleanup entry.
+    // Pausing automatically clears only its recorded temporary cache; canceling preserves complete files and the explanation.
     var pausedWithFiles = queue.StartNew("paused files fixture", async (_, ct) =>
     {
         File.WriteAllText(part, "resumable bytes"); DownloadTransferPolicy.TrackTemporary(part, true);
@@ -333,21 +334,24 @@ try
     queue.Pause(pausedWithFiles);
     var pausedCompletion = pausedWithFiles.Completion;
     Require(await pausedCompletion == DownloadQueueItemStatus.Paused, "File retention fixture did not pause");
+    Require(!File.Exists(part), "Paused task retained its temporary cache");
     var retainedSummary = pausedWithFiles.TransferObservation.Summary();
     var canceledNotifications = 0;
     pausedWithFiles.PropertyChanged += (_, change) =>
     { if (change.PropertyName == nameof(DownloadQueueItem.Status) && pausedWithFiles.Status == DownloadQueueItemStatus.Canceled) canceledNotifications++; };
     queue.Cancel(pausedWithFiles);
+    while (pausedWithFiles.IsCleaningUp) await Task.Delay(10);
     Require(queue.Items.Contains(pausedWithFiles) && pausedWithFiles.Status == DownloadQueueItemStatus.Canceled && pausedWithFiles.CancelLabel == "移除",
         "Paused cancellation removed the explanation row or left a resumable task");
-    Require(pausedWithFiles.TaskExplanation.Contains(retainedSummary) && pausedWithFiles.TaskExplanation.Contains("未删除已有文件"),
+    Require(pausedWithFiles.TaskExplanation.Contains(retainedSummary) && pausedWithFiles.TaskExplanation.Contains("完整文件保留"),
         "Paused cancellation claimed no previous writes or lost its actual file summary");
-    Require(File.Exists(part) && File.ReadAllText(finalFile) == "complete" && File.Exists(unrelated), "Paused cancellation deleted files");
+    Require(!File.Exists(part) && File.ReadAllText(finalFile) == "complete" && File.Exists(unrelated), "Paused cancellation deleted complete or unrelated files");
     Require(queue.FindActiveForVersion(folder, "paused-files-version") == null && await pausedCompletion == DownloadQueueItemStatus.Paused,
         "Paused cancellation retained its version reservation or rewrote the completed attempt result");
     queue.Cancel(pausedWithFiles);
     Require(!queue.Items.Contains(pausedWithFiles) && canceledNotifications == 1, "Second remove recorded a duplicate cancellation");
 }
 finally { Directory.Delete(cleanupRoot, true); }
+await DownloadLifecycleCases.RunAsync();
 await Ux50DownloadCases.RunAsync();
 Console.WriteLine("Download queue scheduling, retry, safe cleanup, limiter, Java metadata, paused checkpoint recovery and Ux50 cases passed.");

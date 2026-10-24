@@ -1,6 +1,6 @@
 namespace XCL2.App.Models;
 
-public enum AiActivityKind { SubAgent, CodeChange, FileEdit, Command, ReasoningSummary, Reasoning }
+public enum AiActivityKind { SubAgent, CodeChange, FileEdit, Command, ReasoningSummary, Reasoning, RequestParameters }
 public enum AiActivityStatus { Pending, Running, Completed, Failed, Denied, Cancelled }
 
 /// <summary>一次真实操作或供应商公开返回内容的快照；不将普通回答推测为内部执行记录。</summary>
@@ -38,6 +38,7 @@ public sealed class AiAssistantActivity
         AiActivityKind.Command => config.ShowCommands,
         AiActivityKind.ReasoningSummary => config.ShowReasoningSummary,
         AiActivityKind.Reasoning => config.ShowReasoning,
+        AiActivityKind.RequestParameters => true,
         _ => false
     };
 }

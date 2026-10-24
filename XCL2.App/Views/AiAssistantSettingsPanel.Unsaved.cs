@@ -19,6 +19,7 @@ public partial class AiAssistantSettingsPanel
 
     private void ShowSettingsWarning(string message, string title)
     {
+        if (_autoSaving) { AutoSaveStatusText.Text = "尚未保存：" + message; return; }
         if (SettingsWarningPrompt is { } prompt) prompt(message, title);
         else MessageBoxDialog.ShowWarning(message, title);
     }
@@ -26,6 +27,8 @@ public partial class AiAssistantSettingsPanel
     public void RequestDismiss()
     {
         if (_promptingToClose || _closeApproved) return;
+        _autoSaveTimer.Stop();
+        if (AutoSaveSettingsCheck.IsChecked == true) TryAutoSave();
         _promptingToClose = true;
         try
         {
@@ -62,6 +65,7 @@ public partial class AiAssistantSettingsPanel
     {
         // Do not move pending key fields into a collection just to inspect the draft.
         var config = CaptureUiAsConfig(commitPendingKeys: false);
+        config.AutoSaveSettings = false; // The toggle persists independently of incomplete editor drafts.
         config.PanelWidth = 0;
         config.PanelWasOpen = false;
         config.LastSessionId = null;
@@ -77,7 +81,7 @@ public partial class AiAssistantSettingsPanel
         {
             Config = config,
             // Preserve invalid / incomplete numeric edits that a config parser would replace by defaults.
-            RawFields = new[] { ThresholdBox.Text, RequestTimeoutBox.Text, LongWaitHintSecondsBox.Text,
+            RawFields = new[] { ThresholdBox.Text, RequestTimeoutBox.Text, MaxRunMinutesBox.Text, LongWaitHintSecondsBox.Text,
                 LongWaitDescriptionBox.Text, TemperatureBox.Text, MaxOutputTokensBox.Text,
                 MaxToolActionsBox.Text, MaxSubAgentsBox.Text, CustomSystemPromptBox.Text },
             DefaultKeyDraft = DefaultExtraKeyBox.Password,

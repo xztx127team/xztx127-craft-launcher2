@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -6,36 +6,8 @@ using System.Windows.Media;
 namespace XCL2.App.Services;
 
 /// <summary>
-/// 窗口"外壳"相关的两个独立功能，放在一起是因为都要用到 Win32 互操作、都是"跟单个
-/// Window 实例打交道"而不是纯资源字典层面的东西，跟 ThemeService（管画刷颜色）、
-/// LocalizationService（管文案）职责上是平行关系：
-///
-/// 1. 标题栏跟随深浅色模式（修复"顶部白条"）——
-///    这个项目里所有 Window 都是标准 WPF 窗口，没有自定义 WindowChrome/去掉系统边框
-///    （这是有意的：完全自绘标题栏意味着要给每一个窗口重新实现拖动/双击最大化/贴边
-///    半屏/Aero Snap 等一整套系统级窗口行为，工作量和维护成本都远超"白条"这一个问题
-///    本身）。真正的根因是：Windows 10 1809+/Windows 11 上，系统标题栏默认按"浅色"
-///    绘制，跟应用深色模式下的内容区完全不搭——这不是画出来的一条"条子"，是系统原生
-///    标题栏本身的颜色，之前项目里没有调用任何 DWM API 去声明"这个窗口是深色内容"，
-///    所以系统一直按默认浅色绘制它。
-///    解决方式是调用 DwmSetWindowAttribute 的 DWMWA_USE_IMMERSIVE_DARK_MODE 属性
-///    （Windows 10 20H1/Build 19041 起支持，此前的旧 attribute 编号 19 在更早的
-///    Insider 预览版用过，这里两个编号都尝试设置一遍，兼容极少数老旧 Windows 10
-///    版本），让系统按暗色主题绘制这个窗口的原生标题栏（背景色+文字颜色都会变），
-///    从而跟下面深色的内容区融为一体，而不是维护自己单独绘制标题栏。
-///    应用时机分两处：① App.xaml.cs 的 OnStartup 里用 EventManager.RegisterClassHandler
-///    在 Window 类型这一级统一注册，项目里所有 Window 子类（MainWindow + 20 多个弹窗）
-///    第一次显示时都会自动应用一次，不需要逐个窗口文件接线；② ThemeService 每次切换
-///    深浅色模式时，同一批"遍历所有已打开窗口"的刷新逻辑里一并调用 ApplyTitleBarTheme，
-///    保证已经打开的窗口标题栏能实时跟着切换，不需要关闭重开。
-///
-/// 2. 主窗口 F11 全屏切换——
-///    只对 MainWindow 生效（其余都是模态弹窗，全屏没有意义）。做法是把 WindowStyle
-///    切到 None、WindowState 切到 Maximized，同时记下切之前的 WindowStyle/
-///    WindowState/尺寸位置，再按 F11 时原样恢复——不用 System.Windows.Forms 的
-///    Screen 类（那是 WinForms 程序集，WPF 项目引入它只为拿屏幕尺寸没必要），
-///    Maximized 状态下 WPF 自己就会把窗口撑满当前显示器工作区，去掉 WindowStyle
-///    (捕获前先设 None）之后就不会露出系统标题栏/边框，视觉上就是完整全屏。
+/// 原生标题栏主题、DWM 窗口过渡、F11 全屏和多显示器工作区边界。
+/// 主窗口保留标准窗口样式并用 WindowChrome 绘制自定义标题栏；弹窗使用系统标题栏。
 /// </summary>
 public static class WindowChromeService
 {
@@ -68,12 +40,12 @@ public static class WindowChromeService
         _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ref useDark, sizeof(int));
     }
 
-    /// <summary>主窗口自带轻过渡，关闭 DWM 的额外尺寸过渡，避免两套动画叠加。</summary>
-    public static void DisableNativeTransitions(Window window)
+    /// <summary>当前操作交给 DWM；逐类应用偏好，关闭一种动画不会关闭其它窗口动画。</summary>
+    public static void ApplyNativeTransitionPreference(Window window, AnimationKind kind = AnimationKind.WindowOpen)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return;
-        var disabled = 1;
+        var disabled = AnimationSettingsService.IsEnabled(kind) ? 0 : 1;
         _ = DwmSetWindowAttribute(hwnd, 3 /* DWMWA_TRANSITIONS_FORCEDISABLED */, ref disabled, sizeof(int));
     }
 
@@ -83,6 +55,17 @@ public static class WindowChromeService
     private static WindowState _savedState;
     private static ResizeMode _savedResizeMode;
     private static bool _isFullScreen;
+    private static bool _changingFullScreen;
+    private static Window? _fullScreenWindow;
+
+    /// <summary>Raised after F11 has finished its synchronous style/state changes.</summary>
+    public static event Action<Window>? FullScreenChanged;
+
+    public static bool IsFullScreenGeometryTemporary(Window window)
+        => ReferenceEquals(window, _fullScreenWindow) && (_isFullScreen || _changingFullScreen);
+
+    public static WindowState? GetPreFullScreenState(Window window)
+        => IsFullScreenGeometryTemporary(window) ? _savedState : null;
 
     /// <summary>当前是否处于 F11 全屏状态，供 MainWindow 判断要不要在其它地方
     /// （比如 Esc 键、双击标题栏等）额外处理，目前只有 ToggleFullScreen 自己读写。</summary>
@@ -97,30 +80,50 @@ public static class WindowChromeService
     /// </summary>
     public static void ToggleFullScreen(Window window)
     {
-        if (!_isFullScreen)
+        if (_changingFullScreen || (_isFullScreen && !ReferenceEquals(window, _fullScreenWindow))) return;
+        _changingFullScreen = true;
+        try
         {
-            _savedStyle = window.WindowStyle;
-            _savedState = window.WindowState;
-            _savedResizeMode = window.ResizeMode;
+            if (!_isFullScreen)
+            {
+                _fullScreenWindow = window;
+                _savedStyle = window.WindowStyle;
+                _savedState = window.WindowState;
+                _savedResizeMode = window.ResizeMode;
+                window.Closed -= FullScreenWindow_Closed;
+                window.Closed += FullScreenWindow_Closed;
 
-            // 顺序很重要：先去掉 ResizeMode/WindowStyle 系统边框，再设 Maximized，
-            // 避免中间态短暂露出"半全屏带边框"的闪烁。
-            _isFullScreen = true;
-            // 从已经最大化的窗口进入全屏也必须重新计算 monitor 边界。
-            // 同一消息内完成，不修改正常窗口的尺寸/RestoreBounds。
-            if (window.WindowState == WindowState.Maximized) window.WindowState = WindowState.Normal;
-            window.ResizeMode = ResizeMode.NoResize;
-            window.WindowStyle = WindowStyle.None;
-            window.WindowState = WindowState.Maximized;
+                // Placement observers must ignore every intermediate Normal/Maximized state.
+                _isFullScreen = true;
+                if (window.WindowState == WindowState.Maximized) window.WindowState = WindowState.Normal;
+                window.ResizeMode = ResizeMode.NoResize;
+                window.WindowStyle = WindowStyle.None;
+                window.WindowState = WindowState.Maximized;
+            }
+            else
+            {
+                _isFullScreen = false;
+                window.WindowState = WindowState.Normal;
+                window.WindowStyle = _savedStyle;
+                window.ResizeMode = _savedResizeMode;
+                window.WindowState = _savedState;
+                window.Closed -= FullScreenWindow_Closed;
+            }
         }
-        else
+        finally
         {
-            _isFullScreen = false;
-            window.WindowState = WindowState.Normal;
-            window.WindowStyle = _savedStyle;
-            window.ResizeMode = _savedResizeMode;
-            window.WindowState = _savedState;
+            _changingFullScreen = false;
+            if (!_isFullScreen) _fullScreenWindow = null;
+            FullScreenChanged?.Invoke(window);
         }
+    }
+
+    private static void FullScreenWindow_Closed(object? sender, EventArgs e)
+    {
+        if (sender is not Window window || !ReferenceEquals(window, _fullScreenWindow)) return;
+        window.Closed -= FullScreenWindow_Closed;
+        _isFullScreen = _changingFullScreen = false;
+        _fullScreenWindow = null;
     }
 
     // ===== 自绘标题栏最大化时"盖住任务栏" 的修复 =====
@@ -188,6 +191,22 @@ public static class WindowChromeService
         var source = HwndSource.FromHwnd(hwnd);
         source?.AddHook((IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) =>
         {
+            // 任务栏、Alt+F4、系统菜单和标题栏双击也使用相同的动画偏好。
+            // 这里只配置 DWM，不截断命令，关闭确认仍由 WPF Closing 处理。
+            if (msg == 0x0112 /* WM_SYSCOMMAND */)
+            {
+                var command = wParam.ToInt64() & 0xFFF0;
+                AnimationKind? kind = command switch
+                {
+                    0xF020 => AnimationKind.WindowMinimize,
+                    0xF030 => AnimationKind.WindowFullscreen,
+                    0xF120 => window.WindowState == WindowState.Minimized
+                        ? AnimationKind.WindowRestore : AnimationKind.WindowFullscreen,
+                    0xF060 => AnimationKind.WindowClose,
+                    _ => null
+                };
+                if (kind.HasValue) ApplyNativeTransitionPreference(window, kind.Value);
+            }
             if (msg != WM_GETMINMAXINFO) return IntPtr.Zero;
 
             var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
@@ -212,7 +231,9 @@ public static class WindowChromeService
                     // ptMaxPosition/ptMaxSize 要用"相对显示器左上角"的偏移，而不是屏幕
                     // 绝对坐标——多屏且非主屏在左/上方向有负坐标时，直接抄绝对坐标会导致
                     // 窗口最大化后跑到别的显示器上，这里统一减去 rcMonitor 的偏移量。
-                    var bounds = _isFullScreen ? info.rcMonitor : info.rcWork;
+                    // F11 的状态只属于主窗口；独立 AI 聊天最大化仍应避开任务栏。
+                    var bounds = _isFullScreen && ReferenceEquals(window, Application.Current?.MainWindow)
+                        ? info.rcMonitor : info.rcWork;
                     mmi.ptMaxPosition.X = bounds.Left - info.rcMonitor.Left;
                     mmi.ptMaxPosition.Y = bounds.Top - info.rcMonitor.Top;
                     mmi.ptMaxSize.X = bounds.Right - bounds.Left;

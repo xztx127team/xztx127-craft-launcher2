@@ -41,6 +41,12 @@ public interface IOverlayDialogDismissGuard
     void RequestDismiss();
 }
 
+/// <summary>文件操作尚未完成或清理时，暂缓宿主退出，避免进程结束中断写入。</summary>
+public interface IOverlayHostCloseGuard
+{
+    bool IsHostCloseBlocked { get; }
+}
+
 /// <summary>宿主已结束此层的通知，包含 Esc、背景、宿主退出和代码关闭；与请求关闭分开。</summary>
 public interface IOverlayDialogLifecycle
 {

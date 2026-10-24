@@ -402,4 +402,8 @@ public static class OverlayDialogService
     internal static bool TopHandlesDismissal => _stack.TryPeek(out var top) && top.Content is IOverlayDialogDismissGuard;
 
     internal static bool HasActiveOverlay => _pending.Count > 0;
+
+    // 检查所有层，包括确认框后面的编辑器和正在淡出的内容。
+    internal static bool BlocksHostClose => _pending.Any(entry =>
+        entry.Content is IOverlayHostCloseGuard { IsHostCloseBlocked: true });
 }

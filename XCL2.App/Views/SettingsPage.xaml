@@ -33,18 +33,18 @@
                      跳转是循环的（到底了再点 ↓ 会回到第一个），当前是第几个/共几个显示在
                      左边的 SettingsSearchResultText 里，见 SettingsPage.xaml.cs 的
                      GoToSettingsSearchMatch。没有关键词/没有命中时两个按钮自动禁用。 -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
+                <WrapPanel Grid.Column="2" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center">
                     <!-- 用箭头符号而不是"上"/"下"两个汉字：这两个按钮只有 36px 宽，汉字在这个
                          尺寸下既挤又不如箭头一眼能懂；↑/↓ 也跟浏览器/编辑器里"查找上一个/下一个"
                          的通行图标一致，不需要认字就知道是干什么的。用 Segoe UI Symbol 里的
                          U+2191/U+2193，不引外部图标字体，保证在任何 Windows 上都画得出来。 -->
-                    <Button x:Name="SettingsSearchPrevBtn" Content="&#x2191;" FontSize="15" Width="36" Padding="0,2" IsEnabled="False"
+                    <Button Style="{StaticResource QuietActionButton}" x:Name="SettingsSearchPrevBtn" Content="&#x2191;" FontSize="15" Width="36" Padding="0,2" IsEnabled="False"
                             ToolTip="跳到上一个包含该关键词的设置项" Click="SettingsSearchPrev_Click"
                             AutomationProperties.Name="上一个搜索结果"/>
-                    <Button x:Name="SettingsSearchNextBtn" Content="&#x2193;" FontSize="15" Width="36" Padding="0,2" Margin="6,0,0,0" IsEnabled="False"
+                    <Button Style="{StaticResource QuietActionButton}" x:Name="SettingsSearchNextBtn" Content="&#x2193;" FontSize="15" Width="36" Padding="0,2" Margin="6,0,0,0" IsEnabled="False"
                             ToolTip="跳到下一个包含该关键词的设置项" Click="SettingsSearchNext_Click"
                             AutomationProperties.Name="下一个搜索结果"/>
-                </StackPanel>
+                </WrapPanel>
             </Grid>
 
 
@@ -69,10 +69,10 @@
             <TextBlock Text="{DynamicResource Str_Settings_LanguageSection_Hint}" FontSize="11"
                        Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8" TextWrapping="Wrap"/>
             <Button x:Name="OpenLanguagePickerBtn" Content="{DynamicResource Str_Settings_LanguageSection_OpenPicker}"
-                    Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Padding="14,8"
+                    Style="{StaticResource CompactActionButton}" HorizontalAlignment="Left" Padding="11,5"
                     Margin="0,0,0,20" Click="OpenLanguagePicker_Click"/>
 
-            <Button x:Name="ReopenWizardBtn" Content="{DynamicResource Str_Ui_Reopen_Setup_Wizard}" HorizontalAlignment="Left" Padding="10,6" Margin="0,0,0,16"
+            <Button Style="{StaticResource CompactActionButton}" x:Name="ReopenWizardBtn" Content="{DynamicResource Str_Ui_Reopen_Setup_Wizard}" HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,16"
                     Click="ReopenWizard_Click"/>
 
             <!-- 窗口与托盘：点击标题栏叉号时的默认行为 + 开机自启动。
@@ -113,13 +113,13 @@
                 <StackPanel Margin="0,10,0,0">
                     <TextBlock Text="这些选项只影响展示与本地使用记录。收藏、导出、清理等入口放在对应页面，需要时再打开。可编辑设置支持右键恢复单项或本组默认值。"
                                TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,12"/>
-                    <CheckBox x:Name="UxRecentHistoryCheck" Content="记录最近启动的实例（默认关闭）" Margin="0,0,0,8"/>
-                    <CheckBox x:Name="UxRecentToolsCheck" Content="记录最近使用的工具（默认关闭）" Margin="0,0,0,8"/>
-                    <Button Content="清空最近使用记录" Click="UxClearRecent_Click" HorizontalAlignment="Left" Padding="12,6" Margin="0,0,0,12" Style="{StaticResource SecondaryButton}"/>
+                    <CheckBox x:Name="UxRecentHistoryCheck" Content="记录最近启动的实例" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="UxRecentToolsCheck" Content="记录最近使用的工具" Margin="0,0,0,8"/>
+                    <Button Content="清空最近使用记录" Click="UxClearRecent_Click" HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,12" Style="{StaticResource CompactActionButton}"/>
                     <CheckBox x:Name="UxRememberBrowseCheck" Content="从实例详情返回时恢复筛选条件与浏览位置" Margin="0,0,0,8"/>
                     <CheckBox x:Name="UxRememberResultsCheck" Content="保留本次会话的任务结果（最多 100 条，退出后清空）" Margin="0,0,0,8"/>
-                    <Button Content="清空本次任务结果" Click="UxClearResults_Click" HorizontalAlignment="Left" Padding="12,6" Margin="0,0,0,12" Style="{StaticResource SecondaryButton}"/>
-                    <CheckBox x:Name="UxHideServerAddressesCheck" Content="隐藏服务器地址（默认关闭）" Margin="0,0,0,8"/>
+                    <Button Content="清空本次任务结果" Click="UxClearResults_Click" HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,12" Style="{StaticResource CompactActionButton}"/>
+                    <CheckBox x:Name="UxHideServerAddressesCheck" Content="隐藏服务器地址" Margin="0,0,0,8"/>
                     <CheckBox x:Name="UxRememberWindowCheck" Content="记住主窗口位置，显示器断开后移回可见区域" Margin="0,0,0,8"/>
                     <CheckBox x:Name="UxFollowReducedMotionCheck" Content="跟随系统的减少动画偏好" Margin="0,0,0,12"/>
                     <TextBlock Text="时间显示" FontSize="12" Margin="0,0,0,4"/>
@@ -135,24 +135,24 @@
                         <ComboBoxItem Content="GB" Tag="GB"/>
                     </ComboBox>
                     <CheckBox x:Name="UxExactCapacityCheck" Content="同时显示精确字节数" Margin="0,0,0,12"/>
-                    <Button Content="恢复界面布局…" Click="UxResetLayout_Click" HorizontalAlignment="Left" Padding="12,6" Style="{StaticResource SecondaryButton}"
+                    <Button Content="恢复界面布局…" Click="UxResetLayout_Click" HorizontalAlignment="Left" Padding="11,5" Style="{StaticResource CompactActionButton}"
                             ToolTip="恢复窗口、搜索框与下载面板布局，不影响账号和游戏文件"/>
                 </StackPanel>
             </Expander>
             <Expander x:Name="RecoverySettingsGroup" Header="提醒、启动检查与恢复" Margin="0,0,0,20">
                 <StackPanel Margin="0,10,0,0">
-                    <CheckBox x:Name="ReminderBadgeCheck" Content="显示右下角提醒角标（默认开启）" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="ReminderBadgeCheck" Content="显示右下角提醒角标" Margin="0,0,0,8"/>
                     <TextBlock Text="后台建议只增加角标，点击后查看详情。你主动执行操作时的确认、错误反馈，以及自己设置的模组更新提醒方式保持原样。"
                                TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,10"/>
-                    <CheckBox x:Name="LaunchHealthCheck" Content="启动前检查实例完整性（默认开启）" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="LaunchHealthCheck" Content="启动前检查实例完整性" Margin="0,0,0,6"/>
                     <ComboBox x:Name="LaunchHealthModeCombo" Width="240" HorizontalAlignment="Left" Margin="0,0,0,12">
                         <ComboBoxItem Content="轻量检查（默认）" Tag="Simple"/>
                         <ComboBoxItem Content="完整检查（逐个核对大小）" Tag="Strict"/>
                     </ComboBox>
-                    <CheckBox x:Name="RememberDownloadsCheck" Content="保存可恢复的下载任务（默认开启）" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="RememberDownloadsCheck" Content="保存可恢复的下载任务" Margin="0,0,0,6"/>
                     <TextBlock Text="重启后将支持恢复的原版安装任务放回下载管理，保持暂停，点击继续才联网。完成的文件会复用，未完成文件按服务器支持情况续传。不会自动重跑脚本或安装进程。"
                                TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,12"/>
-                    <CheckBox x:Name="ModSnapshotCheck" Content="更新模组 / 资源包前保存原文件快照（默认开启）" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="ModSnapshotCheck" Content="更新模组 / 资源包前保存原文件快照" Margin="0,0,0,8"/>
                     <TextBlock Text="保留快照数量（1–100）" FontSize="12"/>
                     <Slider x:Name="ModSnapshotCountSlider" Minimum="1" Maximum="100" Value="10" TickFrequency="1" IsSnapToTickEnabled="True" Width="250" HorizontalAlignment="Left"/>
                     <TextBlock Text="{Binding ElementName=ModSnapshotCountSlider, Path=Value, StringFormat='当前保留 {0:0} 份'}" FontSize="11"/>
@@ -162,14 +162,14 @@
                     <TextBlock Text="轮换时仅清理旧的已完成快照；未完成快照会保留供核对。快照失败时停止更新，恢复前检查文件是否有后续修改。AI 文件编辑继续使用原有的完整备份与回滚。"
                                TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,8,0,10"/>
                     <WrapPanel>
-                        <Button Content="查看提醒" Click="OpenReminders_Click" Style="{StaticResource SecondaryButton}" Padding="10,5" Margin="0,0,8,0"/>
-                        <Button Content="查看更新快照" Click="OpenModSnapshots_Click" Style="{StaticResource SecondaryButton}" Padding="10,5"/>
+                        <Button Content="查看提醒" Click="OpenReminders_Click" Style="{StaticResource CompactActionButton}" Padding="11,5" Margin="0,0,8,0"/>
+                        <Button Content="查看更新快照" Click="OpenModSnapshots_Click" Style="{StaticResource CompactActionButton}" Padding="11,5"/>
                     </WrapPanel>
                 </StackPanel>
             </Expander>
             <Expander x:Name="PerformanceOverlaySettingsGroup" Header="性能悬浮窗 · 系统与游戏占用" Margin="0,0,0,20">
                 <StackPanel Margin="0,10,0,0">
-                    <CheckBox x:Name="PerformanceOverlayEnabledCheck" Content="显示性能悬浮窗（默认关闭）" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="PerformanceOverlayEnabledCheck" Content="显示性能悬浮窗" Margin="0,0,0,8"/>
                     <TextBlock Text="显示真实系统 / 进程采样。CPU 按整台电脑的 0–100% 计算；游戏内存是进程工作集，不等于 JVM 堆上限。初次 CPU 采样需要两个采样点。"
                                FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
                     <WrapPanel Margin="0,0,0,8">
@@ -185,6 +185,61 @@
                         <CheckBox x:Name="PerformanceOverlayGameTotalsCheck" Content="所选范围的游戏合计" Margin="0,0,16,6"/>
                         <CheckBox x:Name="PerformanceOverlayPidCheck" Content="进程 PID" Margin="0,0,16,6"/>
                     </WrapPanel>
+                    <TextBlock Text="GPU / NPU 硬件监视" FontSize="13" FontWeight="SemiBold" Margin="0,8,0,8"/>
+                    <WrapPanel>
+                        <Border Width="340" Margin="0,0,12,12" Padding="14" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}" Background="{DynamicResource PanelBrush}">
+                            <StackPanel>
+                                <CheckBox x:Name="PerformanceOverlayGpuCheck" Content="显示 GPU · 图形处理器" FontWeight="SemiBold" Margin="0,0,0,12" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                <StackPanel x:Name="PerformanceOverlayGpuOptions">
+                                    <CheckBox x:Name="PerformanceOverlayGpuUtilizationCheck" Content="显示使用率" Margin="0,0,0,6" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                    <ComboBox x:Name="PerformanceOverlayGpuUtilizationFormatCombo" Margin="0,0,0,12" SelectionChanged="PerformanceHardwareChoice_Changed">
+                                        <ComboBoxItem Content="百分比 · 0.0%" Tag="Percent"/><ComboBoxItem Content="整数百分比 · 0%" Tag="PercentInteger"/><ComboBoxItem Content="比例 · 0–1" Tag="Ratio"/>
+                                    </ComboBox>
+                                    <WrapPanel Margin="0,0,0,8">
+                                        <CheckBox x:Name="PerformanceOverlayGpuDedicatedMemoryCheck" Content="显示专用显存" Width="175" VerticalAlignment="Center" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                        <ComboBox x:Name="PerformanceOverlayGpuDedicatedMemoryUnitCombo" Width="100" ToolTip="专用显存显示单位，1024进制" SelectionChanged="PerformanceHardwareChoice_Changed">
+                                            <ComboBoxItem Content="自动" Tag="Auto"/><ComboBoxItem Content="B" Tag="B"/><ComboBoxItem Content="KiB" Tag="KiB"/><ComboBoxItem Content="MiB" Tag="MiB"/><ComboBoxItem Content="GiB" Tag="GiB"/>
+                                        </ComboBox>
+                                    </WrapPanel>
+                                    <WrapPanel>
+                                        <CheckBox x:Name="PerformanceOverlayGpuSharedMemoryCheck" Content="显示共享内存" Width="175" VerticalAlignment="Center" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                        <ComboBox x:Name="PerformanceOverlayGpuSharedMemoryUnitCombo" Width="100" ToolTip="共享内存显示单位，1024进制" SelectionChanged="PerformanceHardwareChoice_Changed">
+                                            <ComboBoxItem Content="自动" Tag="Auto"/><ComboBoxItem Content="B" Tag="B"/><ComboBoxItem Content="KiB" Tag="KiB"/><ComboBoxItem Content="MiB" Tag="MiB"/><ComboBoxItem Content="GiB" Tag="GiB"/>
+                                        </ComboBox>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Width="340" Margin="0,0,12,12" Padding="14" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}" Background="{DynamicResource PanelBrush}">
+                            <StackPanel>
+                                <CheckBox x:Name="PerformanceOverlayNpuCheck" Content="显示 NPU · 神经网络处理器" FontWeight="SemiBold" Margin="0,0,0,12" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                <StackPanel x:Name="PerformanceOverlayNpuOptions">
+                                    <CheckBox x:Name="PerformanceOverlayNpuUtilizationCheck" Content="显示使用率" Margin="0,0,0,6" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                    <ComboBox x:Name="PerformanceOverlayNpuUtilizationFormatCombo" Margin="0,0,0,12" SelectionChanged="PerformanceHardwareChoice_Changed">
+                                        <ComboBoxItem Content="百分比 · 0.0%" Tag="Percent"/><ComboBoxItem Content="整数百分比 · 0%" Tag="PercentInteger"/><ComboBoxItem Content="比例 · 0–1" Tag="Ratio"/>
+                                    </ComboBox>
+                                    <WrapPanel Margin="0,0,0,8">
+                                        <CheckBox x:Name="PerformanceOverlayNpuDedicatedMemoryCheck" Content="显示专用内存" Width="175" VerticalAlignment="Center" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                        <ComboBox x:Name="PerformanceOverlayNpuDedicatedMemoryUnitCombo" Width="100" ToolTip="专用内存显示单位，1024进制" SelectionChanged="PerformanceHardwareChoice_Changed">
+                                            <ComboBoxItem Content="自动" Tag="Auto"/><ComboBoxItem Content="B" Tag="B"/><ComboBoxItem Content="KiB" Tag="KiB"/><ComboBoxItem Content="MiB" Tag="MiB"/><ComboBoxItem Content="GiB" Tag="GiB"/>
+                                        </ComboBox>
+                                    </WrapPanel>
+                                    <WrapPanel>
+                                        <CheckBox x:Name="PerformanceOverlayNpuSharedMemoryCheck" Content="显示共享内存" Width="175" VerticalAlignment="Center" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                                        <ComboBox x:Name="PerformanceOverlayNpuSharedMemoryUnitCombo" Width="100" ToolTip="共享内存显示单位，1024进制" SelectionChanged="PerformanceHardwareChoice_Changed">
+                                            <ComboBoxItem Content="自动" Tag="Auto"/><ComboBoxItem Content="B" Tag="B"/><ComboBoxItem Content="KiB" Tag="KiB"/><ComboBoxItem Content="MiB" Tag="MiB"/><ComboBoxItem Content="GiB" Tag="GiB"/>
+                                        </ComboBox>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </WrapPanel>
+                    <WrapPanel Margin="0,0,0,8">
+                        <CheckBox x:Name="PerformanceOverlayDiskCheck" Content="磁盘读写速率" Margin="0,0,16,6" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                        <CheckBox x:Name="PerformanceOverlayNetworkCheck" Content="网卡收发速率" Margin="0,0,16,6" Checked="PerformanceHardwareToggle_Changed" Unchecked="PerformanceHardwareToggle_Changed"/>
+                    </WrapPanel>
+                    <TextBlock Text="两类设备分别保存显示项目、使用率格式与内存单位。数据由 Windows / 驱动提供；没有支持的设备或读数时显示“暂不可用”，不显示为 0。NPU 不一定有专用内存。硬件选项会立即预览到已开启的悬浮窗，保存与撤销沿用本页设置。"
+                               FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
                     <TextBlock Text="显示游戏范围" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,4"/>
                     <WrapPanel Margin="0,0,0,8">
                         <ComboBox x:Name="PerformanceOverlayScopeCombo" Width="180" Margin="0,0,8,6" SelectionChanged="PerformanceOverlayScope_Changed">
@@ -196,6 +251,52 @@
                     </WrapPanel>
                     <TextBlock Text="实例按游戏目录标识区分；同名实例可用 PID 区分。指定实例退出后继续保留选择，不会自动切到其他实例。"
                                FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Border x:Name="PerformanceOverlayLayoutPanel" Padding="16" Margin="0,8,0,16" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}" Background="{DynamicResource PanelBrush}">
+                        <StackPanel>
+                            <TextBlock Text="布局、字段模板与换行" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                            <WrapPanel>
+                                <StackPanel Margin="0,0,14,10">
+                                    <TextBlock Text="内容布局" FontSize="12" Margin="0,0,0,5"/>
+                                    <ComboBox x:Name="PerformanceOverlayLayoutModeCombo" Width="180">
+                                        <ComboBoxItem Content="保留现有布局（默认）" Tag="Default"/>
+                                        <ComboBoxItem Content="使用自定义字段模板" Tag="Template"/>
+                                    </ComboBox>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,14,10">
+                                    <TextBlock Text="统一换行方式" FontSize="12" Margin="0,0,0,5"/>
+                                    <ComboBox x:Name="PerformanceOverlayLineBreakCombo" Width="180">
+                                        <ComboBoxItem Content="全部保留换行" Tag="Preserve"/>
+                                        <ComboBoxItem Content="全部取消换行 · 单行" Tag="SingleLine"/>
+                                        <ComboBoxItem Content="每项独立一行" Tag="EachField"/>
+                                    </ComboBox>
+                                </StackPanel>
+                            </WrapPanel>
+                            <WrapPanel Margin="0,0,0,8">
+                                <Button Content="全部取消换行" Style="{StaticResource CompactActionButton}" Margin="0,0,8,6" Click="PerformanceSingleLine_Click"/>
+                                <Button Content="全部保留换行" Style="{StaticResource CompactActionButton}" Margin="0,0,8,6" Click="PerformancePreserveLines_Click"/>
+                                <CheckBox x:Name="PerformanceOverlayAutoWrapCheck" Content="超出窗口宽度时自动换行" VerticalAlignment="Center" Margin="0,0,8,6"/>
+                            </WrapPanel>
+                            <TextBlock Text="单行模式会关闭自动折行，超出窗口宽度可横向滚动；保留换行时沿用现有布局或模板里的回车。下面和上方的显示项目勾选始终有效。" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,12"/>
+                            <StackPanel x:Name="PerformanceTemplateEditorPanel">
+                                <TextBlock Text="字段模板（按 Enter 插入换行，最多 4096 字符）" FontSize="12" Margin="0,0,0,6"/>
+                                <TextBox x:Name="PerformanceOverlayTemplateBox" MinHeight="110" MaxHeight="240" MaxLength="4096" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="10" FontFamily="Consolas"/>
+                                <WrapPanel Margin="0,8,0,6">
+                                    <ComboBox x:Name="PerformanceTemplateFieldCombo" Width="300" MaxWidth="400" DisplayMemberPath="Label" Margin="0,0,8,6"/>
+                                    <Button Content="插入字段" Style="{StaticResource CompactActionButton}" Margin="0,0,8,6" Click="InsertPerformanceField_Click"/>
+                                    <Button Content="恢复默认模板" Style="{StaticResource CompactActionButton}" Margin="0,0,8,6" Click="ResetPerformanceTemplate_Click"/>
+                                </WrapPanel>
+                                <TextBlock Text="字段自带名称与单位。只替换已勾选的项目；取消 GPU、NPU 或其子指标后，对应字段留空。多张设备和游戏按当前范围显示。固定文字按原样显示。未知字段会提示并忽略；花括号用 {{ 和 }} 显示，不执行表达式。" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10"/>
+                            </StackPanel>
+                            <TextBlock x:Name="PerformanceTemplateWarningText" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+                            <TextBlock Text="当前字段预览" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
+                            <Border x:Name="PerformanceTemplatePreviewFrame" MaxWidth="{Binding ActualWidth, ElementName=PerformanceOverlayLayoutPanel}" HorizontalAlignment="Left" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush2}" Background="{DynamicResource SideBrush}" CornerRadius="8" Padding="12,9">
+                                <ScrollViewer x:Name="PerformanceTemplatePreviewScroll" MaxHeight="220" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                    <TextBlock x:Name="PerformanceTemplatePreviewText" TextWrapping="Wrap"/>
+                                </ScrollViewer>
+                            </Border>
+                            <TextBlock x:Name="PerformanceTemplateSampleText" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,7,0,0"/>
+                        </StackPanel>
+                    </Border>
                     <WrapPanel>
                         <StackPanel Margin="0,0,12,10">
                             <TextBlock Text="样式" FontSize="12" Margin="0,0,0,4"/>
@@ -231,7 +332,7 @@
                             </ComboBox>
                         </StackPanel>
                         <StackPanel Margin="0,0,12,10">
-                            <TextBlock Text="内存单位" FontSize="12" Margin="0,0,0,4"/>
+                            <TextBlock Text="系统 / 进程内存单位" FontSize="12" Margin="0,0,0,4"/>
                             <ComboBox x:Name="PerformanceOverlayMemoryUnitCombo" Width="130">
                                 <ComboBoxItem Content="自动" Tag="Auto"/><ComboBoxItem Content="MB" Tag="MB"/><ComboBoxItem Content="GB" Tag="GB"/>
                             </ComboBox>
@@ -257,7 +358,9 @@
                         <CheckBox x:Name="PerformanceOverlayTopmostCheck" Content="固定在最上层" Margin="0,0,20,6"/>
                         <CheckBox x:Name="PerformanceOverlayLockCheck" Content="锁定位置" Margin="0,0,20,6"/>
                     </WrapPanel>
-                    <TextBlock Text="保存设置后生效。左键拖动悬浮窗；右键可立即保存样式、显示项目和实例选择，也可返回此处详细设置。关闭悬浮窗后停止采样。"
+                    <Button Content="硬件详情 · 厂商、速率与内存通道…" Click="PerformanceHardwareDetails_Click"
+                            Style="{StaticResource CompactActionButton}" HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,8"/>
+                    <TextBlock Text="默认关闭鼠标穿透，可直接拖动悬浮窗主体或右键设置。仅在开启穿透时显示小齿轮：点击打开原右键菜单，按住拖动可移动位置。菜单和硬件详情中的保存立即生效；本页其余设置沿用本页保存方式。关闭悬浮窗后停止采样。"
                                FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap"/>
                 </StackPanel>
             </Expander>
@@ -267,10 +370,10 @@
                       Margin="0,0,0,8"/>
             <CheckBox x:Name="EnableLauncherUpdatesCheck" Content="允许下载安装启动器更新"
                       Margin="0,0,0,6" Checked="LauncherUpdateSettings_Changed" Unchecked="LauncherUpdateSettings_Changed"/>
-            <TextBlock Text="关闭启动检查后，仍可手动检查。关闭下载安装后，仅查看版本，不会替换或重启启动器。设置遵循本页的保存方式。"
+            <TextBlock Text="关闭启动检查后仍可手动检查；关闭下载安装时仅查看可选更新。发布者要求必须安装的更新，以及已过安装期限的更新，仍需安装后才能继续使用。设置遵循本页的保存方式。"
                        FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-            <Button x:Name="CheckLauncherUpdateBtn" Content="检查更新" Style="{StaticResource SecondaryButton}"
-                    HorizontalAlignment="Left" Padding="14,8" Margin="0,0,0,8" Click="CheckLauncherUpdate_Click"/>
+            <Button x:Name="CheckLauncherUpdateBtn" Content="检查更新" Style="{StaticResource CompactActionButton}"
+                    HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,8" Click="CheckLauncherUpdate_Click"/>
             <TextBlock x:Name="LauncherUpdateStatusText" FontSize="12" Foreground="{DynamicResource TextSecondaryBrush}"
                        TextWrapping="Wrap" Margin="0,0,0,20" AutomationProperties.LiveSetting="Polite"/>
 
@@ -340,8 +443,8 @@
 
             <!-- 全盘扫描默认不开启：只在用户主动点击后才弹二次确认，说明扫描范围，
                  同意后才会真正开始遍历磁盘；默认行为(FindJava)完全不受影响，只看默认路径。 -->
-            <Button x:Name="ScanDiskForJavaBtn" Content="{DynamicResource Str_Ui_Scan_The_Whole_Disk_For_Java_Optional_Of}"
-                    HorizontalAlignment="Left" Padding="10,6" Margin="0,4,0,16"
+            <Button Style="{StaticResource CompactActionButton}" x:Name="ScanDiskForJavaBtn" Content="{DynamicResource Str_Ui_Scan_The_Whole_Disk_For_Java_Optional_Of}"
+                    HorizontalAlignment="Left" Padding="11,5" Margin="0,4,0,16"
                     Click="ScanDiskForJava_Click"/>
 
             <!-- Java 列表：多个 Java 运行时可以同时登记在案（多 Java 共存），
@@ -358,20 +461,20 @@
                  之前只能通过"全局默认 Java"强制指定一个，覆盖不到所有场景(比如同时有需要
                  Java 21 的新版本和需要 Java 8 的老 mod)；现在维护一份优先级列表，不同版本各自
                  匹配到列表里排最靠前、又满足版本要求的那个，不需要来回手动切换。 -->
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                <Button Content="{DynamicResource Str_Ui_Move_Up}" Padding="10,6" Margin="0,0,8,0" Click="MoveJavaUp_Click"
+            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <Button Style="{StaticResource CompactActionButton}" Content="{DynamicResource Str_Ui_Move_Up}" Padding="11,5" Margin="0,0,8,0" Click="MoveJavaUp_Click"
                         ToolTip="{DynamicResource Str_Ui_Move_The_Selected_Java_One_Place_Up_Auto}"/>
-                <Button Content="{DynamicResource Str_Ui_Move_Down}" Padding="10,6" Click="MoveJavaDown_Click"
+                <Button Style="{StaticResource CompactActionButton}" Content="{DynamicResource Str_Ui_Move_Down}" Padding="11,5" Click="MoveJavaDown_Click"
                         ToolTip="{DynamicResource Str_Ui_Move_The_Selected_Java_One_Place_Down}"/>
-            </StackPanel>
+            </WrapPanel>
 
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                <Button Content="{DynamicResource Str_Ui_Refresh_Auto_Detect}" Padding="10,6" Margin="0,0,8,0" Click="RefreshDetectJava_Click"
+            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
+                <Button Style="{StaticResource CompactActionButton}" Content="{DynamicResource Str_Ui_Refresh_Auto_Detect}" Padding="11,5" Margin="0,0,8,0" Click="RefreshDetectJava_Click"
                         ToolTip="{DynamicResource Str_Ui_Quickly_Checks_The_Usual_Places_For_Inst}"/>
-                <Button Content="{DynamicResource Str_Ui_Add_Browse}" Padding="10,6" Margin="0,0,8,0" Click="AddJavaByBrowse_Click"/>
-                <Button Content="{DynamicResource Str_Ui_Rename}" Padding="10,6" Margin="0,0,8,0" Click="RenameJava_Click"/>
-                <Button Content="{DynamicResource Str_Ui_Remove}" Padding="10,6" Click="RemoveJava_Click"/>
-            </StackPanel>
+                <Button Style="{StaticResource CompactActionButton}" Content="{DynamicResource Str_Ui_Add_Browse}" Padding="11,5" Margin="0,0,8,0" Click="AddJavaByBrowse_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" Content="{DynamicResource Str_Ui_Rename}" Padding="11,5" Margin="0,0,8,0" Click="RenameJava_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" Content="{DynamicResource Str_Ui_Remove}" Padding="11,5" Click="RemoveJava_Click"/>
+            </WrapPanel>
 
             <TextBlock Text="{DynamicResource Str_Ui_Global_Default_Java_Used_When_A_Version_}" Margin="0,0,0,4"/>
             <ComboBox x:Name="DefaultJavaCombo" Margin="0,0,0,12" Padding="8"
@@ -381,7 +484,7 @@
             <CheckBox x:Name="HighPerformanceGpuLaunchCheck"
                       Content="使用高性能独立显卡进行启动"
                       Margin="0,0,0,4"/>
-            <TextBlock Text="默认开启。启动游戏时优先让 Windows 为 javaw.exe 选择高性能 GPU（独立显卡/外置显卡）；没有可用独显时会自动使用现有显卡。每个版本可以在“版本设置”里单独覆盖。"
+            <TextBlock Text="启动游戏时优先让 Windows 为 javaw.exe 选择高性能 GPU（独立显卡/外置显卡）；没有可用独显时会自动使用现有显卡。每个版本可以在“版本设置”里单独覆盖。"
                        FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,16" TextWrapping="Wrap"/>
 
             <TextBlock Text="JVM 内存分配" FontWeight="Bold" Margin="0,0,0,8"/>
@@ -422,7 +525,7 @@
             </ComboBox>
             <TextBlock x:Name="MemoryAllocationPreviewText" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
                        TextWrapping="Wrap" Margin="0,0,0,6"/>
-            <Button Content="刷新内存信息" Click="RefreshMemoryPreview_Click" HorizontalAlignment="Left" Padding="10,6" Margin="0,0,0,16"/>
+            <Button Style="{StaticResource CompactActionButton}" Content="刷新内存信息" Click="RefreshMemoryPreview_Click" HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,16"/>
 
             <TextBlock Text="{DynamicResource Str_Ui_Game_Window_Size}" Margin="0,0,0,4"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
@@ -436,8 +539,8 @@
                 <ComboBoxItem Content="{DynamicResource Str_Ui_Bmclapi_Mirror_Recommended_Faster_In_Mai}"/>
                 <ComboBoxItem Content="{DynamicResource Str_Ui_Official_Mojang}"/>
             </ComboBox>
-            <Button Content="镜像管理…（社区资源 / GitHub / 自定义）" Click="OpenMirrorSettings_Click"
-                    HorizontalAlignment="Left" Padding="14,8" Margin="0,0,0,20"/>
+            <Button Style="{StaticResource CompactActionButton}" Content="镜像管理…（社区资源 / GitHub / 自定义）" Click="OpenMirrorSettings_Click"
+                    HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,20"/>
 
             <!-- CurseForge 地图下载功能使用内置 API Key（见 CurseForgeKeyService.BuiltInKey），
                  不需要用户自己申请/填写。这里之前有过一个"填 Key"输入框，但内置 key 本来就够用，
@@ -478,7 +581,7 @@
             <TextBlock Text="触屏模式（平板虚拟按键）" FontWeight="SemiBold" Margin="0,10,0,6"/>
             <CheckBox x:Name="TouchModeCheck" Content="启用触屏模式：启动后在游戏画面上叠加虚拟按键悬浮层"
                       Margin="0,0,0,8" Checked="TouchModeCheck_Checked"/>
-            <CheckBox x:Name="AskInputModeCheck" Content="每次启动游戏前询问使用「键鼠模式」还是「触屏模式」（默认开启）"
+            <CheckBox x:Name="AskInputModeCheck" Content="每次启动游戏前询问使用「键鼠模式」还是「触屏模式」"
                       Margin="0,0,0,2"/>
             <TextBlock Text="询问框 10 秒内没有选择会自动按「键鼠模式」启动，不会卡住启动流程。"
                        FontSize="11" Opacity="0.7" TextWrapping="Wrap" Margin="24,0,0,8"/>
@@ -575,7 +678,7 @@
                  默认关闭，见 AppConfig.SettingsAutoSaveWithoutConfirm 注释。 -->
             <TextBlock Text="保存行为" FontSize="14" FontWeight="Bold" Margin="0,0,0,4"/>
             <CheckBox x:Name="SettingsAutoSaveCheck"
-                      Content="修改设置后自动保存，无需点击下方的“保存设置”按钮（默认关闭）"
+                      Content="修改设置后自动保存，无需点击下方的“保存设置”按钮"
                       ToolTip="开启后每次改动会在短暂延迟后自动保存，并在左下角保留可点击“回退”的操作提示；关闭时改动只会先留在界面上，需要手动保存或在提示里点“保存”。"
                       Margin="0,0,0,20"/>
 
@@ -626,10 +729,13 @@
                 </StackPanel>
                 <TextBlock Text="不透明度始终使用设置值，鼠标悬停或展开搜索不会将其改为 100%。窗口缩放后自动限制在可见区域内。位置和尺寸使用 WPF 像素。"
                            TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"/>
-                <Button Content="重置搜索框布局" HorizontalAlignment="Left" Padding="12,5" Click="ResetFeatureSearchAppearance_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" Content="重置搜索框布局" HorizontalAlignment="Left" Padding="11,5" Click="ResetFeatureSearchAppearance_Click"/>
             </StackPanel>
+            <CheckBox x:Name="NativeApprovalsCheck" Content="后台审批使用 Windows 原生消息框"
+                      ToolTip="启动器在后台或最小化时，安装和权限确认可直接在 Windows 消息框中选择，无需恢复主界面。"
+                      Margin="0,0,0,8"/>
             <CheckBox x:Name="Win11EffectsCheck"
-                      Content="启用 Windows 11 新光效设计（云母材质背景 / 窗口圆角 / 沉浸光感过渡，仅 Windows 11 生效，默认关闭）"
+                      Content="启用 Windows 11 新光效设计（云母材质背景 / 沉浸光感过渡，仅 Windows 11 生效）"
                       ToolTip="依赖 Windows 11 才有的 DWM 特性；在 Windows 10 或更早系统上会被自动忽略，不影响正常使用。"
                       Margin="0,0,0,8" Checked="VisualEffectsToggle_Changed" Unchecked="VisualEffectsToggle_Changed"/>
             <CheckBox x:Name="WinUi3DesignCheck"
@@ -703,7 +809,7 @@
             </StackPanel>
 
             <CheckBox x:Name="WindowTransparencyCheck"
-                      Content="启用窗口透明度（侧栏 / 卡片等面板呈现半透明玻璃质感，默认关闭）"
+                      Content="启用窗口透明度（侧栏 / 卡片等面板呈现半透明玻璃质感）"
                       Margin="0,0,0,4" Checked="VisualEffectsToggle_Changed" Unchecked="VisualEffectsToggle_Changed"/>
             <!-- 毛玻璃背景图片：从"只能有一张"改成"候选池 + 固定/每天轮换"。
                  导入支持一次多选；列表里选中哪一条，哪一条就是"固定模式"下实际显示的背景，
@@ -711,23 +817,23 @@
                  这时候无论选什么都只有它可显示，禁用比"选了没反应"更诚实。
                  逻辑见 Services/AppearanceRotationService.cs。 -->
             <StackPanel x:Name="CustomBackgroundPanel" Margin="0,0,0,10">
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <WrapPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="毛玻璃背景图片" VerticalAlignment="Center" Width="200"/>
-                    <Button Content="导入图片" Padding="10,5" Click="ImportBackgroundImage_Click"
+                    <Button Style="{StaticResource CompactActionButton}" Content="导入图片" Padding="11,5" Click="ImportBackgroundImage_Click"
                             ToolTip="可以按住 Ctrl / Shift 一次选中多张图片，全部加入候选池。"/>
-                    <Button Content="移除选中" Margin="8,0,0,0" Padding="10,5" Click="RemoveBackgroundImage_Click"
+                    <Button Style="{StaticResource CompactActionButton}" Content="移除选中" Margin="8,0,0,0" Padding="11,5" Click="RemoveBackgroundImage_Click"
                             ToolTip="把列表里当前选中的那一张从候选池里删掉（同时删除启动器复制的副本，不影响你的原图）。"/>
-                    <Button Content="全部清除" Margin="8,0,0,0" Padding="10,5" Click="ClearBackgroundImage_Click"
+                    <Button Style="{StaticResource CompactActionButton}" Content="全部清除" Margin="8,0,0,0" Padding="11,5" Click="ClearBackgroundImage_Click"
                             ToolTip="清空候选池并恢复成没有背景图片的样子。"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="200,0,0,6">
-                    <Button Content="重命名选中的图片" Padding="10,5" Click="RenameBackgroundImage_Click"
+                </WrapPanel>
+                <WrapPanel Orientation="Horizontal" Margin="200,0,0,6">
+                    <Button Style="{StaticResource CompactActionButton}" Content="重命名选中的图片" Padding="11,5" Click="RenameBackgroundImage_Click"
                             ToolTip="只改候选池里这一份副本的文件名，不影响你磁盘上的原图。"/>
-                    <Button Content="打开文件所在位置" Margin="8,0,0,0" Padding="10,5" Click="OpenBackgroundImageLocation_Click"
+                    <Button Style="{StaticResource CompactActionButton}" Content="打开文件所在位置" Margin="8,0,0,0" Padding="11,5" Click="OpenBackgroundImageLocation_Click"
                             ToolTip="在文件资源管理器里定位并选中这张图片的副本文件。"/>
-                    <Button Content="预览图片" Margin="8,0,0,0" Padding="10,5" Click="PreviewBackgroundImage_Click"
+                    <Button Style="{StaticResource CompactActionButton}" Content="预览图片" Margin="8,0,0,0" Padding="11,5" Click="PreviewBackgroundImage_Click"
                             ToolTip="放大看一眼这张图，不会切换当前背景。"/>
-                </StackPanel>
+                </WrapPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <TextBlock Text="背景候选列表" VerticalAlignment="Top" Width="200" Margin="0,6,0,0"/>
                     <ListBox x:Name="CustomBackgroundCandidateList" Width="300" Height="94" Padding="2"
@@ -806,7 +912,7 @@
             </StackPanel>
 
             <CheckBox x:Name="GlobalWindowTransparencyCheck"
-                      Content="启用整窗全局透明（连标题栏/边框一起透明，能透出后方桌面，默认关闭）"
+                      Content="启用整窗全局透明（连标题栏/边框一起透明，能透出后方桌面）"
                       Margin="0,0,0,4" Checked="VisualEffectsToggle_Changed" Unchecked="VisualEffectsToggle_Changed"/>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                 <TextBlock Text="整窗透明度" VerticalAlignment="Center" Width="200"/>
@@ -969,7 +1075,7 @@
                 <Slider x:Name="UiZoomSlider" Width="180" Minimum="40" Maximum="300" TickFrequency="10"
                         IsSnapToTickEnabled="True" VerticalAlignment="Center" ValueChanged="UiZoomSlider_ValueChanged"/>
                 <TextBlock x:Name="UiZoomPercentText" Text="100%" VerticalAlignment="Center" Margin="10,0,0,0" Width="42"/>
-                <Button Content="重置为 100%" Style="{StaticResource SecondaryButton}" Padding="10,4" Margin="10,0,0,0"
+                <Button Content="重置为 100%" Style="{StaticResource CompactActionButton}" Padding="11,5" Margin="10,0,0,0"
                         Click="UiZoomReset_Click"/>
             </StackPanel>
             <TextBlock Text="没按住 Ctrl 时滚轮/方向键完全不受影响，两种绑定方式可以同时启用。"
@@ -1016,7 +1122,7 @@
                 </StackPanel>
             </Grid>
 
-            <!-- 配色与插件：宽屏时左右并排，窄屏时自动换行。插件管理不再追加到设置页最底部。 -->
+            <!-- 配色设置；插件与扩展在下一常规分区单独管理，避免被外观分类连带隐藏。 -->
             <WrapPanel Margin="0,0,0,20">
                 <StackPanel Width="620" Margin="0,0,20,0">
                 <!-- 配色皮肤：色系(White/Blue/Yellow/Purple/Pink)，跟明暗是两个独立维度。
@@ -1092,11 +1198,11 @@
                             <Slider x:Name="AccentBSlider" Grid.Column="1" Minimum="0" Maximum="255" TickFrequency="1" ValueChanged="AccentRgbSlider_ValueChanged"/>
                             <TextBlock x:Name="AccentBText" Grid.Column="2" Text="255" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                         </Grid>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <WrapPanel Orientation="Horizontal" HorizontalAlignment="Right">
                             <Border x:Name="AccentPickerPreview" Width="38" Height="30" CornerRadius="6" Margin="0,0,8,0"
                                     BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1"/>
                             <Button Content="使用 RGB 颜色" Style="{StaticResource PrimaryButton}" Padding="12,6" Click="AccentPickerUse_Click"/>
-                        </StackPanel>
+                        </WrapPanel>
                     </StackPanel>
                 </Border>
                 <TextBlock Text="选择预设主题会立即预览对应配色；选择“自定义”只展开下方调色区域，选定颜色后才算真正修改。"
@@ -1128,12 +1234,14 @@
                 </StackPanel>
                 </StackPanel>
 
-                <Border Width="520" Padding="16" Margin="0,0,0,20" VerticalAlignment="Top"
-                        Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource BorderBrush2}"
-                        BorderThickness="1" CornerRadius="10">
-                    <StackPanel x:Name="PluginSettingsHost"/>
-                </Border>
             </WrapPanel>
+
+            <TextBlock x:Name="PluginSectionTitle" Text="插件与扩展" FontSize="14" FontWeight="Bold" Margin="0,0,0,8"/>
+            <Border x:Name="PluginSettingsSection" Padding="16" Margin="0,0,0,20" MaxWidth="900" HorizontalAlignment="Stretch"
+                    Background="{DynamicResource SideBrush}" BorderBrush="{DynamicResource BorderBrush2}"
+                    BorderThickness="1" CornerRadius="10">
+                <StackPanel x:Name="PluginSettingsHost"/>
+            </Border>
 
             <!-- 自动循环：开启后由系统时间自动决定深浅色模式，不需要手动点主界面的
                  「模式设置」按钮。这两个小时数只在这里设置，主界面按钮只负责开关这个功能
@@ -1176,7 +1284,7 @@
                      AuthServerAuthService.DetectApiRootAsync），探测成功直接回填输入框，
                      不需要用户自己去皮肤站后台/文档里翻 API 地址。 -->
                 <Button x:Name="DetectSkinApiRootBtn" Grid.Column="1" Content="自动检测"
-                        Style="{StaticResource SecondaryButton}" Padding="12,8" Click="DetectSkinApiRoot_Click"/>
+                        Style="{StaticResource CompactActionButton}" Padding="11,5" Click="DetectSkinApiRoot_Click"/>
             </Grid>
             <TextBlock Text="{DynamicResource Str_Ui_Only_Affects_Offline_Accounts_Set_To_Use}"
                        FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,4" TextWrapping="Wrap"/>
@@ -1186,8 +1294,8 @@
             <!-- AI 助手设置入口 -->
             <TextBlock Text="AI 助手" FontSize="14" FontWeight="Bold" Margin="0,0,0,4"/>
             <TextBlock Text="配置 API Key、模型档位、上下文压缩、悬浮球显示等" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8" TextWrapping="Wrap"/>
-            <Button x:Name="AiAssistantSettingsBtn" Content="AI 助手设置" Style="{StaticResource SecondaryButton}"
-                    HorizontalAlignment="Left" Padding="14,8" Click="AiAssistantSettingsBtn_Click" Margin="0,0,0,20"/>
+            <Button x:Name="AiAssistantSettingsBtn" Content="AI 助手设置" Style="{StaticResource CompactActionButton}"
+                    HorizontalAlignment="Left" Padding="11,5" Click="AiAssistantSettingsBtn_Click" Margin="0,0,0,20"/>
 
             <!-- 实验性功能入口：第一次点击会先弹一个不能跳过、强制等待 10 秒的确认窗口
                  （ExperimentalGateWindow），确认过一次之后（cfg.ExperimentalFeaturesUnlocked=true）
@@ -1197,8 +1305,8 @@
             <TextBlock Text="{DynamicResource Str_Nav_Experimental}" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource WarningTextBrush}" Margin="0,0,0,4"/>
             <TextBlock Text="{DynamicResource Str_Ui_Contains_Features_Still_In_Development_O}"
                        Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,0,0,8" TextWrapping="Wrap"/>
-            <Button x:Name="ExperimentalFeaturesBtn" Content="{DynamicResource Str_Ui_Experimental_Features}" Style="{StaticResource SecondaryButton}"
-                    HorizontalAlignment="Left" Padding="14,8" Click="ExperimentalFeatures_Click" Margin="0,0,0,20"/>
+            <Button x:Name="ExperimentalFeaturesBtn" Content="{DynamicResource Str_Ui_Experimental_Features}" Style="{StaticResource CompactActionButton}"
+                    HorizontalAlignment="Left" Padding="11,5" Click="ExperimentalFeatures_Click" Margin="0,0,0,20"/>
 
 
             <!-- 下载性能：多线程下载 + 限速。默认多线程开启(8线程)、不限速——大多数用户不需要动这里，
@@ -1277,30 +1385,30 @@
             <TextBlock x:Name="SettingsHideSectionTitle" Text="隐藏项目" FontSize="14" FontWeight="Bold" Margin="0,0,0,4"/>
             <TextBlock Text="把用不到的导航入口、功能按钮或设置条目藏起来，让界面只剩你真正在用的部分。隐藏只影响显示，不会关闭功能、也不会改动已经保存的值。"
                        FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8" TextWrapping="Wrap"/>
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                <Button x:Name="OpenHiddenItemsButton" Content="打开「隐藏项目」…" Padding="14,8"
+            <WrapPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <Button Style="{StaticResource CompactActionButton}" x:Name="OpenHiddenItemsButton" Content="打开「隐藏项目」…" Padding="11,5"
                         Click="OpenHiddenItems_Click"/>
-            </StackPanel>
+            </WrapPanel>
             <TextBlock x:Name="SettingsHideStatusText" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
                        Margin="0,0,0,20" TextWrapping="Wrap"/>
 
             <TextBlock Text="百宝箱布局" FontSize="14" FontWeight="Bold" Margin="0,0,0,6"/>
-            <Button Content="设置默认显示的工具、顺序和个数…" HorizontalAlignment="Left" Padding="12,8"
+            <Button Style="{StaticResource CompactActionButton}" Content="设置默认显示的工具、顺序和个数…" HorizontalAlignment="Left" Padding="11,5"
                     Click="OpenToolboxPreferences_Click" Margin="0,0,0,20"/>
 
             <TextBlock Text="OpenGL / 显卡驱动" FontSize="14" FontWeight="Bold" Margin="0,0,0,6"/>
             <TextBlock Text="如果游戏提示 OpenGL 版本过低，可通过 Windows Update 查找与本机硬件匹配的显示驱动。硬件不支持的 OpenGL 版本无法仅靠驱动升级获得。"
                        TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8"/>
-            <Button Content="一键尝试安装 OpenGL 显卡驱动" HorizontalAlignment="Left" Padding="12,8"
+            <Button Style="{StaticResource CompactActionButton}" Content="一键尝试安装 OpenGL 显卡驱动" HorizontalAlignment="Left" Padding="11,5"
                     Click="InstallDisplayDriver_Click" Margin="0,0,0,8"/>
             <local:DriverDownloadLinks/>
 
             <TextBlock Text="DirectX 运行库" FontSize="14" FontWeight="Bold" Margin="0,8,0,6"/>
             <TextBlock Text="如果游戏或原生库提示缺少 d3dx9 / d3dcompiler / xinput 等 DLL，可以从微软官方下载并安装 DirectX 运行库（不是显卡驱动）。"
                        TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8"/>
-            <Button Content="补全 DirectX" HorizontalAlignment="Left" Padding="12,8"
+            <Button Style="{StaticResource CompactActionButton}" Content="补全 DirectX" HorizontalAlignment="Left" Padding="11,5"
                     ToolTip="从微软官方安装 DirectX 运行库" Click="InstallDirectX_Click" Margin="0,0,0,4"/>
-            <Button Content="微软官方下载页 ↗" Click="OpenDirectXPage_Click" HorizontalAlignment="Left" Margin="0,0,0,20" Padding="12,6"/>
+            <Button Style="{StaticResource QuietActionButton}" Content="微软官方下载页 ↗" Click="OpenDirectXPage_Click" HorizontalAlignment="Left" Margin="0,0,0,20" Padding="11,5"/>
 
             <!-- 更新日志：两个入口分别打开两个**互相独立**的窗口（Views/ChangelogWindow），
                  可以同时开着对照看，关掉一个不影响另一个。一个指向 XCL 自己的 GitHub
@@ -1311,14 +1419,14 @@
                        FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8" TextWrapping="Wrap"/>
             <WrapPanel Margin="0,0,0,8">
                 <StackPanel Margin="0,0,12,12" HorizontalAlignment="Left">
-                    <Button x:Name="XclChangelogButton" Content="📋 查看 XCL 更新日志" Padding="14,8"
+                    <Button Style="{StaticResource CompactActionButton}" x:Name="XclChangelogButton" Content="📋 查看 XCL 更新日志" Padding="11,5"
                             Click="OpenXclChangelog_Click" ToolTip="在启动器中查看 XCL 发布日志"/>
-                    <Button x:Name="XclChangelogExternalButton" Content="在浏览器中查看 XCL 日志 ↗"
+                    <Button Style="{StaticResource QuietActionButton}" x:Name="XclChangelogExternalButton" Content="在浏览器中查看 XCL 日志 ↗"
                             Tag="https://github.com/adorable0127/xztx127-craft-launcher2/releases"
-                            Click="OpenExternalPage_Click" Margin="0,6,0,0" Padding="12,6"/>
+                            Click="OpenExternalPage_Click" Margin="0,6,0,0" Padding="11,5"/>
                 </StackPanel>
                 <StackPanel Margin="0,0,12,12" HorizontalAlignment="Left">
-                    <Button x:Name="MinecraftChangelogButton" Content="🧱 Minecraft 更新日志页" Padding="14,8"
+                    <Button Style="{StaticResource CompactActionButton}" x:Name="MinecraftChangelogButton" Content="🧱 Minecraft 更新日志页" Padding="11,5"
                             Click="OpenMinecraftChangelog_Click" ToolTip="在启动器中查看中文 Minecraft Wiki 的 Java 版版本列表"/>
                 </StackPanel>
             </WrapPanel>
@@ -1327,11 +1435,11 @@
                  协议状态，下次启动会重新走一遍协议流程。两者都对应 AgreementsWindow/AppConfig 里
                  已有的协议版本号机制，见各自 Click 处理函数上的注释。 -->
             <TextBlock Text="协议与账户" FontSize="14" FontWeight="Bold" Margin="0,0,0,4"/>
-            <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
-                <Button x:Name="ReadAgreementsButton" Content="阅读协议" Padding="14,8" Click="ReadAgreements_Click"/>
-                <Button x:Name="DeregisterButton" Content="注销应用（暂时不同意协议）" Padding="14,8" Margin="8,0,0,0"
+            <WrapPanel Orientation="Horizontal" Margin="0,0,0,20">
+                <Button Style="{StaticResource CompactActionButton}" x:Name="ReadAgreementsButton" Content="阅读协议" Padding="11,5" Click="ReadAgreements_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" x:Name="DeregisterButton" Content="注销应用（暂时不同意协议）" Padding="11,5" Margin="8,0,0,0"
                         Click="Deregister_Click"/>
-            </StackPanel>
+            </WrapPanel>
 
             <!-- 正版账户令牌保留时效：见 AppConfig.AccountTokenGracePeriodDays 与
                  MainWindow 里微软账户刷新失败后的降级处理。0 = 关闭这个降级。 -->
@@ -1353,12 +1461,12 @@
             <TextBlock x:Name="RegistryStatusText" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"
                        Margin="0,0,0,10" TextWrapping="Wrap"/>
             <WrapPanel Margin="0,0,0,10">
-                <Button x:Name="UpdateConfigDefaultsBtn" Content="更新配置文件" Padding="14,8" Margin="0,0,8,8"
+                <Button Style="{StaticResource CompactActionButton}" x:Name="UpdateConfigDefaultsBtn" Content="更新配置文件" Padding="11,5" Margin="0,0,8,8"
                         ToolTip="把新版本引入的设置默认值补丁进当前配置，不会覆盖你已经改过的任何设置"
                         Click="UpdateConfigDefaults_Click"/>
-                <Button x:Name="ExportRegBtn" Content="导出注册表 (.reg)" Padding="14,8" Margin="0,0,8,8" Click="ExportReg_Click"/>
-                <Button x:Name="ExportAllConfigBtn" Content="导出所有配置" Padding="14,8" Margin="0,0,8,8" Click="ExportAllConfig_Click"/>
-                <Button x:Name="ImportConfigBtn" Content="导入配置" Padding="14,8" Margin="0,0,8,8" Click="ImportConfig_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" x:Name="ExportRegBtn" Content="导出注册表 (.reg)" Padding="11,5" Margin="0,0,8,8" Click="ExportReg_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" x:Name="ExportAllConfigBtn" Content="导出所有配置" Padding="11,5" Margin="0,0,8,8" Click="ExportAllConfig_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" x:Name="ImportConfigBtn" Content="导入配置" Padding="11,5" Margin="0,0,8,8" Click="ImportConfig_Click"/>
             </WrapPanel>
             <!-- 拖拽导入：把导出的 .xclconfig.json 归档文件直接拖到这个区域即可，
                  跟点"导入配置"按钮走同一套解析/写回逻辑（见 SettingsPage.xaml.cs 的
@@ -1389,18 +1497,18 @@
             <TextBlock Text="以下操作需要输入确认码 xztx127 才能执行，且都不可撤销；只会影响 XCL2 自身的配置/注册表数据，不会触碰 .minecraft 游戏目录或系统其它设置。"
                        FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
             <WrapPanel Margin="0,0,0,20">
-                <Button x:Name="DisableRegistryBtn" Content="关闭注册表功能" Padding="14,8" Margin="0,0,8,8" Click="DisableRegistry_Click"/>
-                <Button x:Name="DeleteRegistryBtn" Content="删除所有新增的启动器注册表项" Padding="14,8" Margin="0,0,8,8" Click="DeleteRegistry_Click"/>
-                <Button x:Name="ClearTracesBtn" Content="清除本机痕迹" Padding="14,8" Margin="0,0,8,8" Click="ClearTraces_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" x:Name="DisableRegistryBtn" Content="关闭注册表功能" Padding="11,5" Margin="0,0,8,8" Click="DisableRegistry_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" x:Name="DeleteRegistryBtn" Content="删除所有新增的启动器注册表项" Padding="11,5" Margin="0,0,8,8" Click="DeleteRegistry_Click"/>
+                <Button Style="{StaticResource CompactActionButton}" x:Name="ClearTracesBtn" Content="清除本机痕迹" Padding="11,5" Margin="0,0,8,8" Click="ClearTraces_Click"/>
             </WrapPanel>
 
             <WrapPanel HorizontalAlignment="Left" Margin="0,0,0,8">
                 <Button Content="{DynamicResource Str_Ui_Save_Settings}" Style="{StaticResource PrimaryButton}" MinWidth="140" Padding="18,9" Click="Save_Click" Margin="0,0,10,6"/>
-                <Button Content="一键恢复到默认设置" Style="{StaticResource SecondaryButton}" MinWidth="190" Padding="18,9" Click="ResetToDefaults_Click" Margin="0,0,0,6"
+                <Button Content="一键恢复到默认设置" Style="{StaticResource CompactActionButton}" MinWidth="190" Padding="11,5" Click="ResetToDefaults_Click" Margin="0,0,0,6"
                         ToolTip="恢复启动器设置为默认值"/>
             </WrapPanel>
             <Button x:Name="UxChangeSummaryButton" Content="查看本次修改" Visibility="Collapsed" Click="UxChangeSummary_Click"
-                    Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Padding="12,7" Margin="0,0,0,4"
+                    Style="{StaticResource CompactActionButton}" HorizontalAlignment="Left" Padding="11,5" Margin="0,0,0,4"
                     ToolTip="只比较设置值；搜索、滚动、展开分区不会计入修改"/>
             <TextBlock x:Name="StatusText" Foreground="{DynamicResource AccentBrush}" Margin="0,12,0,0"/>
         </StackPanel>

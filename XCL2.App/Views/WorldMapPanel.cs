@@ -18,6 +18,7 @@ internal sealed class WorldMapPanel : UserControl
     private readonly Button _load = new() { Content = "预览", IsEnabled = false }, _cancel = new() { Content = "取消读取", IsEnabled = false }, _export = new() { Content = "导出 PNG", IsEnabled = false };
     private readonly TextBlock _status = new() { Text = "选择存档后可读取已生成地表。", TextWrapping = TextWrapping.Wrap }, _sample = new() { Text = "北 ↑（−Z） · 东 →（+X）", TextWrapping = TextWrapping.Wrap };
     private readonly WorldMapViewport _viewport = new();
+    private readonly List<Button> _viewActions = new();
     private WorldArchive? _world;
     private WorldMapPreview? _preview;
     private BitmapSource? _bitmap;
@@ -35,15 +36,24 @@ internal sealed class WorldMapPanel : UserControl
         { controls.Children.Add(new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 4) }); value.Margin = new Thickness(0, 0, 12, 4); controls.Children.Add(value); }
         Field("维度", _dimension); Field("中心 X", _x); Field("Z", _z); Field("半径", _radius);
         _radius.ToolTip = "8–256 个方块；只读取正方形范围内已经生成的区块。";
-        foreach (var button in new[] { _load, _cancel }) { button.Margin = new Thickness(0, 0, 8, 4); controls.Children.Add(button); }
+        _load.ToolTip = "读取所选维度在指定坐标附近已生成的地表，不修改世界。";
+        _cancel.ToolTip = "取消当前地图读取，存档内容保持不变。";
+        foreach (var button in new[] { _load, _cancel }) { button.SetResourceReference(StyleProperty, "CompactActionButton"); button.Margin = new Thickness(0, 0, 8, 4); ToolTipService.SetShowOnDisabled(button, true); controls.Children.Add(button); }
         _load.Click += async (_, _) => await LoadMapAsync(); _cancel.Click += (_, _) => { CancelRead(false); _status.Text = "已取消读取。"; };
         _dimension.SelectionChanged += (_, _) => { CancelRead(true); _status.Text = "维度已切换，点击预览读取。"; };
         page.Children.Add(controls);
         var tools = new WrapPanel();
-        Button Tool(string title, Action action) { var button = new Button { Content = title, Margin = new Thickness(0, 0, 8, 4) }; button.Click += (_, _) => action(); tools.Children.Add(button); return button; }
-        Tool("出生点", GoToSpawn); Tool("玩家位置", GoToPlayer);
-        Tool("适应窗口", _viewport.Fit); Tool("＋", () => _viewport.Zoom(1.4)); Tool("−", () => _viewport.Zoom(1 / 1.4));
-        _export.Margin = new Thickness(0, 0, 8, 4); _export.Click += (_, _) => Export(); _export.ToolTip = "地表 PNG 为 1 像素 / 方块，不含定位标记和网格。"; tools.Children.Add(_export);
+        Button Tool(string title, Action action, string tip, bool needsPreview = false)
+        {
+            var button = new Button { Content = title, ToolTip = tip, IsEnabled = !needsPreview, Margin = new Thickness(0, 0, 8, 4) };
+            button.SetResourceReference(StyleProperty, "CompactActionButton"); ToolTipService.SetShowOnDisabled(button, true);
+            if (needsPreview) _viewActions.Add(button);
+            button.Click += (_, _) => action(); tools.Children.Add(button); return button;
+        }
+        Tool("出生点", GoToSpawn, "将中心坐标设为主世界出生点，再点击“预览”读取周围地图。"); Tool("玩家位置", GoToPlayer, "定位 level.dat 中的单人玩家维度及坐标，再点击“预览”读取地图。");
+        Tool("适应窗口", _viewport.Fit, "读取预览后，将整张地图居中显示。", true); Tool("＋", () => _viewport.Zoom(1.4), "读取预览后放大地图；也可使用鼠标滚轮。", true); Tool("−", () => _viewport.Zoom(1 / 1.4), "读取预览后缩小地图；也可使用鼠标滚轮。", true);
+        _export.SetResourceReference(StyleProperty, "CompactActionButton"); ToolTipService.SetShowOnDisabled(_export, true);
+        _export.Margin = new Thickness(0, 0, 8, 4); _export.Click += (_, _) => Export(); _export.ToolTip = "先读取地图预览，再导出地表 PNG；1 像素 / 方块，不含定位标记和网格。"; tools.Children.Add(_export);
         tools.Children.Add(_height); tools.Children.Add(_grid);
         _height.Checked += (_, _) => Recolor(); _height.Unchecked += (_, _) => Recolor();
         _grid.Checked += (_, _) => { _viewport.ShowGrid = true; _viewport.InvalidateVisual(); }; _grid.Unchecked += (_, _) => { _viewport.ShowGrid = false; _viewport.InvalidateVisual(); };
@@ -73,7 +83,7 @@ internal sealed class WorldMapPanel : UserControl
     private void CancelRead(bool clear)
     {
         _generation++; _reading?.Cancel(); _reading = null; _cancel.IsEnabled = false; _load.IsEnabled = _world != null;
-        if (clear) { _preview = null; _bitmap = null; _export.IsEnabled = false; _viewport.Clear(); _sample.Text = "北 ↑（−Z） · 东 →（+X）"; }
+        if (clear) { _preview = null; _bitmap = null; _export.IsEnabled = false; foreach (var button in _viewActions) button.IsEnabled = false; _viewport.Clear(); _sample.Text = "北 ↑（−Z） · 东 →（+X）"; }
     }
     private async Task LoadMapAsync()
     {
@@ -100,7 +110,7 @@ internal sealed class WorldMapPanel : UserControl
     }
     private void GoToSpawn()
     {
-        if (_world == null) return;
+        if (_world == null) { _status.Text = "请先在存档列表中选择一个世界。"; return; }
         if (_world.Settings.SpawnX is not int x || _world.Settings.SpawnZ is not int z) { _status.Text = "存档没有记录出生点坐标。"; return; }
         CancelRead(true);
         _dimension.SelectedIndex = 0; _x.Text = x.ToString(CultureInfo.InvariantCulture); _z.Text = z.ToString(CultureInfo.InvariantCulture);
@@ -149,12 +159,13 @@ internal sealed class WorldMapPanel : UserControl
             playerDimension == preview.Dimension && player?.X is double px && double.IsFinite(px) ? px : null,
             playerDimension == preview.Dimension && player?.Z is double pz && double.IsFinite(pz) ? pz : null, fit);
         _export.IsEnabled = true;
+        foreach (var button in _viewActions) button.IsEnabled = true;
     }
     private void Export()
     {
-        if (_bitmap == null || _preview == null) return;
+        if (_bitmap == null || _preview == null) { _status.Text = "请先点击“预览”读取地图，再导出图片。"; return; }
         var dialog = new Microsoft.Win32.SaveFileDialog { Filter = "PNG 图片|*.png", FileName = $"map-{_preview.MinX}-{_preview.MinZ}.png", AddExtension = true, DefaultExt = ".png" };
-        if (dialog.ShowDialog() != true) return;
+        if ((Window.GetWindow(this) is { } owner ? dialog.ShowDialog(owner) : dialog.ShowDialog()) != true) return;
         try
         {
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(_bitmap));

@@ -9,17 +9,57 @@ public static partial class UpdateCheckService
 {
     private static DispatcherTimer? _snoozeTimer;
     private static Version? _latestReminderVersion;
+    private static LauncherReleaseInstructions? _latestReminderInstructions;
+    private static DispatcherTimer? _globalPreferenceTimer;
+    private static LauncherReminderMode _lastGlobalReminderMode;
 
-    private static void PublishUpdateReminder(Version remote, Version local, Func<bool> enabled)
+    private static void PublishUpdateReminder(Version remote, Version local, Func<bool> enabled, LauncherReleaseInstructions? instructions = null)
     {
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher == null || dispatcher.HasShutdownStarted) return;
-        if (!dispatcher.CheckAccess()) { dispatcher.BeginInvoke(new Action(() => PublishUpdateReminder(remote, local, enabled))); return; }
+        if (!dispatcher.CheckAccess()) { dispatcher.BeginInvoke(new Action(() => PublishUpdateReminder(remote, local, enabled, instructions))); return; }
         if (_latestReminderVersion != null && remote < _latestReminderVersion) return;
         _latestReminderVersion = remote;
         _snoozeTimer?.Stop(); _snoozeTimer = null;
         var version = remote.ToString();
         var key = "launcher-update-" + version;
+        instructions ??= LauncherReleaseInstructions.Default;
+        _latestReminderInstructions = instructions;
+        if (instructions.IsRequired(DateOnly.FromDateTime(DateTime.Now)))
+        {
+            ReminderCenterService.Remove(key);
+            _ = EnforceCachedRequiredUpdateAsync();
+            return;
+        }
+        var global = LauncherUpdatePreferences.Read();
+        _lastGlobalReminderMode = global.EffectiveMode(DateTimeOffset.Now);
+        if (_globalPreferenceTimer == null)
+        {
+            _globalPreferenceTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            _globalPreferenceTimer.Tick += (_, _) =>
+            {
+                if (_lastGlobalReminderMode != LauncherUpdatePreferences.Read().EffectiveMode(DateTimeOffset.Now))
+                    RefreshGlobalReminderPreference();
+            };
+            _globalPreferenceTimer.Start();
+        }
+        if (global.SuppressAutomaticReminder(DateTimeOffset.Now, instructions, DateOnly.FromDateTime(DateTime.Now)))
+        {
+            ReminderCenterService.Remove(key);
+            if (global.EndsAt is { } resumes)
+            {
+                var delay = resumes - DateTimeOffset.Now;
+                if (delay > TimeSpan.FromDays(7)) delay = TimeSpan.FromDays(7);
+                _snoozeTimer = new DispatcherTimer { Interval = delay > TimeSpan.Zero ? delay : TimeSpan.FromSeconds(1) };
+                _snoozeTimer.Tick += (_, _) =>
+                {
+                    _snoozeTimer?.Stop();
+                    PublishUpdateReminder(remote, local, enabled, instructions);
+                };
+                _snoozeTimer.Start();
+            }
+            return;
+        }
         var config = ConfigService.Active?.Config;
         if (config != null && config.Ux50UpdateReminderSnoozes != null
             && config.Ux50UpdateReminderSnoozes.TryGetValue(version, out var until) && until > DateTimeOffset.UtcNow)
@@ -31,7 +71,7 @@ public static partial class UpdateCheckService
                     var active = ConfigService.Active;
                     active?.Config.Ux50UpdateReminderSnoozes?.Remove(version); active?.Save();
                     ReminderCenterService.AllowAgain(key); ReminderCenterService.Remove(key);
-                    PublishUpdateReminder(remote, local, enabled); return Task.CompletedTask;
+                    PublishUpdateReminder(remote, local, enabled, instructions); return Task.CompletedTask;
                 }, initiallyRead: true);
             _snoozeTimer?.Stop();
             var delay = until - DateTimeOffset.UtcNow;
@@ -43,23 +83,40 @@ public static partial class UpdateCheckService
                 _snoozeTimer?.Stop();
                 // Refresh the local badge only. A snooze expiry never starts a network request or download.
                 if (enabled())
-                { ReminderCenterService.AllowAgain(key); ReminderCenterService.Remove(key); PublishUpdateReminder(remote, local, enabled); }
+                { ReminderCenterService.AllowAgain(key); ReminderCenterService.Remove(key); PublishUpdateReminder(remote, local, enabled, instructions); }
             };
             _snoozeTimer.Start();
             return;
         }
         ReminderCenterService.Publish(key, "启动器有新版本",
-            $"当前 v{FormatVersion(local)}，可更新到 v{FormatVersion(remote)}。查看后再决定是否安装。",
+            $"当前 v{FormatVersion(local)}，可更新到 v{FormatVersion(remote)}。" +
+            (instructions.Deadline is { } deadline ? $"请在 {deadline:yyyy/MM/dd} 当日结束前安装，逾期将无法跳过。" : "查看后再决定是否安装。"),
             "查看更新", async () =>
             {
                 if (!enabled()) { ToastService.ShowInfo("启动器更新已在设置中关闭。"); return; }
                 var result = await CheckForUpdateAsync(enabled);
                 if (result.Status is CheckStatus.Failed or CheckStatus.Busy) ToastService.ShowWarning(result.Message);
-            }, "稍后提醒…", () => { ShowSnoozeOptions(remote, local, enabled); return Task.CompletedTask; });
+            }, "稍后提醒…", () => { ShowSnoozeOptions(remote, local, enabled, instructions); return Task.CompletedTask; });
     }
 
-    private static void ShowSnoozeOptions(Version remote, Version local, Func<bool> enabled)
+    public static void RefreshGlobalReminderPreference()
     {
+        if (_latestReminderVersion == null) return;
+        var remote = _latestReminderVersion;
+        var local = GetCurrentReleaseVersion().Core;
+        ReminderCenterService.AllowAgain("launcher-update-" + remote);
+        ReminderCenterService.Remove("launcher-update-" + remote);
+        PublishUpdateReminder(remote, local, () => ConfigService.Active?.Config.EnableLauncherUpdates == true, _latestReminderInstructions);
+    }
+
+    private static void ShowSnoozeOptions(Version remote, Version local, Func<bool> enabled, LauncherReleaseInstructions instructions)
+    {
+        if (instructions.IsRequired(DateOnly.FromDateTime(DateTime.Now)))
+        {
+            ToastService.ShowWarning("此更新已到安装期限，无法再暂缓。");
+            _ = EnforceCachedRequiredUpdateAsync();
+            return;
+        }
         if (ConfigService.Active == null) return;
         var dialog = new OverlayDialogControl { MinWidth = 300, MaxWidth = 500 };
         var root = new StackPanel { Margin = new Thickness(20) };
@@ -71,6 +128,10 @@ public static partial class UpdateCheckService
             var button = new Button { Content = option.Item1, Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(0, 0, 8, 8) };
             button.Click += (_, _) =>
             {
+                if (instructions.IsRequired(DateOnly.FromDateTime(DateTime.Now)))
+                {
+                    dialog.Close(); _ = EnforceCachedRequiredUpdateAsync(); return;
+                }
                 var active = ConfigService.Active;
                 if (active == null) { dialog.Close(); return; }
                 var config = active.Config;
@@ -83,7 +144,7 @@ public static partial class UpdateCheckService
                 active.Save();
                 ReminderCenterService.AllowAgain("launcher-update-" + remote);
                 ReminderCenterService.Remove("launcher-update-" + remote);
-                PublishUpdateReminder(remote, local, enabled); dialog.Close();
+                PublishUpdateReminder(remote, local, enabled, instructions); dialog.Close();
             };
             buttons.Children.Add(button);
         }

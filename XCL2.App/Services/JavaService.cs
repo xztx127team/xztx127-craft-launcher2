@@ -716,21 +716,76 @@ public class JavaService
     {
         var zipPath = Path.Combine(RuntimeDir, source.FileName);
         await DownloadToFileAsync(source, zipPath, progress, ct);
-
-        var extractDir = Path.Combine(RuntimeDir, Path.GetFileNameWithoutExtension(source.FileName));
         ct.ThrowIfCancellationRequested();
         progress?.Report(new ProgressInfo("解压 Java 运行时", 0, 1, "解压中..."));
-        if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
-        ZipFile.ExtractToDirectory(zipPath, extractDir);
-        File.Delete(zipPath);
-
-        // 有些压缩包解压后会多一层目录，向下查找 javaw.exe
-        var found = Directory.GetFiles(extractDir, "javaw.exe", SearchOption.AllDirectories).FirstOrDefault();
-        if (found == null)
-            throw new InvalidOperationException("Java 解压后未找到 javaw.exe，请手动配置 Java 路径。");
-
-        progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Java_Installation_Complete", "Java 安装完成"), 1, 1, found));
-        return found;
+        // Build outside the detected runtime directory. A canceled extraction must never
+        // expose a half-written javaw.exe or remove a previously usable runtime.
+        return await Task.Run(async () =>
+        {
+            var staging = Path.Combine(App.DataDir, "runtime-staging", Guid.NewGuid().ToString("N"));
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                Directory.CreateDirectory(staging);
+                using (DownloadTransferPolicy.BeginPhase("解压"))
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    ArchiveImportSafety.ValidateArchive(archive, staging);
+                    var done = 0;
+                    foreach (var entry in archive.Entries)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var relative = entry.FullName.Replace('\\', '/').TrimEnd('/');
+                        if (relative.Length == 0) continue;
+                        var destination = ArchiveImportSafety.Resolve(staging, relative);
+                        if (string.IsNullOrEmpty(entry.Name)) Directory.CreateDirectory(destination);
+                        else
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                            await using (var input = entry.Open())
+                            await using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                                await input.CopyToAsync(output, ct);
+                        }
+                        progress?.Report(new ProgressInfo("解压 Java 运行时", ++done, archive.Entries.Count, entry.Name));
+                    }
+                }
+                ct.ThrowIfCancellationRequested();
+                var found = Directory.EnumerateFiles(staging, "javaw.exe", SearchOption.AllDirectories)
+                    .FirstOrDefault(path =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        return string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "bin", StringComparison.OrdinalIgnoreCase)
+                            && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "java.exe"));
+                    });
+                if (found == null)
+                    throw new InvalidOperationException("Java 解压后未找到完整的 bin/javaw.exe 和 java.exe，请手动配置 Java 路径。");
+                var runtimeRoot = Path.GetDirectoryName(Path.GetDirectoryName(found)!)!;
+                var extractDir = Path.Combine(RuntimeDir, Path.GetFileNameWithoutExtension(source.FileName));
+                // Never replace or recursively delete an existing runtime. Directory.Move
+                // publishes the complete tree atomically; a name collision gets its own slot.
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (Directory.Exists(extractDir) || File.Exists(extractDir))
+                        extractDir = Path.Combine(RuntimeDir, Path.GetFileNameWithoutExtension(source.FileName) + "-" + Guid.NewGuid().ToString("N"));
+                    try { Directory.Move(runtimeRoot, extractDir); break; }
+                    catch (IOException) when (Directory.Exists(extractDir) || File.Exists(extractDir)) { }
+                }
+                ct.ThrowIfCancellationRequested();
+                var committedJava = Path.Combine(extractDir, "bin", "javaw.exe");
+                try { File.Delete(zipPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                ct.ThrowIfCancellationRequested();
+                progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Java_Installation_Complete", "Java 安装完成"), 1, 1, committedJava));
+                return committedJava;
+            }
+            finally
+            {
+                // This runs on the worker and only removes this attempt's private staging tree.
+                try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }, ct);
     }
 
     /// <summary>
@@ -767,7 +822,7 @@ public class JavaService
             }
             var item = DownloadQueueService.Instance.CurrentItem;
             var exitCode = item != null ? await item.RunInstallerPhaseAsync(InstallAsync) : await InstallAsync();
-            if (exitCode == 1602) throw new OperationCanceledException("用户取消了 Java 系统安装。");
+            if (exitCode == 1602) throw new DownloadUserCanceledException("用户取消了 Java 系统安装。");
             if (exitCode is not (0 or 1641 or 3010))
                 throw new InvalidOperationException($"Java 系统安装失败，退出码：{exitCode}。");
             if ((exitCode is 1641 or 3010) && item != null) item.CompletionText = "Java 已安装，需要重启计算机";
@@ -775,7 +830,7 @@ public class JavaService
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
-            throw new OperationCanceledException("安装已取消（未授予管理员权限），可改用便携版(zip)安装方式，无需管理员权限。", ex);
+            throw new DownloadUserCanceledException("安装已取消（未授予管理员权限），可改用便携版(zip)安装方式，无需管理员权限。", ex);
         }
         finally
         {

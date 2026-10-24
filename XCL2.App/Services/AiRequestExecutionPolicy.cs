@@ -54,6 +54,24 @@ internal static class AiRequestExecutionPolicy
         return 0;
     }
 
+    // Only a rejected search/tool request is eligible. Offline, auth and quota failures
+    // retain their real diagnosis and never get mislabeled as a search setting problem.
+    internal static bool IsWebSearchCompatibilityFailure(int status, string detail)
+    {
+        if (status is not (400 or 422) || Classify(status, detail) != FailureKind.Request) return false;
+        var message = detail;
+        try
+        {
+            using var doc = JsonDocument.Parse(detail);
+            if (doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("message", out var text) && text.ValueKind == JsonValueKind.String) message = text.GetString() ?? "";
+        }
+        catch (JsonException) { }
+        return Contains(message, "web_search", "web search", "search_context", "联网搜索", "tools")
+            && Contains(message, "unsupported", "not support", "not enabled", "disabled", "unknown", "unrecognized",
+                "not allowed", "not permitted", "not available", "invalid", "extra inputs", "should be", "must be", "unexpected", "不支持", "未开启", "不可用");
+    }
+
     private static bool Contains(string text, params string[] values) =>
         values.Any(value => text.Contains(value, StringComparison.OrdinalIgnoreCase));
 }

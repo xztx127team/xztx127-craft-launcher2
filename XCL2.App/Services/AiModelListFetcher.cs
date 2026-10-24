@@ -84,7 +84,7 @@ public static class AiModelListFetcher
         for (var keyIndex = 0; keyIndex < keys.Count; keyIndex++)
         {
             ct.ThrowIfCancellationRequested();
-            result = await FetchAsync(endpoint.BaseUrl, keys[keyIndex], client, ct).ConfigureAwait(false);
+            result = await FetchAsync(endpoint.BaseUrl, keys[keyIndex], client, ct, endpoint.Protocol).ConfigureAwait(false);
             if (result.Success)
             {
                 foreach (var model in result.Models)
@@ -102,15 +102,18 @@ public static class AiModelListFetcher
     public static async Task<AiModelFetchResult> FetchAsync(string baseUrl, string apiKey, CancellationToken ct = default)
         => await FetchAsync(baseUrl, apiKey, Http, ct).ConfigureAwait(false);
 
-    private static async Task<AiModelFetchResult> FetchAsync(string baseUrl, string apiKey, HttpClient client, CancellationToken ct)
+    public static async Task<AiModelFetchResult> FetchAsync(string baseUrl, string apiKey, AiApiProtocol protocol, CancellationToken ct = default)
+        => await FetchAsync(baseUrl, apiKey, Http, ct, protocol).ConfigureAwait(false);
+
+    private static async Task<AiModelFetchResult> FetchAsync(string baseUrl, string apiKey, HttpClient client, CancellationToken ct,
+        AiApiProtocol protocol = AiApiProtocol.OpenAI)
     {
         var empty = new List<AiModelDefinition>();
         try
         {
-            var url = BuildModelsUrl(baseUrl);
+            var url = AiEndpointRouting.BuildModelsUrl(baseUrl, protocol);
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            if (!string.IsNullOrWhiteSpace(apiKey))
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Trim());
+            AiEndpointRouting.ApplyAuthentication(request, apiKey, protocol);
 
             using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
