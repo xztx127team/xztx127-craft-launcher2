@@ -445,6 +445,10 @@ public partial class App : Application
         splash.SetStatus("正在读取启动器配置…");
         var earlyConfig = new ConfigService();
         earlyConfig.Load();
+        WindowsCompatibilityService.Configure(earlyConfig.Config.WindowsCompatibilityMode);
+        var startupCompatibility = WindowsCompatibilityService.Current;
+        if (startupCompatibility.IsAutomatic && startupCompatibility.IsEnabled)
+            splash.SetStatus("正在打开兼容模式…");
         splash.SetStatus("正在应用主题与语言…");
         ThemeService.ApplyForCurrentState(earlyConfig.Config.GuestModeEnabled, earlyConfig.Config.UiSkin, earlyConfig.Config.IsDarkMode, earlyConfig.Config.CustomAccentColor);
         LocalizationService.ApplyForCurrentState(earlyConfig.Config.LauncherLanguage);
@@ -583,6 +587,12 @@ public partial class App : Application
         {
             mainWindow.FirstFrameRendered -= closeSplashAfterFirstFrame;
             try { splash.Close(); } catch { /* splash 已关闭时忽略 */ }
+            // ToastHost 已注册并完成首帧；旧系统也使用启动器自己的通知栏。
+            if (startupCompatibility.IsAutomatic && startupCompatibility.IsEnabled)
+                ToastService.Show($"正在打开兼容模式：{startupCompatibility.DisplayName}。可在设置中调整。",
+                    ToastService.ToastKind.Info, 8);
+            if (mainWindow.ConfigService.Config.FollowSystemTheme && !startupCompatibility.SupportsSystemTheme)
+                ToastService.Show(SystemThemeDetectionPolicy.UnsupportedMessage, ToastService.ToastKind.Warning, 10);
         };
         mainWindow.FirstFrameRendered += closeSplashAfterFirstFrame;
         splash.SetStatus("正在渲染主界面…");

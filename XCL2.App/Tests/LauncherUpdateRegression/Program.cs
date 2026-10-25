@@ -12,6 +12,8 @@ void Check(bool condition, string name)
     checks++;
 }
 
+await HandoffCases.RunAsync(Check);
+
 var current = new Version(2, 2, 22, 0);
 Check(LauncherUpdatePolicy.ExtractVersion("v2.2.22") == current, "release tags and assembly versions normalize identically");
 Check(!LauncherUpdatePolicy.IsNewer(new Version(2, 2, 22), current), "same version never prompts again due to omitted revision");
@@ -115,6 +117,19 @@ var badge = new LauncherReminderPreference(LauncherReminderMode.BadgeOnly, now.A
 Check(badge.EffectiveMode(now) == LauncherReminderMode.Normal && badge.EffectiveMode(now.AddMinutes(90)) == LauncherReminderMode.BadgeOnly,
     "badge-only schedule honors both interval boundaries");
 Check(!badge.SuppressAutomaticReminder(now.AddMinutes(90), minor, today), "badge-only mode retains notification badge");
+Check(LauncherUpdatePolicy.ShouldPromptForStableUpdate(true, LauncherReminderMode.Normal, null, now),
+    "a stable update found on startup opens a confirmation by default");
+Check(LauncherUpdatePolicy.ShouldPromptForStableUpdate(true, LauncherReminderMode.Normal, now, now),
+    "a stable update prompts again exactly when its snooze expires");
+foreach (var mode in new[] { LauncherReminderMode.Snooze, LauncherReminderMode.Paused, LauncherReminderMode.BadgeOnly })
+{
+    Check(!LauncherUpdatePolicy.ShouldPromptForStableUpdate(true, mode, null, now),
+        "explicit automatic reminder preference remains respected: " + mode);
+    Check(LauncherUpdatePolicy.ShouldPromptForStableUpdate(false, mode, now.AddDays(1), now),
+        "manual stable checks still open confirmation: " + mode);
+}
+Check(!LauncherUpdatePolicy.ShouldPromptForStableUpdate(true, LauncherReminderMode.Normal, now.AddMinutes(1), now),
+    "per-version snooze postpones only automatic stable prompts");
 
 void Reject<T>(Action action, string name) where T : Exception
 {
@@ -150,10 +165,39 @@ byte[] Executable(bool x64, int marker)
 }
 LauncherUpdateMetadata Metadata(byte[] bytes) => LauncherUpdateMetadata.FromAsset(bytes.Length,
     "sha256:" + Convert.ToHexString(SHA256.HashData(bytes)));
+byte[] RestartProbeExecutable()
+{
+    // A GUI PE that calls kernel32!Sleep(15000), then ExitProcess(0).
+    // Its finite lifetime also prevents an orphan fixture if the test runner is interrupted.
+    var bytes = Executable(true, 4);
+    using var memory = new MemoryStream(bytes);
+    using var writer = new BinaryWriter(memory);
+    memory.Position = 0x80 + 24 + 72;
+    writer.Write(0x100000L); writer.Write(0x1000L); // stack reserve/commit
+    writer.Write(0x100000L); writer.Write(0x1000L); // heap reserve/commit
+    memory.Position = 0x80 + 24 + 240 + 8;
+    writer.Write(0x200); // virtual section extent includes the import tables below
+    memory.Position = 0x80 + 24 + 112 + 8; // PE32+ import data directory
+    writer.Write(0x1100); writer.Write(40);
+    memory.Position = 0x300; // IMAGE_IMPORT_DESCRIPTOR followed by a zero descriptor
+    writer.Write(0x1140); writer.Write(0); writer.Write(0); writer.Write(0x1180); writer.Write(0x1160);
+    memory.Position = 0x340; writer.Write(0x11a0L); writer.Write(0x11b0L); writer.Write(0L);
+    memory.Position = 0x360; writer.Write(0x11a0L); writer.Write(0x11b0L); writer.Write(0L);
+    memory.Position = 0x380; writer.Write(Encoding.ASCII.GetBytes("KERNEL32.dll\0"));
+    memory.Position = 0x3a0; writer.Write((ushort)0); writer.Write(Encoding.ASCII.GetBytes("Sleep\0"));
+    memory.Position = 0x3b0; writer.Write((ushort)0); writer.Write(Encoding.ASCII.GetBytes("ExitProcess\0"));
+    memory.Position = 0x200;
+    writer.Write(new byte[] { 0x48, 0x83, 0xec, 0x28, 0xb9 }); // shadow space + mov ecx, milliseconds
+    writer.Write(15000);
+    writer.Write(new byte[] { 0xff, 0x15 }); writer.Write(0x1160 - 0x100f); // call [RIP + Sleep IAT]
+    writer.Write(new byte[] { 0x31, 0xc9, 0xff, 0x15 }); writer.Write(0x1168 - 0x1017); // ExitProcess(0)
+    writer.Write((byte)0xcc);
+    return bytes;
+}
 async Task<int> RunUpdater(LauncherUpdatePlan plan)
 {
     using var process = Process.Start(LauncherUpdatePackage.CreateStartInfo(plan))!;
-    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)); return process.ExitCode; }
+    try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90)); return process.ExitCode; }
     finally
     {
         if (!process.HasExited)
@@ -196,9 +240,18 @@ try
     var data = Regex.Match(script, "FromBase64String\\('([^']+)'\\)").Groups[1].Value;
     Check(JsonSerializer.Deserialize<LauncherUpdatePlan>(Convert.FromBase64String(data)) == plan, "serialized argument data round-trips exact paths");
     var start = LauncherUpdatePackage.CreateStartInfo(plan);
-    Check(!start.UseShellExecute && start.Arguments.Length == 0 && start.ArgumentList.Contains("-EncodedCommand"), "updater uses argument-list encoded PowerShell without cmd interpolation");
+    Check(!start.UseShellExecute && start.CreateNoWindow && start.WindowStyle == ProcessWindowStyle.Hidden &&
+        start.Arguments.Length == 0 && start.ArgumentList.Contains("-File") && start.ArgumentList.Last() == plan.ScriptPath,
+        "updater runs the saved script hidden with literal arguments and no command shell");
     Check(!OperatingSystem.IsWindows() || Path.IsPathFullyQualified(start.FileName), "updater resolves PowerShell through the protected system directory rather than PATH");
-    Check(Encoding.Unicode.GetString(Convert.FromBase64String(start.ArgumentList.Last())) == script, "encoded command uses exact production transaction");
+    Check(File.ReadAllText(plan.ScriptPath, Encoding.UTF8) == script &&
+        File.ReadAllBytes(plan.ScriptPath).AsSpan(0, 3).SequenceEqual(new byte[] { 0xef, 0xbb, 0xbf }),
+        "saved UTF-8 BOM script contains the exact transaction, including special-character paths");
+    var longPayload = plan with { LogPath = new string('x', 16000) };
+    var longStart = LauncherUpdatePackage.CreateStartInfo(longPayload);
+    Check(longStart.ArgumentList.Last() == plan.ScriptPath && longStart.ArgumentList.Sum(value => value.Length) < 2000 &&
+        File.ReadAllText(plan.ScriptPath).Contains(Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(longPayload))),
+        "large transaction metadata stays on disk rather than exceeding the Windows command-line limit");
 
     if (OperatingSystem.IsWindows())
     {
@@ -255,6 +308,71 @@ try
         await File.WriteAllTextAsync(tampered.StagePath, "changed after parent verification");
         Check(await RunUpdater(tampered with { ParentProcessId = int.MaxValue }) != 0, "helper rechecks stage bytes before waiting or committing");
         Check(File.ReadAllBytes(installed).SequenceEqual(otherUpdate), "tampered stage cannot replace the installed executable");
+
+        // A disposable GUI-subsystem native PE stays alive through the start probe.
+        // It exercises the real successful replacement/start path without an installed launcher or network.
+        if (Environment.Is64BitOperatingSystem)
+        {
+            var healthy = RestartProbeExecutable();
+            await File.WriteAllBytesAsync(downloaded, healthy);
+            var success = await LauncherUpdatePackage.PrepareAsync(downloaded, installed, Metadata(healthy), true,
+                Path.Combine(directory, "successful-restart.log"), directory);
+            var parentProbePath = Path.Combine(directory, "parent-probe.exe");
+            await File.WriteAllBytesAsync(parentProbePath, healthy);
+            using var parentProbe = Process.Start(new ProcessStartInfo(parentProbePath) { UseShellExecute = false, CreateNoWindow = true })!;
+            Process? child = null;
+            Process? helper = null;
+            try
+            {
+                success = success with { ParentProcessId = parentProbe.Id, ParentStartedUtcTicks = parentProbe.StartTime.ToUniversalTime().Ticks };
+                AuthorizeFixture(success);
+                using (var held = new FileStream(installed, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    helper = Process.Start(LauncherUpdatePackage.CreateStartInfo(success))!;
+                    await LauncherUpdatePackage.WaitUntilReadyAsync(helper, success);
+                    Check(!helper.HasExited && !parentProbe.HasExited,
+                        "an authorized helper still waits for the captured parent process to exit");
+                    parentProbe.Kill();
+                    await parentProbe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    await Task.Delay(750);
+                    Check(!helper.HasExited && File.ReadAllBytes(installed).SequenceEqual(otherUpdate),
+                        "temporary executable lock keeps the silent updater waiting without damaging the installed bytes");
+                }
+                await helper.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
+                Check(helper.ExitCode == 0 && File.ReadAllBytes(installed).SequenceEqual(healthy),
+                    "releasing the file lock allows atomic replacement and a successful five-second restart probe");
+                Check(File.ReadAllBytes(success.BackupPath).SequenceEqual(otherUpdate),
+                    "successful update retains the exact previous executable as backup");
+                var childId = Regex.Match(File.ReadAllText(success.LogPath), @"Started updated launcher PID=(\d+)");
+                Check(childId.Success, "the actual restarted process is recorded for diagnostics");
+                child = Process.GetProcessById(int.Parse(childId.Groups[1].Value));
+                Check(!child.HasExited && !File.Exists(success.ScriptPath),
+                    "the restarted launcher survives and the completed script cleans itself up");
+            }
+            finally
+            {
+                if (!parentProbe.HasExited) { parentProbe.Kill(); await parentProbe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                if (helper != null)
+                {
+                    using (helper)
+                    {
+                        if (!helper.HasExited) { helper.Kill(); await helper.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                    }
+                }
+                if (child == null && File.Exists(success.LogPath))
+                {
+                    var childId = Regex.Match(File.ReadAllText(success.LogPath), @"Started updated launcher PID=(\d+)");
+                    if (childId.Success) { try { child = Process.GetProcessById(int.Parse(childId.Groups[1].Value)); } catch (ArgumentException) { } }
+                }
+                if (child != null)
+                {
+                    using (child)
+                    {
+                        if (!child.HasExited) { child.Kill(); await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+                    }
+                }
+            }
+        }
     }
     else Console.WriteLine("SKIPPED: Windows PowerShell application/rollback cases; metadata, PE, preparation and payload cases ran.");
 }

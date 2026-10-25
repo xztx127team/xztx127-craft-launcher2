@@ -61,8 +61,9 @@ public static class InstanceDeletionService
     /// </summary>
     public static void Rename(AppConfig config, string folderPath, string oldVersionId, string newVersionId)
     {
-        var oldDir = Path.Combine(folderPath, "versions", oldVersionId);
-        var newDir = Path.Combine(folderPath, "versions", newVersionId);
+        var oldDir = ResolveVersionDirectory(folderPath, oldVersionId);
+        var newDir = ResolveVersionDirectory(folderPath, newVersionId);
+        if (string.Equals(oldDir, newDir, StringComparison.Ordinal)) return;
 
         if (!Directory.Exists(oldDir))
             throw new DirectoryNotFoundException($"找不到实例目录：{oldDir}");
@@ -76,6 +77,9 @@ public static class InstanceDeletionService
         MoveDictionaryEntry(config.VersionJavaOverrides, oldVersionId, newVersionId);
         MoveDictionaryEntry(config.VersionJavaIdOverrides, oldVersionId, newVersionId);
         MoveDictionaryEntry(config.VersionAutoJoinServer, oldVersionId, newVersionId);
+        if (config.VersionSkipJavaMismatchPrompt.Remove(oldVersionId))
+            config.VersionSkipJavaMismatchPrompt.Add(newVersionId);
+        RenameScopedReferences(config, folderPath, oldVersionId, newVersionId);
 
         for (int i = 0; i < config.FavoriteVersionIds.Count; i++)
             if (string.Equals(config.FavoriteVersionIds[i], oldVersionId, StringComparison.OrdinalIgnoreCase))
@@ -91,9 +95,34 @@ public static class InstanceDeletionService
             HideFromList(config, folderPath, newVersionId);
         }
 
-        if (string.Equals(config.SelectedVersionId, oldVersionId, StringComparison.OrdinalIgnoreCase))
+        if (BuildKey(config.SelectedFolderPath ?? "", config.SelectedVersionId ?? "") == BuildKey(folderPath, oldVersionId))
             config.SelectedVersionId = newVersionId;
         Plugins.PluginHostBridge.Current?.NotifyInstanceRenamed(folderPath, oldVersionId, newVersionId);
+    }
+
+    // The service is also called by plugins, so UI validation is not the write boundary.
+    // Reject path traversal, DOS device names, ADS, and directory junctions before moving/deleting.
+    internal static string ResolveVersionDirectory(string folderPath, string versionId)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath) || !Path.IsPathFullyQualified(folderPath))
+            throw new InvalidDataException("游戏目录必须是完整的绝对路径。");
+        if (string.IsNullOrWhiteSpace(versionId) || versionId.IndexOfAny(new[] { '/', '\\' }) >= 0)
+            throw new InvalidDataException("实例名称必须是有效的单级目录名称。");
+        return ArchiveImportSafety.Resolve(Path.Combine(folderPath, "versions"), versionId);
+    }
+
+    private static void RenameScopedReferences(AppConfig config, string folderPath, string oldId, string newId)
+    {
+        var oldKey = BuildKey(folderPath, oldId);
+        var newKey = BuildKey(folderPath, newId);
+        if (config.InstancePersonalizations != null && config.InstancePersonalizations.Remove(oldKey, out var metadata))
+            config.InstancePersonalizations[newKey] = metadata;
+        if (config.FavoriteInstanceKeys != null)
+            for (var i = 0; i < config.FavoriteInstanceKeys.Count; i++)
+                if (string.Equals(config.FavoriteInstanceKeys[i], oldKey, StringComparison.OrdinalIgnoreCase))
+                    config.FavoriteInstanceKeys[i] = newKey;
+        foreach (var recent in config.RecentInstances ?? new())
+            if (recent != null && BuildKey(recent.FolderPath, recent.VersionId) == oldKey) recent.VersionId = newId;
     }
 
     private static void MoveDictionaryEntry<TValue>(Dictionary<string, TValue> dict, string oldKey, string newKey)
@@ -110,13 +139,15 @@ public static class InstanceDeletionService
     /// </summary>
     public static void DeletePermanently(AppConfig config, string folderPath, string versionId)
     {
-        var versionDir = Path.Combine(folderPath, "versions", versionId);
-        var existed = Directory.Exists(versionDir);
-        if (Directory.Exists(versionDir))
-        {
-            Directory.Delete(versionDir, recursive: true);
-        }
+        var existed = DeleteFiles(folderPath, versionId, recycle: false);
+        CleanupConfigReferences(config, folderPath, versionId);
+        if (existed) Plugins.PluginHostBridge.Current?.NotifyInstanceRemoved(folderPath, versionId);
+    }
 
+    /// <summary>Only filesystem work runs in the background; config and notifications resume on the caller's context.</summary>
+    public static async Task DeletePermanentlyAsync(AppConfig config, string folderPath, string versionId)
+    {
+        var existed = await Task.Run(() => DeleteFiles(folderPath, versionId, recycle: false));
         CleanupConfigReferences(config, folderPath, versionId);
         if (existed) Plugins.PluginHostBridge.Current?.NotifyInstanceRemoved(folderPath, versionId);
     }
@@ -130,18 +161,42 @@ public static class InstanceDeletionService
     /// </summary>
     public static void DeleteToRecycleBin(AppConfig config, string folderPath, string versionId)
     {
-        var versionDir = Path.Combine(folderPath, "versions", versionId);
-        var existed = Directory.Exists(versionDir);
-        if (Directory.Exists(versionDir))
-        {
-            Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
-                versionDir,
-                Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
-                Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-        }
-
+        var existed = DeleteFiles(folderPath, versionId, recycle: true);
         CleanupConfigReferences(config, folderPath, versionId);
         if (existed) Plugins.PluginHostBridge.Current?.NotifyInstanceRemoved(folderPath, versionId);
+    }
+
+    public static async Task DeleteToRecycleBinAsync(AppConfig config, string folderPath, string versionId)
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var worker = new Thread(() =>
+        {
+            try { completion.SetResult(DeleteFiles(folderPath, versionId, recycle: true)); }
+            catch (Exception ex) { completion.SetException(ex); }
+        }) { IsBackground = true, Name = "XCL2 recycle instance" };
+        if (OperatingSystem.IsWindows()) worker.SetApartmentState(ApartmentState.STA);
+        worker.Start();
+        var existed = await completion.Task;
+        CleanupConfigReferences(config, folderPath, versionId);
+        if (existed) Plugins.PluginHostBridge.Current?.NotifyInstanceRemoved(folderPath, versionId);
+    }
+
+    private static bool DeleteFiles(string folderPath, string versionId, bool recycle)
+    {
+        var versionDir = ResolveVersionDirectory(folderPath, versionId);
+        var existed = Directory.Exists(versionDir);
+        if (existed)
+        {
+            if (recycle)
+                Microsoft.VisualBasic.FileIO.FileSystem.DeleteDirectory(
+                    versionDir,
+                    Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                    Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin,
+                    Microsoft.VisualBasic.FileIO.UICancelOption.ThrowException);
+            else Directory.Delete(versionDir, recursive: true);
+            if (Directory.Exists(versionDir)) throw new IOException("实例目录仍然存在，未清除配置或报告删除成功。");
+        }
+        return existed;
     }
 
     /// <summary>两种"从电脑中删除"模式共用的配置清理逻辑，从原来的 DeletePermanently 里
@@ -153,13 +208,18 @@ public static class InstanceDeletionService
         config.VersionJavaOverrides.Remove(versionId);
         config.VersionJavaIdOverrides.Remove(versionId);
         config.VersionAutoJoinServer.Remove(versionId);
+        config.VersionSkipJavaMismatchPrompt.Remove(versionId);
+        var key = BuildKey(folderPath, versionId);
+        config.InstancePersonalizations?.Remove(key);
+        config.FavoriteInstanceKeys?.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+        config.RecentInstances?.RemoveAll(r => r != null && BuildKey(r.FolderPath, r.VersionId) == key);
         config.FavoriteVersionIds.RemoveAll(id => string.Equals(id, versionId, StringComparison.OrdinalIgnoreCase));
         config.FavoriteItems.RemoveAll(f => f.Type == FavoriteItemType.Version
             && string.Equals(f.SourceId, versionId, StringComparison.OrdinalIgnoreCase));
 
         UnhideFromList(config, folderPath, versionId);
 
-        if (string.Equals(config.SelectedVersionId, versionId, StringComparison.OrdinalIgnoreCase))
+        if (BuildKey(config.SelectedFolderPath ?? "", config.SelectedVersionId ?? "") == BuildKey(folderPath, versionId))
             config.SelectedVersionId = null;
     }
 }

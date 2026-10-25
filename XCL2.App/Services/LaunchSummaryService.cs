@@ -58,7 +58,7 @@ public static class LaunchSummaryService
         ct.ThrowIfCancellationRequested();
         var versionDir = Path.Combine(folder.Path, "versions", id);
         var instance = InstanceConfigService.TryLoad(versionDir);
-        var isolate = config.VersionIsolationOverrides.TryGetValue(id, out var value) ? value : config.IsolateVersionsByDefault;
+        var isolate = InstanceIsolationPolicy.Resolve(folder.Path, id, config.IsolateVersionsByDefault, config.VersionIsolationOverrides);
         var gameDir = isolate ? versionDir : folder.Path;
         rows.Add(new("实例", id));
         rows.Add(new("运行目录", gameDir));

@@ -26,6 +26,13 @@ namespace XCL2.App.Services;
 /// </summary>
 public static class WebView2RuntimeDetector
 {
+    /// <summary>Use the existing system-browser authentication flow before creating SDK controls.</summary>
+    public static bool PreferExternalBrowser => WindowsCompatibilityService.Current.IsLegacyWindows
+        || WindowsCompatibilityService.Current.IsEnabled;
+
+    public const string CompatibilityBrowserMessage =
+        "当前系统或兼容模式改用系统浏览器登录，无需内嵌 WebView2。";
+
     /// <summary>官方 WebView2 Runtime 独立安装包下载地址（Evergreen Bootstrapper）。</summary>
     public const string DownloadUrl = "https://developer.microsoft.com/microsoft-edge/webview2/";
 

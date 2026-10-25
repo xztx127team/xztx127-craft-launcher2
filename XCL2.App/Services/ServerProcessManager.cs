@@ -125,6 +125,9 @@ public class ServerProcessManager
         {
             var job = JobObjectCpuLimiter.TryLimitCpu(process, cpuPercent);
             if (job != IntPtr.Zero) _jobHandles[instance.Id] = job;
+            else LauncherLogService.AppendLine(WindowsCompatibilityService.Current.SupportsCpuRateControl
+                ? "[服务器] CPU 使用率限制未生效，服务器继续运行；请检查进程权限或系统作业限制。"
+                : "[服务器] 当前 Windows 不支持 CPU 使用率硬上限（需要 Windows 8 或更新版本）；服务器继续运行。");
         }
 
         var info = new ServerProcessInfo(process, instance.Id, instance.DisplayName, assignment.GamePort, assignment.Ports);

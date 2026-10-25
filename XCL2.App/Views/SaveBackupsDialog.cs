@@ -174,7 +174,7 @@ public sealed class SaveBackupsDialog : OverlayDialogControl, IOverlayDialogDism
     }
     private async Task ChooseDirectoryAsync()
     {
-        if (_busy) { _status.Text = "请等待当前任务完成后再更换备份位置。"; return; } var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择存档备份位置", InitialDirectory = _directory.Text };
+        if (_busy) { _status.Text = "请等待当前任务完成后再更换备份位置。"; return; } var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择存档备份位置", InitialDirectory = _directory.Text };
         if (picker.ShowDialog(_owner) != true) return; _directory.Text = picker.FolderName; await RefreshAsync();
     }
     private Task SaveOptionsAsync()

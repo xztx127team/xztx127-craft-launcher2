@@ -27,6 +27,10 @@ namespace XCL2.App.Views;
 /// </summary>
 public partial class ModDetailPage : UserControl
 {
+    // DownloadCenter's third-level host animates the whole page. The wizard and
+    // server-resource hosts still use this page's own entrance by default.
+    internal void UseHostPageTransition() => PageTransitionBehavior.SetAnimateOnVisible(DetailPageSurface, false);
+
     public enum DetailMode { DirectDownload, AddToWizardList }
 
     /// <summary>版本条目按钮的文案依赖属性："下载"（下载中心模式）或"加入清单"（一键开服模式），
@@ -104,6 +108,8 @@ public partial class ModDetailPage : UserControl
         bool isMod = false)
     {
         InitializeComponent();
+        PreviewFluentTheme.ApplyTo(this);
+        InitializePreviewDetailLayout();
         _mode = mode;
         EntryActionLabel = mode == DetailMode.AddToWizardList ? "加入清单" : "下载";
         _sourceItem = sourceItem;

@@ -30,7 +30,7 @@ public static class DiagnosticRedactionService
         {
             text = Replace(text, "(https?://[^\\s?#\"'<>]+)[?#][^\\s\"'<>]*", "$1?<查询参数已隐藏>");
             text = Replace(text, "(?m)(^|\\s)(--?(?:access[-_]?token|refresh[-_]?token|client[-_]?token|token|password|passwd|api[-_]?key|client[-_]?secret)(?:\\s+|=))(?:\"[^\"]*\"|'[^']*'|[^\\s]+)", "$1$2<已隐藏>");
-            text = Replace(text, "((?:\"|')?(?:access[-_]?token|refresh[-_]?token|client[-_]?token|id[-_]?token|token|auth|secret|api[-_]?key|authorization|password|passwd|client[-_]?secret|session[-_]?id|username|user_name|accountName|cookie|set-cookie)(?:\"|')?\\s*[:=]\\s*)(?:\"[^\"]*\"|'[^']*'|[^\\s,;}]+)", "$1<已隐藏>");
+            text = Replace(text, "((?:\"|')?(?:access[-_]?token|refresh[-_]?token|client[-_]?token|id[-_]?token|identityToken|RpsTicket|device[-_]?code|user[-_]?code|code[-_]?verifier|token|auth|secret|api[-_]?key|authorization|password|passwd|client[-_]?secret|session[-_]?id|username|user_name|accountName|cookie|set-cookie)(?:\"|')?\\s*[:=]\\s*)(?:\"[^\"]*\"|'[^']*'|[^\\s,;}]+)", "$1<已隐藏>");
             text = Replace(text, "(?m)(^\\s*(?:Set-Cookie|Cookie|Authorization)\\s*:\\s*).*$", "$1<已隐藏>");
             text = Replace(text, "\\b(Bearer|Basic)\\s+[A-Za-z0-9+/=_\\-.]+", "$1 <已隐藏>");
             text = Replace(text, "\\beyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+", "<令牌已隐藏>");

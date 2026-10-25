@@ -39,7 +39,7 @@ public sealed class PluginProjectService
         return await _context.Host.OnUiAsync(() =>
         {
             scope.Check();
-            var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "允许插件 “" + _context.Metadata.Name + "” 访问此项目", Multiselect = false };
+            var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "允许插件 “" + _context.Metadata.Name + "” 访问此项目", Multiselect = false };
             if (dialog.ShowDialog() != true) return null;
             scope.Check(); return Add(dialog.FolderName);
         }, scope.Token).ConfigureAwait(false);

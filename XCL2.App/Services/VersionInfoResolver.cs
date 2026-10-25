@@ -56,7 +56,25 @@ public static class VersionInfoResolver
         new(@"\b\d{1,2}\.\d{1,2}(?:\.\d{1,2})?-(?:pre|rc)\d+\b", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex NumericVersionPattern =
-        new(@"\b\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\b", RegexOptions.Compiled);
+        new(@"(?<![\w.])\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?![\w.])", RegexOptions.Compiled);
+
+    // Exact old_alpha/old_beta IDs from Mojang's official version_manifest_v2.json
+    // (verified 2026-10-25). Do not accept arbitrary a/b-prefixed version guesses.
+    // https://piston-meta.mojang.com/mc/game/version_manifest_v2.json
+    private static readonly HashSet<string> HistoricalVersionIds = new(StringComparer.Ordinal)
+    {
+        "b1.8.1", "b1.8", "b1.7.3", "b1.7.2", "b1.7", "b1.6.6", "b1.6.5", "b1.6.4", "b1.6.3",
+        "b1.6.2", "b1.6.1", "b1.6", "b1.5_01", "b1.5", "b1.4_01", "b1.4", "b1.3_01", "b1.3b",
+        "b1.2_02", "b1.2_01", "b1.2", "b1.1_02", "b1.1_01", "b1.0.2", "b1.0_01", "b1.0",
+        "a1.2.6", "a1.2.5", "a1.2.4_01", "a1.2.3_04", "a1.2.3_02", "a1.2.3_01", "a1.2.3",
+        "a1.2.2b", "a1.2.2a", "a1.2.1_01", "a1.2.1", "a1.2.0_02", "a1.2.0_01", "a1.2.0",
+        "a1.1.2_01", "a1.1.2", "a1.1.0", "a1.0.17_04", "a1.0.17_02", "a1.0.16", "a1.0.15",
+        "a1.0.14", "a1.0.11", "a1.0.5_01", "a1.0.4", "inf-20100618", "c0.30_01c", "c0.0.13a",
+        "c0.0.13a_03", "c0.0.11a", "rd-161348", "rd-160052", "rd-20090515", "rd-132328", "rd-132211"
+    };
+    private static readonly Regex HistoricalVersionPattern = new(
+        @"(?<![\w.])(?:" + string.Join("|", HistoricalVersionIds.OrderByDescending(id => id.Length).Select(Regex.Escape)) + @")(?![\w.])",
+        RegexOptions.Compiled);
 
     /// <summary>解析结果。ModLoader 为 null 表示纯原版；ModLoaderVersion 为 null 表示
     /// 确实解析不出加载器版本号（调用方应当把它当成"未知"处理并整个省略该字段，
@@ -71,6 +89,12 @@ public static class VersionInfoResolver
     {
         detail ??= TryLoadDetail(versionDir, versionId);
 
+        if (!string.IsNullOrWhiteSpace(detail?.XclMinecraftVersion) &&
+            detail.XclComponentLoader is "Vanilla" or "Fabric" or "LegacyFabric" or "Forge" or "NeoForge" or "Quilt" or "OptiFine")
+            return new Result(detail.XclMinecraftVersion,
+                detail.XclComponentLoader == "Vanilla" ? null : detail.XclComponentLoader == "LegacyFabric" ? "Legacy Fabric" : detail.XclComponentLoader,
+                detail.XclComponentLoader == "Vanilla" ? null : detail.XclComponentLoaderVersion);
+
         var (loader, loaderVersion, mcFromLibrary) = ResolveFromLibraries(detail);
 
         // ---- 加载器类型兜底：库里没认出来就退回看版本 ID 里的关键字 ----
@@ -84,6 +108,7 @@ public static class VersionInfoResolver
             FirstUsable(mcFromLibrary)
             ?? FirstUsable(detail?.InheritsFrom)
             ?? FirstUsable(detail?.ClientVersion)
+            ?? FirstUsable(detail?.Id)
             ?? GuessMcVersionFromId(versionId, loader)
             ?? ExtractAnyVersion(versionId)
             ?? ExtractAnyVersion(detail?.Id)
@@ -105,6 +130,7 @@ public static class VersionInfoResolver
     {
         if (string.IsNullOrWhiteSpace(value)) return false;
         var v = value.Trim();
+        if (HistoricalVersionIds.Contains(v)) return true;
         if (SnapshotPattern.IsMatch(v) && SnapshotPattern.Match(v).Value.Length == v.Length) return true;
         if (PreReleasePattern.IsMatch(v) && PreReleasePattern.Match(v).Value.Length == v.Length) return true;
         var m = NumericVersionPattern.Match(v);
@@ -136,6 +162,18 @@ public static class VersionInfoResolver
     {
         if (detail?.Libraries == null) return (null, null, null);
 
+        // The Legacy Fabric API deliberately reuses net.fabricmc:fabric-loader.
+        // Its intermediary identifies the ecosystem and MC version, never a second
+        // loader or its version. Inspect all libraries before handling fabric-loader.
+        var legacyFabric = detail.Libraries.Any(lib =>
+            lib?.Name?.StartsWith("net.legacyfabric:", StringComparison.OrdinalIgnoreCase) == true);
+        var legacyMinecraft = legacyFabric ? detail.Libraries
+            .Select(lib => lib?.Name?.Split(':'))
+            .Where(parts => parts is { Length: >= 3 } &&
+                parts[0].Equals("net.legacyfabric", StringComparison.OrdinalIgnoreCase) &&
+                parts[1].Equals("intermediary", StringComparison.OrdinalIgnoreCase))
+            .Select(parts => FirstUsable(parts![2])).LastOrDefault(version => version != null) : null;
+
         foreach (var lib in detail.Libraries)
         {
             var name = lib?.Name;
@@ -148,9 +186,10 @@ public static class VersionInfoResolver
             var artifact = parts[1];
             var version = parts[2];
 
-            if (group.Equals("net.fabricmc", StringComparison.OrdinalIgnoreCase) &&
+            if ((group.Equals("net.fabricmc", StringComparison.OrdinalIgnoreCase) ||
+                 group.Equals("net.legacyfabric", StringComparison.OrdinalIgnoreCase)) &&
                 artifact.Equals("fabric-loader", StringComparison.OrdinalIgnoreCase))
-                return ("Fabric", version, null);
+                return (legacyFabric ? "Legacy Fabric" : "Fabric", version, legacyMinecraft);
 
             if (group.Equals("org.quiltmc", StringComparison.OrdinalIgnoreCase) &&
                 artifact.Equals("quilt-loader", StringComparison.OrdinalIgnoreCase))
@@ -176,7 +215,7 @@ public static class VersionInfoResolver
             }
         }
 
-        return (null, null, null);
+        return legacyFabric ? ("Legacy Fabric", null, legacyMinecraft) : (null, null, null);
     }
 
     private static string? GuessLoaderFromId(string versionId)
@@ -184,6 +223,7 @@ public static class VersionInfoResolver
         var lower = versionId.ToLowerInvariant();
         // 注意顺序：neoforge 必须在 forge 之前判断，否则 "neoforge-21.1.66" 会被误判成 Forge。
         if (lower.Contains("neoforge")) return "NeoForge";
+        if (lower.Contains("legacyfabric") || lower.Contains("legacy-fabric")) return "Legacy Fabric";
         if (lower.Contains("fabric")) return "Fabric";
         if (lower.Contains("quilt")) return "Quilt";
         if (lower.Contains("forge")) return "Forge";
@@ -205,10 +245,11 @@ public static class VersionInfoResolver
         switch (loader)
         {
             case "Fabric":
+            case "Legacy Fabric":
             case "Quilt":
             {
                 var m = Regex.Match(versionId,
-                    @"^(?:fabric|quilt)-loader-(?<lv>[\w.+\-]+?)-(?<mc>[\w.\-]+)$",
+                    @"^(?:legacy-?fabric|fabric|quilt)-loader-(?<lv>[\w.+\-]+?)-(?<mc>[\w.\-]+)$",
                     RegexOptions.IgnoreCase);
                 if (m.Success) return m.Groups["lv"].Value;
                 break;
@@ -232,10 +273,10 @@ public static class VersionInfoResolver
     /// <summary>按命名约定反解原版版本号（跟 GuessLoaderVersionFromId 是同一批正则的另一半）。</summary>
     private static string? GuessMcVersionFromId(string versionId, string? loader)
     {
-        if (loader is "Fabric" or "Quilt")
+        if (loader is "Fabric" or "Legacy Fabric" or "Quilt")
         {
             var m = Regex.Match(versionId,
-                @"^(?:fabric|quilt)-loader-(?<lv>[\w.+\-]+?)-(?<mc>[\w.\-]+)$",
+                @"^(?:legacy-?fabric|fabric|quilt)-loader-(?<lv>[\w.+\-]+?)-(?<mc>[\w.\-]+)$",
                 RegexOptions.IgnoreCase);
             if (m.Success && LooksLikeMcVersion(m.Groups["mc"].Value)) return m.Groups["mc"].Value;
         }
@@ -251,10 +292,13 @@ public static class VersionInfoResolver
     }
 
     /// <summary>从任意字符串里抓出第一个"看起来像版本号"的片段。
-    /// 顺序：快照 → 预发布 → 普通数字版本，保证 "1.21-pre1" 不会被截成 "1.21"。</summary>
+    /// 顺序：官方历史 ID → 快照 → 预发布 → 普通数字版本，保留 a/b 前缀与补丁后缀。</summary>
     public static string? ExtractAnyVersion(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
+
+        var historical = HistoricalVersionPattern.Match(text);
+        if (historical.Success) return historical.Value;
 
         var snap = SnapshotPattern.Match(text);
         if (snap.Success) return snap.Value;

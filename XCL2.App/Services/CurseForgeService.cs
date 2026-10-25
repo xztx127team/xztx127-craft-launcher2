@@ -1,6 +1,5 @@
 using System.IO;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text.Json;
 using XCL2.App.Models;
 
@@ -19,12 +18,14 @@ public class CurseForgeService
 {
     private const string BaseUrl = "https://api.curseforge.com/v1";
     private readonly HttpClient _http;
+    private readonly HttpClient _api;
     private readonly CurseForgeKeyService _keyService;
 
     public CurseForgeService(CurseForgeKeyService keyService)
     {
         _keyService = keyService;
-        _http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(5));
+        _api = CurseForgeApiTransport.CreateClient();
     }
 
     /// <summary>每次请求前都重新读一次 key（用户可能刚在设置页改过，不需要重启程序才生效）。</summary>
@@ -34,14 +35,6 @@ public class CurseForgeService
         if (string.IsNullOrEmpty(key))
             throw new CurseForgeKeyMissingException();
         return key;
-    }
-
-    private HttpRequestMessage BuildRequest(HttpMethod method, string url)
-    {
-        var req = new HttpRequestMessage(method, url);
-        req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        req.Headers.TryAddWithoutValidation("x-api-key", RequireKey());
-        return req;
     }
 
     /// <summary>搜索地图/存档。query 可为空（浏览热门）；gameVersion 可为空（不限定版本）。</summary>
@@ -100,10 +93,7 @@ public class CurseForgeService
             if (loaderType != null) url += $"&modLoaderType={loaderType}";
         }
 
-        using var req = BuildRequest(HttpMethod.Get, url);
-        using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
-        var json = await resp.Content.ReadAsStringAsync(ct);
+        var json = await CurseForgeApiTransport.GetStringAsync(_api, url, RequireKey(), ct);
         return JsonSerializer.Deserialize<CurseForgeSearchResult>(json) ?? new CurseForgeSearchResult();
     }
 
@@ -113,10 +103,7 @@ public class CurseForgeService
         var url = $"{BaseUrl}/mods/{modId}/files";
         if (!string.IsNullOrWhiteSpace(gameVersion)) url += $"?gameVersion={Uri.EscapeDataString(gameVersion)}";
 
-        using var req = BuildRequest(HttpMethod.Get, url);
-        using var resp = await _http.SendAsync(req, ct);
-        resp.EnsureSuccessStatusCode();
-        var json = await resp.Content.ReadAsStringAsync(ct);
+        var json = await CurseForgeApiTransport.GetStringAsync(_api, url, RequireKey(), ct);
         var result = JsonSerializer.Deserialize<CurseForgeFileListResult>(json) ?? new CurseForgeFileListResult();
         return result.Data;
     }
@@ -154,7 +141,7 @@ public class CurseForgeService
             await DownloadFileAsync(file, tmpZip, ct);
 
             progress?.Report("解压存档 ...");
-            System.IO.Compression.ZipFile.ExtractToDirectory(tmpZip, targetDir, overwriteFiles: true);
+            await WorldArchiveInstaller.InstallAsync(tmpZip, targetDir, ct, file.FileName);
             progress?.Report("安装完成");
             return targetDir;
         }
@@ -173,23 +160,13 @@ public class CurseForgeService
     {
         var modsDir = appendCategorySubdir ? Path.Combine(minecraftDir, "mods") : minecraftDir;
         Directory.CreateDirectory(modsDir);
-        var destPath = Path.Combine(modsDir, file.FileName);
-        var tmp = destPath + ".tmp";
-
-        try
-        {
-            progress?.Report($"下载 {file.FileName} ...");
-            await DownloadFileAsync(file, tmp, ct);
-
-            File.Move(tmp, destPath, overwrite: true);
-            progress?.Report("下载完成");
-            return destPath;
-        }
-        catch
-        {
-            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 忽略清理失败 */ }
-            throw;
-        }
+        var destPath = ResourceDownloadPath.ResolveChild(modsDir, file.FileName);
+        // DownloadEndpoints owns the final target lock, unique temporary file, verification
+        // and atomic commit. A shared "destination.tmp" introduced races between downloads.
+        progress?.Report($"下载 {file.FileName} ...");
+        await DownloadFileAsync(file, destPath, ct);
+        progress?.Report("下载完成");
+        return destPath;
     }
 
     /// <summary>
@@ -212,7 +189,7 @@ public class CurseForgeService
         {
             if (string.IsNullOrWhiteSpace(saveName))
                 throw new InvalidOperationException("数据包必须安装到具体的存档里，请先选择一个存档。");
-            destDir = Path.Combine(minecraftDir, "saves", saveName, "datapacks");
+            destDir = Path.Combine(ResourceDownloadPath.ResolveChild(Path.Combine(minecraftDir, "saves"), saveName), "datapacks");
         }
         else
         {
@@ -229,23 +206,13 @@ public class CurseForgeService
         }
 
         Directory.CreateDirectory(destDir);
-        var destPath = Path.Combine(destDir, file.FileName);
-        var tmp = destPath + ".tmp";
-
-        try
-        {
-            progress?.Report($"下载 {file.FileName} ...");
-            await DownloadFileAsync(file, tmp, ct);
-
-            File.Move(tmp, destPath, overwrite: true);
-            progress?.Report("下载完成");
-            return destPath;
-        }
-        catch
-        {
-            try { if (File.Exists(tmp)) File.Delete(tmp); } catch { /* 忽略清理失败 */ }
-            throw;
-        }
+        var destPath = ResourceDownloadPath.ResolveChild(destDir, file.FileName);
+        // DownloadEndpoints owns the final target lock, unique temporary file, verification
+        // and atomic commit. A shared "destination.tmp" introduced races between downloads.
+        progress?.Report($"下载 {file.FileName} ...");
+        await DownloadFileAsync(file, destPath, ct);
+        progress?.Report("下载完成");
+        return destPath;
     }
 }
 

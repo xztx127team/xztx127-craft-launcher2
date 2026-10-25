@@ -406,7 +406,15 @@ public partial class LauncherService
 
     /// <summary>启动游戏，返回封装了进程 + 实时输出缓冲的 GameProcessInfo，供进程管理/日志面板使用。</summary>
     public GameProcessInfo Launch(LaunchOptions opts)
-        => Plugins.PluginRuntimeRegistry.Launch(opts, () => LaunchBuiltIn(opts));
+    {
+        using var lease = ComponentsOperationLock.AcquireForLaunch(opts.MinecraftDir, opts.VersionId);
+        var info = Plugins.PluginRuntimeRegistry.Launch(opts, () => LaunchBuiltIn(opts))
+            ?? throw new InvalidOperationException("启动内核没有返回游戏进程。");
+        // Keep the selected profile and every inherited client locked even before its first
+        // window appears. Shared leases preserve the existing ability to launch multiple games.
+        lease.TransferTo(info.Process);
+        return info;
+    }
 
     /// <summary>内置 Java 启动内核。公开 Launch 先经过旧版插件中间件链；next() 最终落到这里。</summary>
     private GameProcessInfo LaunchBuiltIn(LaunchOptions opts)
@@ -754,22 +762,6 @@ public partial class LauncherService
         if (!preview) Directory.CreateDirectory(gameDir);
         opts.EffectiveGameDir = gameDir;
 
-        // 写入游戏语言 + 跳过官方首次启动引导：Minecraft 客户端只认 <gameDir>/options.txt
-        // 里的字段，早期版本才支持的 --lang 启动参数目前基本已被客户端忽略，只靠命令行参数
-        // 完全无法可靠控制语言——这正是"设置里选了中文，进游戏还是英文"这个 bug 的根因，
-        // 而不是资源下载损坏（那个问题已经在 DownloadService 里通过 SHA1 校验修复了）。
-        //
-        // 同时，Minecraft 判断"是否首次启动、要不要弹 Welcome to Minecraft / 辅助功能引导页"
-        // 的依据是 options.txt 里的 onboardAccessibility 字段(为 true 或文件不存在时会弹出)，
-        // 不受 lang 字段控制。参考 PCL 等主流第三方启动器的做法：预先生成一份"看起来已经
-        // 跑过一次"的 options.txt(onboardAccessibility:false + 一批配套的新手引导已完成
-        // 标记字段)，游戏检测到这些字段就会认为不是第一次启动，直接进主菜单，不再弹出引导页。
-        if (!preview && !string.IsNullOrWhiteSpace(opts.GameLanguage))
-        {
-            try { ApplyGameLanguage(gameDir, opts.GameLanguage!); }
-            catch { /* options.txt 写入失败不应该阻止游戏启动，语言只是体验问题不是功能性问题 */ }
-        }
-
         if (!preview && !string.IsNullOrWhiteSpace(opts.GraphicsApiPreference))
         {
             try { ApplyGraphicsApiPreference(gameDir, opts.GraphicsApiPreference!); }
@@ -786,6 +778,13 @@ public partial class LauncherService
         var inheritance = VersionInheritanceResolver.Load(opts.MinecraftDir, opts.VersionId, FolderService.ResolveVersionJson, argumentArchitecture);
         var detail = inheritance.Effective;
         var mainClass = detail.MainClass;
+        var gameLanguage = LegacyMinecraftCompatibility.ResolveGameLanguage(opts.GameLanguage,
+            inheritance.Layers.SelectMany(layer => new[] { layer.Detail.ClientVersion, layer.Detail.Id }));
+        if (!preview && !string.IsNullOrWhiteSpace(gameLanguage))
+        {
+            try { ApplyGameLanguage(gameDir, gameLanguage!); }
+            catch (Exception ex) { ErrorPresenter.LogFallback("写入游戏语言失败，保留游戏现有设置。", ex); }
+        }
 
         var librariesDir = Path.Combine(opts.MinecraftDir, "libraries");
         var classpath = new List<string>();
@@ -1001,6 +1000,8 @@ public partial class LauncherService
         var legacyArgsText = detail.MinecraftArgumentsLegacy;
         var usesPositionalIdentity = detail.Arguments?.Game is not { Count: > 0 } &&
             LegacyMinecraftCompatibility.UsesPositionalIdentity(legacyArgsText);
+        var usesManifestGameArguments = usesPositionalIdentity ||
+            detail.Arguments?.Game is not { Count: > 0 } && LegacyMinecraftCompatibility.UsesEarlyNamedIdentity(legacyArgsText);
         var authenticated = opts.Account.Type is AccountType.Microsoft or AccountType.AuthServer;
         var accessToken = authenticated ? opts.Account.MinecraftAccessToken ?? "0" : "0";
         var uuid = opts.Account.Uuid.Replace("-", "");
@@ -1070,7 +1071,7 @@ public partial class LauncherService
             // 编码由单独的 stdout.encoding/stderr.encoding 决定（JEP 400），如果不显式指定，
             // 在中文 Windows 上 JVM 仍然会用系统 ANSI 代码页(GBK)写控制台输出，
             // 跟我们这边 StandardOutputEncoding=UTF8 对不上，日志面板/控制台镜像就会整体乱码。
-            "-Dfile.encoding=UTF-8",
+            JavaRuntimeCompatibility.FileEncodingArgument(opts.JavaPath, detail.Libraries.Select(library => library.Name ?? "")),
             "-Dstdout.encoding=UTF-8",
             "-Dstderr.encoding=UTF-8",
             // 标识"这局游戏是被哪个启动器启动的"，参考 PCL 等主流第三方启动器的做法
@@ -1116,7 +1117,7 @@ public partial class LauncherService
         // 1.0 / Alpha / Beta 的官方模板以“玩家名 会话”开头。Launchwrapper 把未识别的
         // 现代选项也作为位置参数交给游戏；在前面塞 --username 会让玩家名和会话位置错位。
         // 此分支直接保留旧模板的顺序，1.6+ 的 --username 模板仍使用原有的现代路径。
-        if (!usesPositionalIdentity) args.AddRange(new List<string>
+        if (!usesManifestGameArguments) args.AddRange(new List<string>
         {
             "--username", opts.Account.Username,
             "--version", displayVersion,
@@ -1186,7 +1187,7 @@ public partial class LauncherService
             "--username", "--version", "--gameDir", "--assetsDir", "--assetIndex", "--uuid",
             "--accessToken", "--userType", "--versionType", "--width", "--height"
         };
-        if (usesPositionalIdentity) alreadyHandledKeys.Clear();
+        if (usesManifestGameArguments) alreadyHandledKeys.Clear();
 
         // 根因（"Only one quick play option can be specified" 崩溃，1.20.6+ 的 Fabric/Forge/
         // NeoForge/Quilt/纯原版都会中招）：Mojang 从 1.20.6 起在 version json 的 arguments.game
@@ -1289,7 +1290,7 @@ public partial class LauncherService
         // 至少给"客户端本身认识这个参数、只是 json 没declare"的情况留一条生路。
         if (opts.RequireAutoJoinServerSupport && !quickPlayMultiplayerInjected)
             throw new NotSupportedException("这个客户端清单没有声明可用的 Quick Play 服务器参数，无法使用 --server；请在游戏中手动连接服务器。");
-        if (!usesPositionalIdentity && !quickPlayMultiplayerInjected && !string.IsNullOrWhiteSpace(opts.AutoJoinServerAddress))
+        if (!usesManifestGameArguments && !quickPlayMultiplayerInjected && !string.IsNullOrWhiteSpace(opts.AutoJoinServerAddress))
         {
             args.Add("--quickPlayMultiplayer");
             args.Add(opts.AutoJoinServerAddress!.Trim());
@@ -1307,14 +1308,14 @@ public partial class LauncherService
 
         // --lang 只在很老的版本(约 1.12 以前)里被读取，新版本已不认这个参数，
         // 但加上也无害，作为老版本的兼容兜底一起传。真正生效的是上面写的 options.txt。
-        if (!usesPositionalIdentity && !string.IsNullOrWhiteSpace(opts.GameLanguage))
+        if (!usesManifestGameArguments && !string.IsNullOrWhiteSpace(gameLanguage))
         {
             args.Add("--lang");
-            args.Add(opts.GameLanguage!);
+            args.Add(gameLanguage!);
         }
 
-        if (opts.LaunchFullscreen && usesPositionalIdentity)
-            throw new NotSupportedException("这个远古客户端使用位置身份参数，暂不支持 --fullscreen；请在游戏内切换全屏。");
+        if (opts.LaunchFullscreen && usesManifestGameArguments)
+            throw new NotSupportedException("这个早期客户端没有声明 --fullscreen 支持；请在游戏内切换全屏。");
         if (opts.LaunchFullscreen && !args.Contains("--fullscreen")) args.Add("--fullscreen");
         if (!string.IsNullOrWhiteSpace(opts.ExtraGameArgs)) args.AddRange(SplitArgsRespectingQuotes(opts.ExtraGameArgs));
         return (mainClass, args);

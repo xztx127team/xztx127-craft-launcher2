@@ -686,6 +686,7 @@
                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,20"
                 Style="{StaticResource SecondaryButton}" Padding="12,7" Content="提醒" Click="ReminderBadge_Click"/>
         <Border x:Name="ReminderPanel" Grid.Row="1" Grid.Column="1" Visibility="Collapsed"
+                services:PageTransitionBehavior.PopupFadeOnVisible="True"
                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="12,12,20,66"
                 Width="360" MaxHeight="360" Padding="14" CornerRadius="8" BorderThickness="1"
                 Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource AccentBrush}">

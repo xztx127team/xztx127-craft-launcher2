@@ -1,0 +1,6 @@
+Terracotta | 陶瓦联机 v0.4.2
+Copyright (c) burningtnt and Terracotta contributors.
+Source: https://github.com/burningtnt/Terracotta/tree/v0.4.2
+License: GNU Affero General Public License v3.0 or later, with the upstream binary-distribution / IPC exception; see LICENSE.txt and upstream README.
+The bundled terracotta-0.4.2-windows-x86_64.exe is the user's supplied, unmodified executable.
+XCL2 uses --hmcl <port-json-file> and the upstream HTTP backend API through native WPF controls. No web UI is embedded. No changes are made to Terracotta.

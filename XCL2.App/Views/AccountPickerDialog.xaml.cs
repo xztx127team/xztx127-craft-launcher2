@@ -169,7 +169,19 @@ public partial class AccountPickerDialog : OverlayDialogControl
         }
     }
 
-    private async void AddMicrosoftEmbedded_Click(object sender, RoutedEventArgs e)
+    private void AddMicrosoftEmbedded_Click(object sender, RoutedEventArgs e)
+    {
+        if (WebView2RuntimeDetector.PreferExternalBrowser)
+        {
+            ToastService.ShowInfo(WebView2RuntimeDetector.CompatibilityBrowserMessage);
+            AddMicrosoft_Click(sender, e);
+            return;
+        }
+        AddMicrosoftEmbeddedCore(sender, e);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private async void AddMicrosoftEmbeddedCore(object sender, RoutedEventArgs e)
     {
         if (!WebView2RuntimeDetector.IsAvailable())
         {

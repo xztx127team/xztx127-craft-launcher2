@@ -75,7 +75,7 @@ public static class InstanceUxService
     public static string GetGameDirectory(AppConfig cfg, string folder, string id)
     {
         // 与启动入口使用同一组隔离覆盖；仅读取，不创建目录。
-        var isolated = cfg.VersionIsolationOverrides.TryGetValue(id, out var choice) ? choice : cfg.IsolateVersionsByDefault;
+        var isolated = InstanceIsolationPolicy.Resolve(folder, id, cfg.IsolateVersionsByDefault, cfg.VersionIsolationOverrides);
         return isolated ? GetVersionDirectory(folder, id) : Path.GetFullPath(folder);
     }
 

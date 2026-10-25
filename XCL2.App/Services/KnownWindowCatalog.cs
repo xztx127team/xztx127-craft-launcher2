@@ -25,7 +25,7 @@ public static class KnownWindowCatalog
         EnumWindows((hwnd, _) =>
         {
             if (!IsWindowVisible(hwnd)) return true;
-            if (DwmGetWindowAttribute(hwnd, 14 /* DWMWA_CLOAKED */, out var cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
+            if (IsCloaked(hwnd)) return true;
             var title = new StringBuilder(2048);
             if (GetWindowText(hwnd, title, title.Capacity) <= 0) return true;
             GetWindowThreadProcessId(hwnd, out var rawPid);
@@ -41,5 +41,14 @@ public static class KnownWindowCatalog
             return true;
         }, IntPtr.Zero);
         return result.OrderByDescending(w => w.IsForeground).ThenBy(w => w.ProcessName, StringComparer.OrdinalIgnoreCase).ThenBy(w => w.Title).ToList();
+    }
+
+    private static bool IsCloaked(IntPtr hwnd)
+    {
+        // DWMWA_CLOAKED begins with Windows 8. Older desktops use ordinary visibility.
+        if (!WindowsCompatibilityService.Current.IsAtLeast(6, 2)) return false;
+        try { return DwmGetWindowAttribute(hwnd, 14, out var value, sizeof(int)) == 0 && value != 0; }
+        catch (DllNotFoundException) { return false; }
+        catch (EntryPointNotFoundException) { return false; }
     }
 }

@@ -57,7 +57,7 @@ public static class DirectXRuntimeInstallService
         {
             progress.Report(new ProgressInfo("下载 DirectX 运行库安装程序", 0, 0, "dxwebsetup.exe"));
             LauncherLogService.AppendLine("[DirectX] 开始下载 dxwebsetup.exe");
-            using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+            using (var http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(10)))
             {
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 XCL2-Launcher/1.0");
                 using var resp = await http.GetAsync(WebSetupUrl, HttpCompletionOption.ResponseHeadersRead, ct);

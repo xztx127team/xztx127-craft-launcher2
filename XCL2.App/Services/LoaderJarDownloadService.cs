@@ -28,7 +28,7 @@ public enum StandaloneLoaderType
 /// </summary>
 public class LoaderJarDownloadService : IDisposable
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private readonly HttpClient _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(10));
 
     private const string FabricMetaBase = "https://meta.fabricmc.net/v2";
     private const string QuiltMetaBase = "https://meta.quiltmc.org/v3";

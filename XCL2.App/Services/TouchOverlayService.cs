@@ -163,7 +163,15 @@ public class TouchOverlayService
                     var originalInput = TouchRoutePolicy.UseModern(versionRoute, backend);
                     if (versionRoute.HasValue && originalInput != versionRoute.Value)
                         LauncherLogService.AppendLine($"[触屏模式] 版本元数据与窗口后端 {backend} 不符，按实际后端选择输入路径。");
-                    info.TouchInputRoute = originalInput ? "触控路径：SDL3" : "触控路径：GLFW/LWJGL";
+                    var legacyWindowsInput = WindowsCompatibilityService.Current.IsWindows
+                        && !WindowsCompatibilityService.Current.SupportsPointerInput;
+                    if (legacyWindowsInput)
+                    {
+                        originalInput = true;
+                        LauncherLogService.AppendLine("[兼容模式] 当前 Windows 没有 WM_POINTER，触控改用 WPF 触摸/鼠标入口；旧版游戏视角需实机验证。");
+                    }
+                    info.TouchInputRoute = legacyWindowsInput ? "触控路径：WPF 兼容入口"
+                        : originalInput ? "触控路径：SDL3" : "触控路径：GLFW/LWJGL";
                     var rawInputAdvice = TouchRoutePolicy.NeedsRuntimeRawInputAdvice(backend,
                         info.TouchModeRequestedAtLaunch, info.UseOriginalTouchInput);
                     ITouchOverlayWindow overlay = originalInput

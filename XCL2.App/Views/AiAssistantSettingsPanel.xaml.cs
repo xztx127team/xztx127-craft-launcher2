@@ -696,7 +696,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
 
     private void BrowseWorkingDirectory_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new Microsoft.Win32.OpenFolderDialog
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog
         {
             Title = "选择 AI 助手工作目录"
         };
@@ -708,7 +708,7 @@ public partial class AiAssistantSettingsPanel : UserControl, IOverlayDialog, IOv
 
     private void AddExtraDirectory_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "添加 AI 可访问的目录" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "添加 AI 可访问的目录" };
         if (dialog.ShowDialog() != true) return;
         var dir = dialog.FolderName;
         if (string.IsNullOrWhiteSpace(dir)) return;

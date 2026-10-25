@@ -176,7 +176,7 @@ public partial class ModpackService
         foreach (var entry in overrides) _ = ArchiveImportSafety.Resolve(targetVersionDir, entry.Relative);
         progress?.Report(server ? "导入服务器附带文件 ..." : "导入客户端附带文件 ...");
         foreach (var entry in overrides) ArchiveImportSafety.Extract(entry.Entry, targetVersionDir, entry.Relative, ct);
-        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        using var http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(5));
         http.DefaultRequestHeaders.UserAgent.ParseAdd("XCL2-Launcher/1.0 (+https://github.com/xztx127-craft/xcl2)");
         var failed = new List<string>();
         for (var i = 0; i < files.Length; i++)

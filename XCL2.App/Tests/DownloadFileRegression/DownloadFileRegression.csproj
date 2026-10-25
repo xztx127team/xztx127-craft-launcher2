@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Models/AppConfig.WindowsCompatibility.cs" Link="AppConfig.WindowsCompatibility.cs" />
+    <Compile Include="../../Services/WindowsCompatibilityService.cs" Link="WindowsCompatibilityService.cs" />
+    <Compile Include="../../Services/LauncherHttpClientFactory.cs" Link="LauncherHttpClientFactory.cs" />
+
     <Compile Include="../../Models/VersionManifest.cs" Link="VersionManifest.cs" />
     <Compile Include="../../Models/DownloadMirrorConfig.cs" Link="DownloadMirrorConfig.cs" />
     <Compile Include="../../Services/DownloadMirrorPolicy.cs" Link="DownloadMirrorPolicy.cs" />

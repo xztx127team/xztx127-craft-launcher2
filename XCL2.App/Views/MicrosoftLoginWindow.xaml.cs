@@ -58,7 +58,7 @@ public partial class MicrosoftLoginWindow : OverlayDialogControl
 
     private void CheckUrl(string url)
     {
-        if (_settled || string.IsNullOrEmpty(url) || !url.StartsWith(_redirectUri, StringComparison.OrdinalIgnoreCase))
+        if (_settled || string.IsNullOrEmpty(url) || !AuthEndpointPolicy.MatchesRedirect(url, _redirectUri))
             return;
 
         var query = ParseQuery(new Uri(url).Query);

@@ -20,7 +20,7 @@ public partial class PluginTemplatePromptDialog : OverlayDialogControl
 
     private void BrowseDir_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择生成插件模板的目录" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择生成插件模板的目录" };
         if (dialog.ShowDialog() == true)
         {
             TargetDirBox.Text = dialog.FolderName;

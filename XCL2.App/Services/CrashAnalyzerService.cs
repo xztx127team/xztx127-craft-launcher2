@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace XCL2.App.Services;
 
-/// <summary>一份崩溃报告：原始文件路径 + 原文内容 + 自动分析出的中文提示列表。</summary>
+/// <summary>一份崩溃报告：原始文件路径 + 有界原文片段 + 自动分析出的中文提示列表。</summary>
 public class CrashReportResult
 {
     public string FilePath { get; init; } = "";
@@ -38,7 +38,7 @@ public enum CrashConfidence
 
 /// <summary>
 /// 崩溃报告分析：
-/// 1) 原样读取 Minecraft 生成的 crash-reports/*.txt 和 JVM 的 hs_err_pid*.log，供用户/高手直接查看原文；
+/// 1) 读取 Minecraft crash-reports/*.txt 和 JVM hs_err_pid*.log 的有界原文片段，保留首尾并标注截断；
 /// 2) 用一批常见规则做中文自动解析（mod 冲突、内存不足、显卡驱动、Java 版本不匹配等），给普通用户看得懂的结论。
 /// 规则是启发式关键字匹配，不保证 100% 准确，仅作为定位问题的第一步提示。
 /// </summary>
@@ -100,7 +100,7 @@ public class CrashAnalyzerService
 
     private static string SafeReadAll(string path)
     {
-        try { return File.ReadAllText(path); }
+        try { return DiagnosticLogReader.Read(path, includeHead: true); }
         catch (Exception ex) { return $"(读取崩溃文件失败: {ex.Message})"; }
     }
 

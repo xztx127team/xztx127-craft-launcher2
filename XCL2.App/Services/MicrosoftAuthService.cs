@@ -15,7 +15,10 @@ namespace XCL2.App.Services;
 public class AuthStepException : Exception
 {
     public string Step { get; }
-    public AuthStepException(string step, string message) : base(message) => Step = step;
+    public System.Net.HttpStatusCode? StatusCode { get; }
+    public AuthStepException(string step, string message, System.Net.HttpStatusCode? statusCode = null)
+        : base(DiagnosticRedactionService.Sanitize(message, 16 * 1024))
+    { Step = step; StatusCode = statusCode; }
 }
 
 /// <summary>见 MicrosoftAuthService.LastRefreshFailureReason。</summary>
@@ -58,11 +61,14 @@ public class MicrosoftAuthService
     // （平台类型选"移动和桌面应用程序"），否则微软会在显示登录页之前就直接拒绝请求。
     public const string NativeClientRedirectUri = "https://login.microsoftonline.com/common/oauth2/nativeclient";
 
-    private readonly HttpClient _http = new();
+    private readonly HttpClient _http;
 
     /// <param name="clientId">留空则使用编译进程序的默认 Client ID (<see cref="DefaultClientId"/>)。</param>
-    public MicrosoftAuthService(string? clientId = null)
+    public MicrosoftAuthService(string? clientId = null) : this(new HttpClient(AuthEndpointPolicy.CreateCredentialHandler()), clientId) { }
+
+    internal MicrosoftAuthService(HttpClient http, string? clientId = null)
     {
+        _http = http;
         _clientId = string.IsNullOrWhiteSpace(clientId) ? DefaultClientId : clientId;
 
         // Xbox Live / XSTS 接口对请求头很敏感：官方文档明确指出，如果不设置
@@ -135,11 +141,11 @@ public class MicrosoftAuthService
             ["code_verifier"] = verifier,
             ["scope"] = Scope
         };
-        var resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+        using var resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
             new FormUrlEncodedContent(form), ct);
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
-            throw new AuthStepException("获取登录令牌", $"HTTP {(int)resp.StatusCode}: {body}");
+            throw new AuthStepException("获取登录令牌", $"HTTP {(int)resp.StatusCode}: {body}", resp.StatusCode);
         var token = JsonSerializer.Deserialize<MsaTokenResponse>(body)
             ?? throw new AuthStepException("获取登录令牌", "响应解析失败: " + body);
 
@@ -166,55 +172,49 @@ public class MicrosoftAuthService
     public async Task<Account?> RefreshAsync(string refreshToken, CancellationToken ct = default)
     {
         LastRefreshFailureReason = RefreshFailureReason.None;
-        var form = new Dictionary<string, string>
-        {
-            ["client_id"] = _clientId,
-            ["grant_type"] = "refresh_token",
-            ["refresh_token"] = refreshToken,
-            ["scope"] = Scope
-        };
-
-        System.Net.Http.HttpResponseMessage resp;
         try
         {
-            resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
-                new FormUrlEncodedContent(form), ct);
+            var form = new Dictionary<string, string>
+            {
+                ["client_id"] = _clientId,
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = refreshToken,
+                ["scope"] = Scope
+            };
+            using var content = new FormUrlEncodedContent(form);
+            using var resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/token", content, ct);
+            if (!resp.IsSuccessStatusCode)
+            {
+                LastRefreshFailureReason = IsTemporaryFailure(resp.StatusCode)
+                    ? RefreshFailureReason.ServiceUnavailable : RefreshFailureReason.TokenInvalid;
+                return null;
+            }
+            var token = await resp.Content.ReadFromJsonAsync<MsaTokenResponse>(cancellationToken: ct);
+            if (token == null || string.IsNullOrWhiteSpace(token.AccessToken))
+            {
+                LastRefreshFailureReason = RefreshFailureReason.ServiceUnavailable;
+                return null;
+            }
+            // The refresh endpoint may omit refresh_token; retain the previous valid token.
+            var effectiveRefreshToken = string.IsNullOrEmpty(token.RefreshToken) ? refreshToken : token.RefreshToken;
+            return await CompleteLoginChainAsync(token.AccessToken, effectiveRefreshToken, ct);
         }
-        catch (Exception) when (ct.IsCancellationRequested == false)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (AuthStepException ex) when (ex.StatusCode.HasValue)
         {
-            // 连不上微软登录服务器本身（断网/DNS/超时等）：这不是"这个 refresh token 已失效"，
-            // 是"这次根本没能问到答案"，标记为服务不可用，供调用方走令牌保留时效降级。
+            LastRefreshFailureReason = IsTemporaryFailure(ex.StatusCode.Value)
+                ? RefreshFailureReason.ServiceUnavailable : RefreshFailureReason.TokenInvalid;
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or AuthStepException)
+        {
             LastRefreshFailureReason = RefreshFailureReason.ServiceUnavailable;
             return null;
         }
-
-        if (!resp.IsSuccessStatusCode)
-        {
-            // 微软明确应答了（不是网络层失败），但拒绝了这次刷新：绝大多数情况下是 refresh
-            // token 本身已经过期/被吊销/用户在别处撤销了授权，这是明确的"需要重新登录"，
-            // 不应该走令牌保留时效降级（继续离线启动没有意义——正版身份确实已经失效）。
-            // 5xx 状态码例外：那是微软服务端自己出了问题，同样按"服务不可用"处理。
-            LastRefreshFailureReason = (int)resp.StatusCode >= 500
-                ? RefreshFailureReason.ServiceUnavailable
-                : RefreshFailureReason.TokenInvalid;
-            return null;
-        }
-        var token = await resp.Content.ReadFromJsonAsync<MsaTokenResponse>(cancellationToken: ct);
-        if (token == null) return null;
-
-        // 根因修复（"明明是微软账户，进游戏却变成 Demo 试玩"）：微软的 refresh_token 授权端点
-        // 并不保证每次都返回新的 refresh_token —— 很多时候它会省略这个字段，让客户端继续复用
-        // 旧的那个。之前这里直接把 token.RefreshToken（可能是 null）传给 CompleteLoginChainAsync
-        // 再原样写回 Account.MsRefreshToken，一旦某次刷新恰好没带新 refresh_token，就会用 null
-        // 覆盖掉账户里本来还有效的旧 refresh_token 并持久化保存。下一次 access token 过期后，
-        // MainWindow 启动前的检查（"!string.IsNullOrEmpty(account.MsRefreshToken)"）会因为它已经
-        // 变成 null 而直接跳过刷新，转而拿着一个已过期的 access token 去启动游戏——Minecraft
-        // 收到无效凭证时不会报错，而是静默降级成离线试玩(Demo)模式，现象上就是"账户管理里明明
-        // 显示已登录微软账户，一进游戏却是 Demo"。
-        // 修复：微软没给新的就沿用调用方传进来的旧 refreshToken，永远不用 null 覆盖已存在的值。
-        var effectiveRefreshToken = string.IsNullOrEmpty(token.RefreshToken) ? refreshToken : token.RefreshToken;
-        return await CompleteLoginChainAsync(token.AccessToken, effectiveRefreshToken, ct);
     }
+
+    internal static bool IsTemporaryFailure(System.Net.HttpStatusCode status) =>
+        (int)status >= 500 || status is System.Net.HttpStatusCode.RequestTimeout or System.Net.HttpStatusCode.TooManyRequests;
 
     /// <summary>
     /// 手动构造 JSON POST 请求，Content-Type 精确写成 "application/json"（不带 charset 后缀），
@@ -238,6 +238,8 @@ public class MicrosoftAuthService
 
     private async Task<Account> CompleteLoginChainAsync(string msaAccessToken, string? newRefreshToken, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(msaAccessToken))
+            throw new AuthStepException("获取登录令牌", "服务器返回了空的访问令牌。");
         // 1) Xbox Live 认证
         var xblReq = new
         {
@@ -255,12 +257,13 @@ public class MicrosoftAuthService
                 ? "（响应正文为空，这不是 Xbox Live 正常的报错格式。响应头：" + xblHeaders + "）"
                 : "";
             throw new AuthStepException("Xbox Live 认证",
-                $"HTTP {(int)xblStatus}: {xblBody} {hint}\n[诊断] RpsTicket 前缀长度={msaAccessToken.Length}, " +
-                $"访问令牌前 12 位={msaAccessToken[..Math.Min(12, msaAccessToken.Length)]}...");
+                $"HTTP {(int)xblStatus}: {xblBody} {hint}", xblStatus);
         }
         var xbl = JsonSerializer.Deserialize<XblResponse>(xblBody)
             ?? throw new AuthStepException("Xbox Live 认证", "响应解析失败: " + xblBody);
 
+        if (string.IsNullOrWhiteSpace(xbl.Token))
+            throw new AuthStepException("Xbox Live 认证", "服务器响应中缺少 Xbox 访问令牌。");
         // 2) XSTS 认证
         var xstsReq = new
         {
@@ -277,37 +280,43 @@ public class MicrosoftAuthService
                 : xstsBody.Contains("2148916238") ? "（此账户是未成年账户，需要监护人在家庭组中添加同意）"
                 : string.IsNullOrWhiteSpace(xstsBody) ? "（响应正文为空。响应头：" + xstsHeaders + "）"
                 : "";
-            throw new AuthStepException("XSTS 认证", $"HTTP {(int)xstsStatus}: {xstsBody} {hint}");
+            throw new AuthStepException("XSTS 认证", $"HTTP {(int)xstsStatus}: {xstsBody} {hint}", xstsStatus);
         }
         var xsts = JsonSerializer.Deserialize<XblResponse>(xstsBody)
             ?? throw new AuthStepException("XSTS 认证", "响应解析失败: " + xstsBody);
         var userHash = xsts.DisplayClaims?.Xui?.FirstOrDefault()?.Uhs
             ?? throw new AuthStepException("XSTS 认证", "响应中缺少 uhs 字段: " + xstsBody);
 
+        if (string.IsNullOrWhiteSpace(xsts.Token) || string.IsNullOrWhiteSpace(userHash))
+            throw new AuthStepException("XSTS 认证", "服务器响应中缺少 XSTS 访问令牌或用户标识。");
         // 3) 用 Xbox 令牌换取 Minecraft access token
         var mcReq = new { identityToken = $"XBL3.0 x={userHash};{xsts.Token}" };
-        var mcResp = await _http.PostAsJsonAsync("https://api.minecraftservices.com/authentication/login_with_xbox", mcReq, ct);
+        using var mcResp = await _http.PostAsJsonAsync("https://api.minecraftservices.com/authentication/login_with_xbox", mcReq, ct);
         var mcBody = await mcResp.Content.ReadAsStringAsync(ct);
         if (!mcResp.IsSuccessStatusCode)
-            throw new AuthStepException("Minecraft 服务登录", $"HTTP {(int)mcResp.StatusCode}: {mcBody}");
+            throw new AuthStepException("Minecraft 服务登录", $"HTTP {(int)mcResp.StatusCode}: {mcBody}", mcResp.StatusCode);
         var mcToken = JsonSerializer.Deserialize<MinecraftLoginResponse>(mcBody)
             ?? throw new AuthStepException("Minecraft 服务登录", "响应解析失败: " + mcBody);
 
+        if (string.IsNullOrWhiteSpace(mcToken.AccessToken) || mcToken.ExpiresIn <= 0)
+            throw new AuthStepException("Minecraft 服务登录", "服务器返回了空的访问令牌或无效的有效期。");
         // 4) 获取玩家档案(用户名 + UUID)
-        var profileReq = new HttpRequestMessage(HttpMethod.Get, "https://api.minecraftservices.com/minecraft/profile");
+        using var profileReq = new HttpRequestMessage(HttpMethod.Get, "https://api.minecraftservices.com/minecraft/profile");
         profileReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", mcToken.AccessToken);
-        var profileResp = await _http.SendAsync(profileReq, ct);
+        using var profileResp = await _http.SendAsync(profileReq, ct);
         var profileBody = await profileResp.Content.ReadAsStringAsync(ct);
         if (!profileResp.IsSuccessStatusCode)
         {
             var hint = profileResp.StatusCode == System.Net.HttpStatusCode.NotFound
                 ? "（此微软账户名下没有正版 Minecraft，请确认购买/关联游戏的账户是否就是刚才登录的这个）"
                 : "";
-            throw new AuthStepException("获取游戏档案", $"HTTP {(int)profileResp.StatusCode}: {profileBody} {hint}");
+            throw new AuthStepException("获取游戏档案", $"HTTP {(int)profileResp.StatusCode}: {profileBody} {hint}", profileResp.StatusCode);
         }
         var profile = JsonSerializer.Deserialize<MinecraftProfile>(profileBody)
             ?? throw new AuthStepException("获取游戏档案", "响应解析失败: " + profileBody);
 
+        if (string.IsNullOrWhiteSpace(profile.Name))
+            throw new AuthStepException("获取游戏档案", "服务器返回了空的玩家名称。");
         return new Account
         {
             Type = AccountType.Microsoft,
@@ -316,20 +325,22 @@ public class MicrosoftAuthService
             MsRefreshToken = newRefreshToken,
             MinecraftAccessToken = mcToken.AccessToken,
             AccessTokenExpiresAtUtc = DateTime.UtcNow.AddSeconds(mcToken.ExpiresIn),
+            LastVerifiedAtUtc = DateTime.UtcNow,
             IsSelected = true
         };
     }
 
     private static string FormatUuid(string raw)
     {
-        if (raw.Contains('-')) return raw;
-        return $"{raw[..8]}-{raw[8..12]}-{raw[12..16]}-{raw[16..20]}-{raw[20..32]}";
+        if (!Guid.TryParse(raw, out var uuid))
+            throw new AuthStepException("获取游戏档案", "服务器返回了无效的玩家 UUID。");
+        return uuid.ToString("D");
     }
 
     private async Task<DeviceCodeResponse> RequestDeviceCodeAsync(CancellationToken ct)
     {
         var form = new Dictionary<string, string> { ["client_id"] = _clientId, ["scope"] = Scope };
-        var resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode",
+        using var resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode",
             new FormUrlEncodedContent(form), ct);
         var body = await resp.Content.ReadAsStringAsync(ct);
         if (!resp.IsSuccessStatusCode)
@@ -337,7 +348,7 @@ public class MicrosoftAuthService
             var hint = body.Contains("unauthorized_client") || body.Contains("invalid_client")
                 ? "（请检查 Azure 应用是否已开启 “允许公共客户端流” = 是，并且账户类型支持个人微软账户）"
                 : "";
-            throw new AuthStepException("请求登录代码", $"HTTP {(int)resp.StatusCode}: {body} {hint}");
+            throw new AuthStepException("请求登录代码", $"HTTP {(int)resp.StatusCode}: {body} {hint}", resp.StatusCode);
         }
         return JsonSerializer.Deserialize<DeviceCodeResponse>(body)
             ?? throw new AuthStepException("请求登录代码", "响应解析失败: " + body);
@@ -346,18 +357,23 @@ public class MicrosoftAuthService
     private async Task<MsaTokenResponse> PollForTokenAsync(DeviceCodeResponse device, CancellationToken ct)
     {
         var interval = Math.Max(device.Interval, 5);
-        var deadline = DateTime.UtcNow.AddSeconds(device.ExpiresIn);
+        var lifetime = TimeSpan.FromSeconds(Math.Max(0, device.ExpiresIn));
+        var timer = Stopwatch.StartNew();
 
-        while (DateTime.UtcNow < deadline)
+        while (timer.Elapsed < lifetime)
         {
-            await Task.Delay(TimeSpan.FromSeconds(interval), ct);
+            var remaining = lifetime - timer.Elapsed;
+            var wait = TimeSpan.FromSeconds(interval);
+            if (wait > remaining) wait = remaining;
+            if (wait > TimeSpan.Zero) await Task.Delay(wait, ct);
+            if (timer.Elapsed >= lifetime) break;
             var form = new Dictionary<string, string>
             {
                 ["client_id"] = _clientId,
                 ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
                 ["device_code"] = device.DeviceCode
             };
-            var resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
+            using var resp = await _http.PostAsync("https://login.microsoftonline.com/consumers/oauth2/v2.0/token",
                 new FormUrlEncodedContent(form), ct);
             var json = await resp.Content.ReadAsStringAsync(ct);
 
@@ -367,7 +383,13 @@ public class MicrosoftAuthService
 
             using var doc = JsonDocument.Parse(json);
             var error = doc.RootElement.TryGetProperty("error", out var e) ? e.GetString() : null;
-            if (error is "authorization_pending" or "slow_down") continue;
+            if (error == "slow_down")
+            {
+                // RFC 8628 section 3.5: every slow_down raises all subsequent intervals by 5s.
+                interval = NextPollingInterval(interval);
+                continue;
+            }
+            if (error == "authorization_pending") continue;
 
             var hint = error == "expired_token" ? "（登录代码已过期，请重新点击“添加微软账户”）"
                 : error == "authorization_declined" ? "（登录已被拒绝/取消）"
@@ -376,6 +398,8 @@ public class MicrosoftAuthService
         }
         throw new AuthStepException("获取登录令牌", "登录代码已过期，请重新发起登录。");
     }
+
+    internal static int NextPollingInterval(int seconds) => (int)Math.Min(int.MaxValue, (long)seconds + 5);
 
     // --- DTOs ---
     private class DeviceCodeResponse

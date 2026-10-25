@@ -118,6 +118,12 @@ public class FolderService
 
     public GameFolder AddFolder(AppConfig config, string path, string? name = null)
     {
+        path = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (path.Length == 0 || (path.Length == 2 && path[1] == ':')) path += Path.DirectorySeparatorChar;
+        var existing = config.Folders.FirstOrDefault(item => string.Equals(
+            Path.GetFullPath(item.Path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase));
+        if (existing != null) return existing;
         Directory.CreateDirectory(path);
         var folder = new GameFolder { Name = name ?? Path.GetFileName(path.TrimEnd('\\', '/')), Path = path };
         config.Folders.Add(folder);

@@ -28,16 +28,17 @@ public static class WindowChromeService
     /// </summary>
     public static void ApplyTitleBarTheme(Window window, bool isDark)
     {
+        if (!WindowsCompatibilityService.Current.SupportsSystemTheme) return;
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return; // 句柄还没创建（窗口还没 Show 过），交给 App.xaml.cs 的 SourceInitialized 处理器再调一次
 
-        var useDark = isDark ? 1 : 0;
+        var useDark = isDark && WindowsCompatibilityService.Current.SupportsNativeDarkTitleBar ? 1 : 0;
         // 两个 attribute 编号都尝试设置：新系统认新编号(20)、旧编号会返回失败但无副作用；
         // 极少数老 Windows 10 版本只认旧编号(19)。返回值不为 0 代表调用失败（比如运行在
         // Windows 7/8，系统压根没有这个 DWM attribute），静默忽略即可——非深色标题栏
         // 场景下窗口退化回系统默认外观，不影响功能，不弹错误打扰用户。
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useDark, sizeof(int));
-        _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ref useDark, sizeof(int));
+        TrySetDwmAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, useDark);
+        TrySetDwmAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, useDark);
     }
 
     /// <summary>当前操作交给 DWM；逐类应用偏好，关闭一种动画不会关闭其它窗口动画。</summary>
@@ -45,8 +46,15 @@ public static class WindowChromeService
     {
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd == IntPtr.Zero) return;
-        var disabled = AnimationSettingsService.IsEnabled(kind) ? 0 : 1;
-        _ = DwmSetWindowAttribute(hwnd, 3 /* DWMWA_TRANSITIONS_FORCEDISABLED */, ref disabled, sizeof(int));
+        var disabled = !WindowsCompatibilityService.Current.IsEnabled && AnimationSettingsService.IsEnabled(kind) ? 0 : 1;
+        TrySetDwmAttribute(hwnd, 3 /* DWMWA_TRANSITIONS_FORCEDISABLED */, disabled);
+    }
+
+    private static void TrySetDwmAttribute(IntPtr hwnd, int attribute, int value)
+    {
+        try { _ = DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int)); }
+        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { }
     }
 
     // ===== F11 全屏（仅 MainWindow 使用） =====

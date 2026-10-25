@@ -20,7 +20,8 @@ public class JavaListItem
     public InstalledJava? Entry { get; init; }
     public string DisplayText => Entry == null
         ? "（不指定，使用自动探测）"
-        : (Entry.MajorVersion is > 0 ? $"{Entry.Name}  [Java {Entry.MajorVersion}]  " : $"{Entry.Name}  [版本未知]  ") + Entry.JavawPath;
+        : (!File.Exists(Entry.JavawPath) ? $"{Entry.Name}  [文件不存在]  "
+            : Entry.MajorVersion is > 0 ? $"{Entry.Name}  [Java {Entry.MajorVersion}]  " : $"{Entry.Name}  [版本未知]  ") + Entry.JavawPath;
 }
 
 public partial class SettingsPage : UserControl
@@ -101,6 +102,8 @@ public partial class SettingsPage : UserControl
         var cfg = _owner.ConfigService.Config;
         InitializePerformanceOverlaySettings(cfg);
         InitializeRecoverySettings(cfg);
+        InitializeSidebarSettings(cfg);
+        InitializeWindowsCompatibilitySettings(cfg);
         _committedUiSkin = cfg.UiSkin;
         _committedCustomAccentColor = NormalizeAccentColor(cfg.CustomAccentColor) ?? (cfg.UiSkin == ThemeService.SkinCustom ? "#4C9AFF" : null);
         _pendingSkinCandidates = (cfg.UiSkinCandidates ?? new List<string>()).Distinct(StringComparer.Ordinal).ToList();
@@ -897,6 +900,7 @@ public partial class SettingsPage : UserControl
     private void ApplyAllVisualEffectsFromConfig()
     {
         var cfg = _owner.ConfigService.Config;
+        WindowsCompatibilityService.Configure(cfg.WindowsCompatibilityMode);
         PerformanceOverlayService.ApplySettings();
         _owner.EndFeatureSearchPreview();
         AnimationSettingsService.ClearPreview();
@@ -933,31 +937,34 @@ public partial class SettingsPage : UserControl
         {
             var javaService = new JavaService();
             // QuickDetectJavaAsync 首次 await 前包含目录/注册表枚举，必须整个方法在工作线程启动。
-            var candidates = await Task.Run(() => javaService.QuickDetectJavaAsync(cancellationToken), cancellationToken);
+            var registeredPaths = _owner.ConfigService.Config.InstalledJavas.Select(entry => entry.JavawPath).ToArray();
+            var candidates = await Task.Run(() => javaService.QuickDetectJavaAsync(cancellationToken, registeredPaths), cancellationToken);
             if (!IsLoaded || cancellationToken.IsCancellationRequested) return;
 
             var cfg = _owner.ConfigService.Config;
             var existingPaths = new HashSet<string>(
                 cfg.InstalledJavas.Select(j => j.JavawPath), StringComparer.OrdinalIgnoreCase);
 
+            var refreshed = JavaRegistrationRefreshPolicy.RefreshExisting(cfg.InstalledJavas,
+                candidates.Select(candidate => (candidate.JavawPath, candidate.Version)), File.Exists);
             var added = 0;
             foreach (var candidate in candidates)
             {
                 if (existingPaths.Contains(candidate.JavawPath)) continue;
 
                 int? major = candidate.Version != null
-                    ? JavaService.ParseJavaMajorVersion($"\"{candidate.Version}\"")
+                    ? JavaVersionOutputPolicy.ParseMajorValue(candidate.Version)
                     : null;
                 _owner.ConfigService.RegisterJava(candidate.JavawPath, major, "Detected");
                 existingPaths.Add(candidate.JavawPath);
                 added++;
             }
 
-            if (added > 0)
+            if (added > 0 || refreshed > 0)
             {
                 _owner.ConfigService.Save();
                 RunWithoutDirtyTracking(RefreshJavaList);
-                StatusText.Text = $"已自动探测到 {added} 个新 Java 并加入列表。";
+                StatusText.Text = $"Java 探测完成：新增 {added} 个，更新 {refreshed} 个已登记条目。";
             }
         }
         catch { /* 静默失败：这是打开设置页时的自动锦上添花操作，不应该弹窗打扰用户 */ }
@@ -1565,37 +1572,37 @@ public partial class SettingsPage : UserControl
         try
         {
             var javaService = new JavaService();
-            var candidates = await Task.Run(() => javaService.QuickDetectJavaAsync(cancellation), cancellation);
+            var registeredPaths = _owner.ConfigService.Config.InstalledJavas.Select(entry => entry.JavawPath).ToArray();
+            var candidates = await Task.Run(() => javaService.QuickDetectJavaAsync(cancellation, registeredPaths), cancellation);
             if (!IsLoaded || cancellation.IsCancellationRequested) return;
 
             var cfg = _owner.ConfigService.Config;
             var existingPaths = new HashSet<string>(
                 cfg.InstalledJavas.Select(j => j.JavawPath), StringComparer.OrdinalIgnoreCase);
 
+            var refreshed = JavaRegistrationRefreshPolicy.RefreshExisting(cfg.InstalledJavas,
+                candidates.Select(candidate => (candidate.JavawPath, candidate.Version)), File.Exists);
             var added = 0;
             foreach (var candidate in candidates)
             {
                 if (existingPaths.Contains(candidate.JavawPath)) continue;
 
                 int? major = candidate.Version != null
-                    ? JavaService.ParseJavaMajorVersion($"\"{candidate.Version}\"")
+                    ? JavaVersionOutputPolicy.ParseMajorValue(candidate.Version)
                     : null;
                 _owner.ConfigService.RegisterJava(candidate.JavawPath, major, "Detected");
                 existingPaths.Add(candidate.JavawPath);
                 added++;
             }
 
-            if (added > 0)
-            {
-                _owner.ConfigService.Save();
-                RefreshJavaList();
-            }
+            if (added > 0 || refreshed > 0) _owner.ConfigService.Save();
+            // Rebuild even when only availability changed (for example a previously
+            // unprobed runtime was uninstalled while this page remained open).
+            RunWithoutDirtyTracking(RefreshJavaList);
 
-            StatusText.Text = candidates.Count == 0
-                ? "没有在常见位置探测到 Java。可以点「全盘扫描查找 Java」做更彻底的搜索，或手动浏览选择。"
-                : added > 0
-                    ? $"自动探测完成：新增 {added} 个 Java 到列表（共探测到 {candidates.Count} 个）。"
-                    : $"自动探测完成：探测到的 {candidates.Count} 个 Java 都已经在列表里了。";
+            var missing = cfg.InstalledJavas.Count(entry => !File.Exists(entry.JavawPath));
+            StatusText.Text = $"Java 探测完成：新增 {added} 个，更新 {refreshed} 个，当前 {missing} 个登记路径不存在。" +
+                (candidates.Count == 0 ? " 未找到可用 Java，可尝试全盘扫描或手动选择。" : "");
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex)
@@ -1655,7 +1662,7 @@ public partial class SettingsPage : UserControl
             if (picker.ShowDialog() == true && picker.SelectedPath != null)
             {
                 var picked = candidates.FirstOrDefault(candidate => candidate.JavawPath == picker.SelectedPath);
-                int? major = picked?.Version != null ? JavaService.ParseJavaMajorVersion($"\"{picked.Version}\"") : null;
+                int? major = picked?.Version != null ? JavaVersionOutputPolicy.ParseMajorValue(picked.Version) : null;
                 var entry = _owner.ConfigService.RegisterJava(picker.SelectedPath, major, "Scanned");
                 _owner.ConfigService.Save();
                 RunWithoutDirtyTracking(RefreshJavaList);
@@ -1832,6 +1839,7 @@ public partial class SettingsPage : UserControl
         var cfg = _owner.ConfigService.Config;
         
         cfg.AdvancedMode = false;
+        cfg.WindowsCompatibilityMode = WindowsCompatibilityMode.Auto;
         cfg.UiSkin = "White";
         cfg.IsDarkMode = false;
         cfg.RegistryFeatureEnabled = true;
@@ -1863,6 +1871,12 @@ public partial class SettingsPage : UserControl
         cfg.NoAnimationOptimization = NoAnimationOptimization.Balanced;
         cfg.EnableHighPerformanceMode = false;
         cfg.AnimationSettings = new Dictionary<string, AnimationOption>();
+        cfg.SidebarPlacement = SidebarPlacement.Left;
+        cfg.SidebarExpandedWidth = 0;
+        cfg.SidebarLabelFontSize = 0;
+        cfg.SidebarShowNavigationIcons = true;
+        cfg.SidebarStartCollapsed = false;
+        cfg.SidebarLabels = new Dictionary<string, string>();
         cfg.LowPerformanceMode = false;
         cfg.AlwaysOnTop = false;
         cfg.EnableWinUi3Design = false;
@@ -2123,6 +2137,8 @@ public partial class SettingsPage : UserControl
         };
         SavePerformanceOverlaySettings(cfg);
         SaveRecoverySettings(cfg);
+        SaveSidebarSettings(cfg);
+        SaveWindowsCompatibilitySettings(cfg);
         SaveUxOptions(cfg);
         SaveExperienceSettings(cfg);
         cfg.AutoStartOnBoot = AutoStartOnBootCheck.IsChecked == true;
@@ -2378,6 +2394,7 @@ public partial class SettingsPage : UserControl
         _uxSavingSettings = true;
         try { _owner.ConfigService.Save(); }
         finally { _uxSavingSettings = false; }
+        ApplyWindowsCompatibilitySettings(cfg);
         PresentationPreferencesService.NotifyChanged();
         AutoStartService.Apply(cfg.AutoStartOnBoot);
         PerformanceOverlayService.ApplySettings();
@@ -3650,6 +3667,7 @@ public partial class SettingsPage : UserControl
     private void InitializeAnimationSettings(AppConfig config)
     {
         StopAnimationPreviews();
+        ClearNotificationDurationControls();
         _animationPreviewControls.Clear();
         // 即使以后改为在同一页重新载入配置，也不重复注册名字或累加页面强度滑块。
         foreach (var kind in _animationControls.Keys)
@@ -3719,6 +3737,7 @@ public partial class SettingsPage : UserControl
             row.Children.Add(intensity);
             row.Children.Add(value);
             AddAnimationPreview(row, kind, label);
+            AddNotificationDurationControls(row, kind, option.DurationSeconds);
             AnimationOptionsPanel.Children.Add(row);
             _animationControls[kind] = (enabled, intensity, value);
         }
@@ -3734,7 +3753,9 @@ public partial class SettingsPage : UserControl
             options[kind.ToString()] = new AnimationOption
             {
                 Enabled = controls.Enabled.IsChecked == true,
-                IntensityPercent = controls.Intensity.Value
+                IntensityPercent = controls.Intensity.Value,
+                DurationSeconds = _notificationDurationControls.TryGetValue(kind, out var duration)
+                    ? duration.Value : AnimationSettingsService.GetOption(_owner.ConfigService.Config, kind).DurationSeconds
             };
         return options;
     }
@@ -3751,6 +3772,8 @@ public partial class SettingsPage : UserControl
             ? Visibility.Visible : Visibility.Collapsed;
         foreach (var controls in _animationControls.Values)
             controls.Intensity.IsEnabled = running && controls.Enabled.IsChecked == true;
+        foreach (var (kind, duration) in _notificationDurationControls)
+            duration.IsEnabled = running && _animationControls[kind].Enabled.IsChecked == true;
         foreach (var (kind, preview) in _animationPreviewControls)
             preview.Button.IsEnabled = running && _animationControls[kind].Enabled.IsChecked == true;
     }

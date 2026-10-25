@@ -7,7 +7,7 @@ namespace XCL2.App.Services
     public static class InstanceUxService
     {
         public static string GetGameDirectory(Models.AppConfig cfg, string folder, string id)
-            => (cfg.VersionIsolationOverrides.TryGetValue(id, out var value) ? value : cfg.IsolateVersionsByDefault) ? Path.Combine(folder, "versions", id) : Path.GetFullPath(folder);
+            => InstanceIsolationPolicy.Resolve(folder, id, cfg.IsolateVersionsByDefault, cfg.VersionIsolationOverrides) ? Path.Combine(folder, "versions", id) : Path.GetFullPath(folder);
     }
     public sealed class UpdateCandidate
     {

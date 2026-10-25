@@ -43,7 +43,7 @@ internal sealed class MiniWorldLocalClientDialog : OverlayDialogControl
         };
         choices.Children.Add(browse);
         var work = new Button { Content = "选择工作目录…", Padding = new Thickness(12, 7, 12, 7), Margin = new Thickness(0, 0, 8, 8) };
-        work.Click += (_, _) => { var picker = new OpenFolderDialog { Title = "选择游戏工作目录" }; if (picker.ShowDialog() == true) directory.Text = picker.FolderName; }; choices.Children.Add(work);
+        work.Click += (_, _) => { var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择游戏工作目录" }; if (picker.ShowDialog() == true) directory.Text = picker.FolderName; }; choices.Children.Add(work);
         panel.Children.Add(choices); panel.Children.Add(error);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "取消", Padding = new Thickness(16, 8, 16, 8), Margin = new Thickness(0, 0, 8, 0) }; cancel.Click += (_, _) => CloseWith(false); actions.Children.Add(cancel);

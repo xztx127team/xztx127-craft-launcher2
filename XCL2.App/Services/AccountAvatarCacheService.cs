@@ -29,10 +29,9 @@ public static class AccountAvatarCacheService
     {
         AccountType.Microsoft => true,
         AccountType.AuthServer => !string.IsNullOrWhiteSpace(account.AuthServerApiRoot) && !string.IsNullOrWhiteSpace(account.Uuid),
-        // 离线账户没有账户体系认证，只能按用户名去正版接口"猜"一次——猜中说明这确实是某个
-        // 正版玩家常用的用户名，猜不中（绝大多数情况）就静默放弃，不影响本地皮肤/默认头像显示。
-        // 未设置皮肤/主动选 Steve 的账户始终使用同一内嵌默认皮肤，不能被同名正版角色覆盖。
-        AccountType.Offline => account.SkinType is OfflineSkinType.Custom or OfflineSkinType.Alex,
+        // A matching display name is not proof of the same identity. Never replace a local
+        // Custom/Alex skin with the unrelated official player's online skin.
+        AccountType.Offline => false,
         _ => false
     };
 

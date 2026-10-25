@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using XCL2.App.Services;
 
 namespace XCL2.App.Views;
 
@@ -18,7 +19,12 @@ public partial class MainWindow
         _wideSidebarCollapsed = _sidebarCollapsed;
         AppBodyGrid.SizeChanged += (_, _) => ApplyResponsiveLayout();
         Loaded += (_, _) => ApplyResponsiveLayout();
-        ContentViewport.SizeChanged += (_, _) => RefreshCompactContentViewport();
+        ContentViewport.SizeChanged += (_, _) =>
+        {
+            RefreshCompactContentViewport();
+            ResizeDebugPanel();
+            ReminderPanel.MaxWidth = Math.Max(80, ContentAreaBorder.ActualWidth);
+        };
         ContentAreaBorder.PreviewMouseDown += (_, _) =>
         {
             if (_compactWindowLayout && !_sidebarCollapsed) ApplySidebarCollapsedState(true);
@@ -43,7 +49,8 @@ public partial class MainWindow
         if (!_responsiveLayoutReady) return;
         var width = AppBodyGrid.ActualWidth > 0 ? AppBodyGrid.ActualWidth : Width;
         var height = AppBodyGrid.ActualHeight > 0 ? AppBodyGrid.ActualHeight : Math.Max(0, Height - 32);
-        var compact = width < 760;
+        var compact = SidebarPreferences.NeedsCompactLayout(width, ConfigService.Config.SidebarExpandedWidth,
+            LocalizationService.CurrentLanguageCode == "zh-microsoft", IsNativePreviewOpen);
         _shortWindowLayout = height < 440;
         if (compact != _compactWindowLayout)
         {
@@ -64,11 +71,10 @@ public partial class MainWindow
     {
         if (!_responsiveLayoutReady) return;
         var drawerOpen = _compactWindowLayout && !_sidebarCollapsed;
-        Grid.SetColumnSpan(SidebarAreaBorder, drawerOpen ? 2 : 1);
-        SidebarAreaBorder.HorizontalAlignment = drawerOpen ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
-        SidebarAreaBorder.Width = drawerOpen ? (IsNativePreviewOpen ? Math.Max(192, SidebarExpandedWidth) : SidebarExpandedWidth) : double.NaN;
+        ApplySidebarPlacement(drawerOpen);
+        SidebarAreaBorder.Width = drawerOpen ? (SidebarExpandedWidth) : double.NaN;
         SidebarColumn.Width = new GridLength(_compactWindowLayout || _sidebarCollapsed
-            ? SidebarCollapsedWidth : IsNativePreviewOpen ? Math.Max(192, SidebarExpandedWidth) : SidebarExpandedWidth);
+            ? SidebarCollapsedWidth : SidebarExpandedWidth);
         SidebarPanel.Margin = _shortWindowLayout
             ? new Thickness(_sidebarCollapsed ? 4 : 8, 4, _sidebarCollapsed ? 4 : 8, 4)
             : _sidebarCollapsed ? new Thickness(4, 12, 4, 12) : new Thickness(12);
@@ -93,16 +99,19 @@ public partial class MainWindow
             button.Padding = _sidebarCollapsed ? new Thickness(0, _shortWindowLayout ? 7 : 10, 0, _shortWindowLayout ? 7 : 10)
                 : new Thickness(10, _shortWindowLayout ? 7 : 10, 10, _shortWindowLayout ? 7 : 10);
         }
+        UpdateSidebarLabelLayout();
     }
 
     private void RefreshCompactContentViewport()
     {
         if (!_responsiveLayoutReady) return;
         // 百宝箱可动态创建 WebView2 HWND；它与首页都保留自己的有限视口和页内滚动。
-        var legacyCompactPage = (_compactWindowLayout || _shortWindowLayout)
+        var adaptivePreviewPage = IsNativePreviewOpen && MainContent.Content is DownloadCenterPage;
+        var legacyCompactPage = !adaptivePreviewPage && (_compactWindowLayout || _shortWindowLayout)
             && MainContent.Content != null && MainContent.Content is not (HomePage or ToolboxPage);
         ContentViewport.HorizontalScrollBarVisibility = legacyCompactPage ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
         ContentViewport.VerticalScrollBarVisibility = legacyCompactPage ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
+        // 预览下载页自行分行和滚动，直接使用可用视口；旧页面继续保留原字号和横滚兜底。
         // 旧页面保留原字号与可用布局宽度，较小窗口通过滚动访问全部控件。
         // 显式有限视图尺寸避免外层 ScrollViewer 无限测量，保留内部列表虚拟化与页内滚动。
         MainContent.Width = legacyCompactPage ? Math.Max(640, ContentViewport.ActualWidth - 20) : double.NaN;

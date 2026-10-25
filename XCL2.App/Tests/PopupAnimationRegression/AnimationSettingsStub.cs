@@ -14,4 +14,10 @@ public static class AnimationSettingsService
     public static double Intensity(AnimationKind kind) => Strength;
     public static TimeSpan Duration(int milliseconds, AnimationKind kind) => TimeSpan.FromMilliseconds(milliseconds);
     public static void NotifyChanged() => Changed?.Invoke();
+    public static void LoadStartupPreferences() { }
+}
+
+public static class SingleInstanceService
+{
+    public enum ConflictChoice { KeepBothRunning, CloseNewInstance, CloseNewAndActivateOld, CloseOldKeepNewInstance }
 }

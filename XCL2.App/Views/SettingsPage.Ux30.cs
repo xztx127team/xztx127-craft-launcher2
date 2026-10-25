@@ -342,11 +342,21 @@ public partial class SettingsPage
             RunWithoutDirtyTracking(() => SelectComboByTag(UiSkinCombo, defaults.UiSkin));
             CommitThemeChoice(defaults.UiSkin, showReplacement: false);
         });
+        RegisterUxReset(SidebarPlacementCombo, () => SidebarPlacementCombo.SelectedIndex = 0);
+        RegisterUxReset(SidebarAutomaticWidthCheck, () => SidebarAutomaticWidthCheck.IsChecked = true);
+        RegisterUxReset(SidebarWidthSlider, () => SidebarWidthSlider.Value = 180);
+        RegisterUxReset(SidebarAutomaticFontSizeCheck, () => SidebarAutomaticFontSizeCheck.IsChecked = true);
+        RegisterUxReset(SidebarFontSizeSlider, () => SidebarFontSizeSlider.Value = 14);
+        RegisterUxReset(SidebarShowIconsCheck, () => SidebarShowIconsCheck.IsChecked = true);
+        RegisterUxReset(SidebarStartCollapsedCheck, () => SidebarStartCollapsedCheck.IsChecked = false);
+        foreach (var input in _sidebarLabelControls.Values) RegisterUxReset(input, () => input.Text = "");
         foreach (var (kind, controls) in _animationControls)
         {
             var option = AnimationSettingsService.GetOption(defaults, kind);
             RegisterUxReset(controls.Enabled, () => controls.Enabled.IsChecked = option.Enabled);
             RegisterUxReset(controls.Intensity, () => controls.Intensity.Value = option.IntensityPercent);
+            if (_notificationDurationControls.TryGetValue(kind, out var duration))
+                RegisterUxReset(duration, () => duration.Value = option.DurationSeconds);
         }
         RegisterExperienceDefaults(defaults);
         InstallUxGroupResetMenus();
@@ -491,9 +501,18 @@ public partial class SettingsPage
             nameof(TouchScaleBox) => "触屏按钮大小",
             nameof(TouchOpacityBox) => "触屏按钮不透明度",
             nameof(TouchSensitivityBox) => "触屏视角灵敏度",
+            nameof(SidebarPlacementCombo) => "侧边栏显示位置",
+            nameof(SidebarWidthSlider) => "侧边栏展开宽度",
+            nameof(SidebarFontSizeSlider) => "导航文字大小",
             _ => null
         };
         if (explicitLabel != null) return explicitLabel;
+        foreach (var (kind, duration) in _notificationDurationControls)
+            if (ReferenceEquals(control, duration))
+                return AnimationSettingsService.Options.First(option => option.Kind == kind).Label + "动画时长";
+        foreach (var (key, input) in _sidebarLabelControls)
+            if (ReferenceEquals(control, input))
+                return SidebarPreferences.Labels.First(item => item.Key == key).DefaultText + "导航文字";
         foreach (var (kind, controls) in _animationControls)
             if (ReferenceEquals(control, controls.Intensity))
                 return AnimationSettingsService.Options.First(option => option.Kind == kind).Label + "动画强度";

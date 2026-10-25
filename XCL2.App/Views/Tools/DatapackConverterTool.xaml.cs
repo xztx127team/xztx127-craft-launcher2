@@ -21,7 +21,7 @@ public partial class DatapackConverterTool : UserControl
 
     private void DpcBrowseSource_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择源目录（数据包 / 行为包根目录）" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择源目录（数据包 / 行为包根目录）" };
         if (!string.IsNullOrWhiteSpace(DpcSourceDirBox.Text) && Directory.Exists(DpcSourceDirBox.Text))
             dialog.InitialDirectory = DpcSourceDirBox.Text;
 
@@ -31,7 +31,7 @@ public partial class DatapackConverterTool : UserControl
 
     private void DpcBrowseOutput_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择转换结果输出目录" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择转换结果输出目录" };
         if (!string.IsNullOrWhiteSpace(DpcOutputDirBox.Text) && Directory.Exists(DpcOutputDirBox.Text))
             dialog.InitialDirectory = DpcOutputDirBox.Text;
 

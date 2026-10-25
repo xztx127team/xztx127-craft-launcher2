@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><NoWarn>CA1416</NoWarn></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AppConfig.UxInstances.cs" Link="AppConfig.UxInstances.cs"/>
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs"/>
+    <Compile Include="../../Services/InstanceDeletionService.cs" Link="InstanceDeletionService.cs"/>
+    <Compile Include="../../Services/JunkCleanupService.cs" Link="JunkCleanupService.cs"/>
+  </ItemGroup>
+</Project>

@@ -262,7 +262,7 @@ public partial class CreateServerWindow : OverlayDialogControl
 
     private void BrowseTargetDir_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择服务器安装位置" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择服务器安装位置" };
         if (Directory.Exists(TargetDirBox.Text)) dialog.InitialDirectory = TargetDirBox.Text;
 
         // 修复编译错误 CS1503：OpenFolderDialog/OpenFileDialog.ShowDialog(Window? owner)

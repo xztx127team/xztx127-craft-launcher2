@@ -17,7 +17,7 @@ public class ModrinthService
 
     public ModrinthService()
     {
-        _http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(5));
         // Modrinth 官方要求：必须带一个能唯一标识“谁在调用”的 User-Agent，
         // 格式建议 "作者/项目名 (联系方式)"，不能用默认的 .NET HttpClient UA（会被限流/拒绝）。
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("XCL2-Launcher", "1.0"));
@@ -77,7 +77,8 @@ public class ModrinthService
 
         var json = await DownloadEndpoints.GetStringWithFallbackAsync(_http, url, DownloadEndpoints.PreferMirror,
             "读取 Modrinth 资源信息失败", ct);
-        return JsonSerializer.Deserialize<List<ModrinthVersion>>(json) ?? new List<ModrinthVersion>();
+        return (JsonSerializer.Deserialize<List<ModrinthVersion>>(json) ?? new List<ModrinthVersion>())
+            .Where(version => version != null && ModUpdateSelectionPolicy.MatchesFilters(version.GameVersions, version.Loaders, gameVersion)).ToList();
     }
 
     /// <summary>启动器的加载器名 -> Modrinth 的 loaders 取值。Quilt 能加载 Fabric 的 mod，所以一并放行；
@@ -119,10 +120,8 @@ public class ModrinthService
         var all = JsonSerializer.Deserialize<List<ModrinthVersion>>(json) ?? new List<ModrinthVersion>();
 
         // 服务端已经过滤过一次，这里再兜底校验一遍，防止接口行为变化时又混进别的加载器的文件。
-        if (loaders.Count > 0)
-            all = all.Where(v => v.Loaders == null || v.Loaders.Count == 0
-                                 || v.Loaders.Any(l => loaders.Contains(l, StringComparer.OrdinalIgnoreCase))).ToList();
-        return all;
+        return all.Where(version => version != null &&
+            ModUpdateSelectionPolicy.MatchesFilters(version.GameVersions, version.Loaders, gameVersion, loaders)).ToList();
     }
 
     /// <summary>
@@ -138,7 +137,7 @@ public class ModrinthService
 
         try
         {
-            var resp = await _http.GetAsync($"{BaseUrl}/project/{Uri.EscapeDataString(modId)}", ct);
+            using var resp = await _http.GetAsync($"{BaseUrl}/project/{Uri.EscapeDataString(modId)}", ct);
             if (resp.IsSuccessStatusCode)
             {
                 using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
@@ -151,6 +150,7 @@ public class ModrinthService
                     return slugProp.GetString();
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch { /* 直接查询失败（网络/解析）就继续走搜索兜底 */ }
 
         static string Norm(string x) => x.Replace("-", "").Replace("_", "").Replace(" ", "").ToLowerInvariant();
@@ -201,7 +201,7 @@ public class ModrinthService
         {
             if (string.IsNullOrWhiteSpace(saveName))
                 throw new InvalidOperationException("数据包必须安装到具体的存档里，请先选择一个存档。");
-            destDir = Path.Combine(minecraftDir, "saves", saveName, "datapacks");
+            destDir = Path.Combine(ResourceDownloadPath.ResolveChild(Path.Combine(minecraftDir, "saves"), saveName), "datapacks");
         }
         else
         {
@@ -218,7 +218,7 @@ public class ModrinthService
         }
 
         Directory.CreateDirectory(destDir);
-        var destPath = Path.Combine(destDir, file.Filename);
+        var destPath = ResourceDownloadPath.ResolveChild(destDir, file.Filename);
 
         progress?.Report($"下载 {file.Filename} ...");
 

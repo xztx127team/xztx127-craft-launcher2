@@ -41,10 +41,13 @@ public partial class ModManagerPage : UserControl
     private bool _isLoadingVersions;
     private bool _isLoadingMods;
     private bool _checkingBatchUpdates;
+    private bool _versionScanFailed;
+    private bool _modScanFailed;
 
     // 监视当前实例的 mods 文件夹：不管是拖拽导入、下载、还是用户手动往文件夹里丢文件，
     // 只要内容变了就自动刷新列表。防抖是因为复制一个 jar 会连续触发好几次文件事件。
     private FileSystemWatcher? _modsWatcher;
+    private FileSystemWatcher? _modsParentWatcher;
     private string? _watchedModsDir;
     private readonly System.Windows.Threading.DispatcherTimer _watchDebounce;
 
@@ -104,6 +107,8 @@ public partial class ModManagerPage : UserControl
         CancelVersionScan();
         CancelModScan();
         StopWatchingMods();
+        _versionScanFailed = false;
+        _modScanFailed = false;
         SetVersions(Array.Empty<GameVersion>(), null);
         SetMods(Array.Empty<LocalModInfo>());
 
@@ -132,8 +137,11 @@ public partial class ModManagerPage : UserControl
         catch (Exception ex)
         {
             if (IsLoaded && !cancellation.IsCancellationRequested && generation == _versionScanGeneration)
+            {
+                _versionScanFailed = true;
                 ErrorPresenter.ShowFriendlyError("扫描已安装版本失败，可能是这个文件夹不是有效的 .minecraft 目录，或权限不足。",
                     ex.ToString(), "扫描版本失败");
+            }
         }
         finally
         {
@@ -202,11 +210,8 @@ public partial class ModManagerPage : UserControl
         if (folder == null || version == null) return null;
 
         var cfg = _owner.ConfigService.Config;
-        var isolate = cfg.VersionIsolationOverrides.TryGetValue(version.Id, out var overrideValue)
-            ? overrideValue
-            : cfg.IsolateVersionsByDefault;
-
-        return isolate ? Path.Combine(folder.Path, "versions", version.Id) : folder.Path;
+        return ModManagementPresentation.GameDirectory(folder.Path, version.Id,
+            cfg.IsolateVersionsByDefault, cfg.VersionIsolationOverrides);
     }
 
     /// <summary>供主窗口调用：拖拽导入等操作装完文件后，如果用户正停在这个页面，立刻刷新列表。</summary>
@@ -226,37 +231,82 @@ public partial class ModManagerPage : UserControl
     private void WatchModsDir(string gameDir)
     {
         var modsDir = Path.Combine(gameDir, "mods");
-        if (_modsWatcher != null && string.Equals(_watchedModsDir, modsDir, StringComparison.OrdinalIgnoreCase)) return;
+        var watchRoot = ModManagementPresentation.WatchDirectory(modsDir);
+        if (_modsWatcher != null && string.Equals(_watchedModsDir, modsDir, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_modsWatcher.Path, watchRoot, StringComparison.OrdinalIgnoreCase)) return;
 
         StopWatchingMods();
+        if (watchRoot == null) return;
         try
         {
-            if (!Directory.Exists(modsDir)) return;
-
-            var watcher = new FileSystemWatcher(modsDir)
+            var watcher = new FileSystemWatcher(watchRoot)
             {
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                // Only the next missing path component needs monitoring. Its
+                // creation schedules a scan and narrows the watcher again;
+                // recursively watching .minecraft would also see every asset.
                 IncludeSubdirectories = false,
             };
-            void OnChanged() => Dispatcher.BeginInvoke(new Action(() =>
+            void QueueRefresh(bool recreateWatcher = false)
             {
-                // 已排队的旧 watcher 事件不能在切走后重新启动计时器。
-                if (!IsLoaded || !ReferenceEquals(_modsWatcher, watcher)) return;
-                _watchDebounce.Stop();
-                _watchDebounce.Start();
-            }));
-            watcher.Created += (_, _) => OnChanged();
-            watcher.Deleted += (_, _) => OnChanged();
-            watcher.Changed += (_, _) => OnChanged();
-            watcher.Renamed += (_, _) => OnChanged();
-            watcher.EnableRaisingEvents = true;
-
+                if (Dispatcher.HasShutdownStarted) return;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    // Old queued events cannot restart polling after leaving this page.
+                    if (!IsLoaded || !ReferenceEquals(_modsWatcher, watcher)) return;
+                    if (recreateWatcher) StopWatchingMods();
+                    _watchDebounce.Stop();
+                    _watchDebounce.Start();
+                }));
+            }
+            void OnChanged(object sender, FileSystemEventArgs args)
+            {
+                if (ModManagementPresentation.AffectsMods(args.FullPath, modsDir)) QueueRefresh();
+            }
+            watcher.Created += OnChanged;
+            watcher.Deleted += OnChanged;
+            watcher.Changed += OnChanged;
+            watcher.Renamed += (_, args) =>
+            {
+                if (ModManagementPresentation.AffectsMods(args.FullPath, modsDir)
+                    || ModManagementPresentation.AffectsMods(args.OldFullPath, modsDir)) QueueRefresh();
+            };
+            watcher.Error += (_, _) => QueueRefresh(recreateWatcher: true);
             _modsWatcher = watcher;
             _watchedModsDir = modsDir;
+            watcher.EnableRaisingEvents = true;
+            if (string.Equals(watchRoot, modsDir, StringComparison.OrdinalIgnoreCase)
+                && Path.GetDirectoryName(modsDir) is { } parentDirectory)
+            {
+                // A watcher on mods sees files, but renaming the watched directory
+                // itself is reported by its parent. Keep the empty state current.
+                var parentWatcher = new FileSystemWatcher(parentDirectory)
+                {
+                    NotifyFilter = NotifyFilters.DirectoryName,
+                    IncludeSubdirectories = false
+                };
+                parentWatcher.Created += (_, args) =>
+                {
+                    if (ModManagementPresentation.AffectsMods(args.FullPath, modsDir)) QueueRefresh(recreateWatcher: true);
+                };
+                parentWatcher.Deleted += (_, args) =>
+                {
+                    if (ModManagementPresentation.AffectsMods(args.FullPath, modsDir)) QueueRefresh(recreateWatcher: true);
+                };
+                parentWatcher.Renamed += (_, args) =>
+                {
+                    if (ModManagementPresentation.AffectsMods(args.FullPath, modsDir)
+                        || ModManagementPresentation.AffectsMods(args.OldFullPath, modsDir)) QueueRefresh(recreateWatcher: true);
+                };
+                parentWatcher.Error += (_, _) => QueueRefresh(recreateWatcher: true);
+                _modsParentWatcher = parentWatcher;
+                parentWatcher.EnableRaisingEvents = true;
+            }
         }
         catch
         {
-            // 监视失败（权限/网络盘等）不影响功能，用户仍然可以手动点刷新。
+            StopWatchingMods();
+            // Network shares and restricted directories still support manual refresh.
         }
     }
 
@@ -269,6 +319,12 @@ public partial class ModManagerPage : UserControl
             _modsWatcher.Dispose();
             _modsWatcher = null;
         }
+        if (_modsParentWatcher != null)
+        {
+            _modsParentWatcher.EnableRaisingEvents = false;
+            _modsParentWatcher.Dispose();
+            _modsParentWatcher = null;
+        }
         _watchedModsDir = null;
     }
 
@@ -280,6 +336,7 @@ public partial class ModManagerPage : UserControl
         // 显式刷新会取消还在排队的"文件变化"刷新，避免同一件事刷两遍。
         _watchDebounce.Stop();
         CancelModScan();
+        _modScanFailed = false;
         var gameDir = GetEffectiveGameDir();
         if (gameDir == null)
         {
@@ -307,6 +364,7 @@ public partial class ModManagerPage : UserControl
         {
             if (IsLoaded && !cancellation.IsCancellationRequested && generation == _modScanGeneration)
             {
+                _modScanFailed = true;
                 SetMods(Array.Empty<LocalModInfo>());
                 ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Couldn_T_Scan_The_Mod_List_A_File_May_Be", "扫描 Mod 列表失败，可能是文件被占用或权限不足，请重试。"),
                     ex.ToString(), "扫描 Mod 列表失败");
@@ -326,16 +384,49 @@ public partial class ModManagerPage : UserControl
 
     private void UpdateEmptyHint()
     {
-        var isLoading = _isLoadingVersions || _isLoadingMods;
-        LoadingHost.Visibility = isLoading ? Visibility.Visible : Visibility.Collapsed;
         VersionCombo.IsEnabled = !_isLoadingVersions;
-        var hasSelection = FolderCombo.SelectedItem != null && VersionCombo.SelectedItem != null;
-        EmptyHint.Visibility = !isLoading && _mods.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        EmptyHint.Text = !hasSelection
-            ? "请先选择一个文件夹和版本。"
-            : "这个版本还没有安装任何 Mod，去「下载」页的 Mod 分类搜索安装吧。";
-        ModsListBox.Visibility = isLoading || _mods.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (!isLoading) ApplyModFilter();
+        ApplyModFilter();
+    }
+
+    private void UpdateModPresentation(int visibleCount)
+    {
+        if (EmptyModsState == null || EmptyHint == null || LoadingHost == null) return;
+        var state = ModManagementPresentation.Resolve(_isLoadingVersions || _isLoadingMods,
+            FolderCombo.SelectedItem is GameFolder && VersionCombo.SelectedItem is GameVersion,
+            _versionScanFailed || _modScanFailed, _mods.Count, visibleCount);
+        LoadingHost.Visibility = state == ModManagementState.Loading ? Visibility.Visible : Visibility.Collapsed;
+        EmptyModsState.Visibility = state == ModManagementState.Empty ? Visibility.Visible : Visibility.Collapsed;
+        ModsListBox.Visibility = state is ModManagementState.Ready or ModManagementState.FilterEmpty
+            ? Visibility.Visible : Visibility.Collapsed;
+        EmptyHint.Visibility = state is ModManagementState.SelectionRequired or ModManagementState.FilterEmpty or ModManagementState.Failed
+            ? Visibility.Visible : Visibility.Collapsed;
+        EmptyHint.Text = state switch
+        {
+            ModManagementState.Failed => _versionScanFailed
+                ? "未能读取已安装版本，请检查文件夹权限后点击刷新。"
+                : "未能读取模组列表，请检查文件占用或权限后点击刷新。",
+            ModManagementState.FilterEmpty => "没有符合筛选条件的模组。清空关键词可显示全部；已选项目仍然保留。",
+            _ => "请先选择一个文件夹和版本。"
+        };
+    }
+
+    private void AddMods_Click(object sender, RoutedEventArgs e)
+    {
+        if (FolderCombo.SelectedItem is not GameFolder folder || VersionCombo.SelectedItem is not GameVersion version) return;
+        try
+        {
+            // Download targets are resolved from the global selected instance.
+            // Keep it aligned with the instance whose empty state was clicked.
+            _owner.ConfigService.Config.SelectedFolderPath = folder.Path;
+            _owner.ConfigService.Config.SelectedVersionId = version.Id;
+            _owner.ConfigService.Save();
+            _owner.RefreshSidebar();
+            _owner.NavigateToModDownloads(version.McVersion, version.ModLoader);
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError("无法打开这个版本的模组下载页，请重试。", ex.ToString(), "添加模组");
+        }
     }
 
     private void FolderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -356,7 +447,11 @@ public partial class ModManagerPage : UserControl
         RefreshMods();
     }
 
-    private void Refresh_Click(object sender, RoutedEventArgs e) => RefreshMods();
+    private void Refresh_Click(object sender, RoutedEventArgs e)
+    {
+        if (_versionScanFailed || VersionCombo.SelectedItem == null) RefreshVersions();
+        else RefreshMods();
+    }
 
     private void MoreActions_Click(object sender, RoutedEventArgs e)
     {

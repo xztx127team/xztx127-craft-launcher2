@@ -37,13 +37,13 @@
                        Text="如果你正在使用桌面便签功能，选择下面的「打开此实例，并关闭原有实例」会一并关掉便签——想两边都保留，请选「保留此实例」。"/>
 
             <Button Content="保留此实例（两个实例都继续运行）" Style="{StaticResource SecondaryButton}"
-                    HorizontalContentAlignment="Left" Margin="0,0,0,8" Click="KeepBothRunning_Click"/>
+                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Margin="0,0,0,8" Click="KeepBothRunning_Click"/>
             <Button Content="关闭此实例（保留原有实例不变）" Style="{StaticResource SecondaryButton}"
-                    HorizontalContentAlignment="Left" Margin="0,0,0,8" Click="CloseNewInstance_Click"/>
+                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Margin="0,0,0,8" Click="CloseNewInstance_Click"/>
             <Button Content="关闭此实例，并切换到原有实例" Style="{StaticResource SecondaryButton}"
-                    HorizontalContentAlignment="Left" Margin="0,0,0,8" Click="CloseNewAndActivateOld_Click"/>
+                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Margin="0,0,0,8" Click="CloseNewAndActivateOld_Click"/>
             <Button Content="打开此实例，并关闭原有实例" Style="{StaticResource PrimaryButton}"
-                    HorizontalContentAlignment="Left" Click="CloseOldKeepNewInstance_Click"/>
+                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Click="CloseOldKeepNewInstance_Click"/>
         </StackPanel>
     </Border>
 </Window>

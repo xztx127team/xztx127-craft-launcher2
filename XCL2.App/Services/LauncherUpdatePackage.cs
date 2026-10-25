@@ -21,7 +21,11 @@ internal sealed record LauncherUpdateMetadata(long Size, string Sha256)
 
 internal sealed record LauncherUpdatePlan(string CurrentPath, string StagePath, string BackupPath, string FailedPath,
     string RestorePath, string LogPath, string ReadyPath, string AbortPath, string AuthorizePath, string AuthorizationToken, long ExpectedSize, string Sha256,
-    string CurrentSha256, int ParentProcessId, long ParentStartedUtcTicks, ushort Machine);
+    string CurrentSha256, int ParentProcessId, long ParentStartedUtcTicks, ushort Machine)
+{
+    public string ScriptPath => Path.Combine(Path.GetDirectoryName(ReadyPath)!,
+        Path.GetFileNameWithoutExtension(StagePath) + ".ps1");
+}
 
 /// <summary>Verifies the exact published package and prepares a literal-data update transaction.</summary>
 internal static class LauncherUpdatePackage
@@ -79,13 +83,18 @@ internal static class LauncherUpdatePackage
 
     internal static ProcessStartInfo CreateStartInfo(LauncherUpdatePlan plan)
     {
+        // Windows PowerShell 5.1 reads UTF-8 scripts reliably with a BOM. Only the
+        // short literal script path is passed on the command line, regardless of payload size.
+        Directory.CreateDirectory(Path.GetDirectoryName(plan.ScriptPath)!);
+        File.WriteAllText(plan.ScriptPath, BuildScript(plan), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
         var info = new ProcessStartInfo(powershell)
-        { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
-        var command = Convert.ToBase64String(Encoding.Unicode.GetBytes(BuildScript(plan)));
-        if (command.Length > 28000) throw new PathTooLongException("更新路径过长，无法安全启动更新辅助进程；当前版本保持不变，请将启动器移到较短路径或手动更新。");
-        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand",
-                     command }) info.ArgumentList.Add(argument);
+        {
+            UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = Path.GetDirectoryName(plan.ScriptPath)!
+        };
+        foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
+                     "-ExecutionPolicy", "Bypass", "-File", plan.ScriptPath }) info.ArgumentList.Add(argument);
         return info;
     }
 
@@ -127,6 +136,7 @@ $replaced = $false
 $parentExited = $false
 $authorized = $false
 $child = $null
+$parent = $null
 $ownership = $null
 function Log([string]$message) {
     try { [IO.File]::AppendAllText($d.LogPath, ('[' + [DateTime]::Now.ToString('o') + '] ' + $message + [Environment]::NewLine), [Text.Encoding]::UTF8) } catch {}
@@ -136,27 +146,51 @@ function VerifyStage {
     if ($item.Length -ne $d.ExpectedSize) { throw 'Staged update size mismatch.' }
     if ((Get-FileHash -LiteralPath $d.StagePath -Algorithm SHA256).Hash -ne $d.Sha256) { throw 'Staged update SHA256 mismatch.' }
 }
+function InvokeWithFileRetry([scriptblock]$operation, [int]$seconds = 30) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        try { return (& $operation) }
+        catch {
+            $cause = $_.Exception
+            while ($null -ne $cause.InnerException) { $cause = $cause.InnerException }
+            # File locks can outlive the parent by a short interval (scanner/indexer/other instance).
+            # Errors in validation or script logic must not be retried as file-access failures.
+            $retryable = $cause -is [IO.IOException] -or $cause -is [UnauthorizedAccessException] -or
+                ($cause -is [ComponentModel.Win32Exception] -and $cause.NativeErrorCode -in @(5, 32, 33))
+            if (!$retryable -or $clock.Elapsed.TotalSeconds -ge $seconds) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
 function StartLauncher([string]$argument) {
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $d.CurrentPath
     $start.WorkingDirectory = [IO.Path]::GetDirectoryName($d.CurrentPath)
     $start.UseShellExecute = $false
     $start.Arguments = $argument
-    return [Diagnostics.Process]::Start($start)
+    return InvokeWithFileRetry { [Diagnostics.Process]::Start($start) }
 }
 try {
     VerifyStage
+    try { $parent = [Diagnostics.Process]::GetProcessById([int]$d.ParentProcessId) }
+    catch {
+        if (!($_.Exception.GetBaseException() -is [ArgumentException])) { throw }
+    }
+    if ($null -ne $parent) {
+        if ($parent.StartTime.ToUniversalTime().Ticks -ne [long]$d.ParentStartedUtcTicks) {
+            $parent.Dispose()
+            $parent = $null
+        } else {
+            # Open the stable process handle before reporting ready. Re-reading StartTime
+            # while the launcher exits can throw exactly when replacement should begin.
+            $null = $parent.Handle
+        }
+    }
     [IO.File]::WriteAllText($d.ReadyPath, 'ready')
     while ($true) {
         if (Test-Path -LiteralPath $d.AbortPath) { throw 'Update exit was cancelled; installed executable was preserved.' }
-        $parent = $null
-        try { $parent = [Diagnostics.Process]::GetProcessById([int]$d.ParentProcessId) } catch {}
         if ($null -eq $parent) { break }
-        try {
-            if ($parent.StartTime.ToUniversalTime().Ticks -ne [long]$d.ParentStartedUtcTicks) { break }
-            if ($parent.HasExited) { break }
-        } finally { $parent.Dispose() }
-        Start-Sleep -Milliseconds 200
+        if ($parent.WaitForExit(200)) { break }
     }
     if (Test-Path -LiteralPath $d.AbortPath) { throw 'Update cancelled before replacement.' }
     $parentExited = $true
@@ -167,15 +201,19 @@ try {
     # A fixed shared file serializes updater processes without evaluating the executable path as code.
     $lockPath = [IO.Path]::Combine([IO.Path]::GetDirectoryName($d.CurrentPath), '.xcl2-update-apply.lock')
     $ownership = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
-    if ((Get-FileHash -LiteralPath $d.CurrentPath -Algorithm SHA256).Hash -ne $d.CurrentSha256) {
-        throw 'Installed executable changed during preparation; refusing to overwrite another update.'
+    InvokeWithFileRetry {
+        if ((Get-FileHash -LiteralPath $d.CurrentPath -Algorithm SHA256).Hash -ne $d.CurrentSha256) {
+            throw 'Installed executable changed during preparation; refusing to overwrite another update.'
+        }
+        VerifyStage
+        [IO.File]::Replace($d.StagePath, $d.CurrentPath, $d.BackupPath, $true)
     }
-    VerifyStage
-    [IO.File]::Replace($d.StagePath, $d.CurrentPath, $d.BackupPath, $true)
     $replaced = $true
     Log 'Executable replaced atomically; previous executable retained in the unique backup.'
-    $child = StartLauncher '--just-updated'
+    # The replacement opens normally without a second update/result/changelog prompt.
+    $child = StartLauncher '--skip-update-check'
     if ($null -eq $child) { throw 'The new executable did not start.' }
+    Log ('Started updated launcher PID=' + $child.Id)
     if ($child.WaitForExit(5000)) { throw ('New process exited during the five-second start probe: ' + $child.ExitCode) }
     Log 'New process survived the five-second probe. This is a liveness probe, not complete health verification. Backup retained.'
 } catch {
@@ -183,9 +221,11 @@ try {
     if ($replaced) {
         try {
             if ($null -ne $child) { try { if (!$child.HasExited) { $child.Kill(); $child.WaitForExit(5000) | Out-Null } } catch {} }
-            [IO.File]::Copy($d.BackupPath, $d.RestorePath, $false)
-            if (Test-Path -LiteralPath $d.CurrentPath) { [IO.File]::Replace($d.RestorePath, $d.CurrentPath, $d.FailedPath, $true) }
-            else { [IO.File]::Move($d.RestorePath, $d.CurrentPath) }
+            InvokeWithFileRetry { [IO.File]::Copy($d.BackupPath, $d.RestorePath, $true) }
+            InvokeWithFileRetry {
+                if (Test-Path -LiteralPath $d.CurrentPath) { [IO.File]::Replace($d.RestorePath, $d.CurrentPath, $d.FailedPath, $true) }
+                else { [IO.File]::Move($d.RestorePath, $d.CurrentPath) }
+            }
             Log 'Previous executable restored; backup retained.'
             $old = StartLauncher '--skip-update-check'
             if ($null -ne $old) { $old.Dispose() }
@@ -200,9 +240,10 @@ try {
     }
     exit 1
 } finally {
+    if ($null -ne $parent) { $parent.Dispose() }
     if ($null -ne $child) { $child.Dispose() }
     if ($null -ne $ownership) { $ownership.Dispose() }
-    foreach ($path in @($d.StagePath, $d.RestorePath, $d.ReadyPath, $d.AbortPath, $d.AuthorizePath)) {
+    foreach ($path in @($d.StagePath, $d.RestorePath, $d.ReadyPath, $d.AbortPath, $d.AuthorizePath, $d.ScriptPath)) {
         try { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } } catch {}
     }
 }

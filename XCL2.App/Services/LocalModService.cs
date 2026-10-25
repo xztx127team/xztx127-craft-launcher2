@@ -23,32 +23,52 @@ public class LocalModService
         cancellationToken.ThrowIfCancellationRequested();
         var result = new List<LocalModInfo>();
         var modsDir = Path.Combine(minecraftDir, "mods");
-        if (!Directory.Exists(modsDir)) return result;
+        // Directory.Exists also returns false for inaccessible paths. Only a
+        // genuinely missing directory is an empty instance; permission and I/O
+        // errors must reach the manager's failure state instead of "no mods".
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(modsDir); }
+        catch (FileNotFoundException) { cancellationToken.ThrowIfCancellationRequested(); return result; }
+        catch (DirectoryNotFoundException) { cancellationToken.ThrowIfCancellationRequested(); return result; }
+        if ((attributes & FileAttributes.Directory) == 0)
+            throw new IOException("The mods location is a file, not a directory: " + modsDir);
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(modsDir))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var fileName = Path.GetFileName(file);
+                var isDisabled = fileName.EndsWith(DisabledSuffix, StringComparison.OrdinalIgnoreCase);
+                var effectiveName = isDisabled
+                    ? fileName[..^DisabledSuffix.Length]
+                    : fileName;
 
-        foreach (var file in Directory.EnumerateFiles(modsDir))
+                // 只认 .jar / .jar.disabled，其他文件（比如用户手滑放进 mods 文件夹的说明文档）跳过，
+                // 不当成 mod 展示，避免用户对着一个 txt 文件点"禁用"却什么都没发生的困惑。
+                if (!effectiveName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) continue;
+
+                long fileSize;
+                try { fileSize = new FileInfo(file).Length; }
+                // The watcher can observe a delete while this snapshot is being
+                // read. Skip that vanished entry, but keep permission failures
+                // visible instead of silently presenting a partial empty list.
+                catch (FileNotFoundException) { continue; }
+                catch (DirectoryNotFoundException) { continue; }
+
+                result.Add(new LocalModInfo
+                {
+                    FilePath = file,
+                    DisplayName = TryReadModName(file, isDisabled) ?? effectiveName,
+                    FileName = effectiveName,
+                    IsEnabled = !isDisabled,
+                    FileSizeBytes = fileSize
+                });
+            }
+        }
+        catch (DirectoryNotFoundException)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var fileName = Path.GetFileName(file);
-            var isDisabled = fileName.EndsWith(DisabledSuffix, StringComparison.OrdinalIgnoreCase);
-            var effectiveName = isDisabled
-                ? fileName[..^DisabledSuffix.Length]
-                : fileName;
-
-            // 只认 .jar / .jar.disabled，其他文件（比如用户手滑放进 mods 文件夹的说明文档）跳过，
-            // 不当成 mod 展示，避免用户对着一个 txt 文件点"禁用"却什么都没发生的困惑。
-            if (!effectiveName.EndsWith(".jar", StringComparison.OrdinalIgnoreCase)) continue;
-
-            FileInfo? info = null;
-            try { info = new FileInfo(file); } catch { /* 忽略单个文件读取失败，不影响其他文件展示 */ }
-
-            result.Add(new LocalModInfo
-            {
-                FilePath = file,
-                DisplayName = TryReadModName(file, isDisabled) ?? effectiveName,
-                FileName = effectiveName,
-                IsEnabled = !isDisabled,
-                FileSizeBytes = info?.Length ?? 0
-            });
+            return new List<LocalModInfo>();
         }
 
         cancellationToken.ThrowIfCancellationRequested();

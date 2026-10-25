@@ -834,7 +834,11 @@ public partial class AppConfig
             _animationSettings = new Dictionary<string, AnimationOption>(StringComparer.OrdinalIgnoreCase);
             if (value == null) return;
             foreach (var pair in value)
-                _animationSettings[pair.Key] = pair.Value ?? new AnimationOption();
+                _animationSettings[pair.Key] = pair.Value ?? new AnimationOption
+                {
+                    IntensityPercent = pair.Key.Equals("Popup", StringComparison.OrdinalIgnoreCase)
+                        || pair.Key.Equals("Toast", StringComparison.OrdinalIgnoreCase) ? 30 : 100
+                };
         }
     }
 

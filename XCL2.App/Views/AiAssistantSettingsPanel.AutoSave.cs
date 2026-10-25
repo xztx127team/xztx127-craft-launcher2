@@ -134,7 +134,7 @@ public partial class AiAssistantSettingsPanel
     {
         if (Window.GetWindow(this) is { } owner && owner is not MainWindow)
         {
-            MessageBox.Show(owner, message, title, MessageBoxButton.OK, success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            OwnedMessageDialog.Show(owner, message, title, MessageBoxButton.OK, success ? MessageBoxImage.Information : MessageBoxImage.Warning);
             return Task.CompletedTask;
         }
         return success ? MessageBoxDialog.ShowSuccessAsync(message, title) : MessageBoxDialog.ShowErrorAsync(message, title);

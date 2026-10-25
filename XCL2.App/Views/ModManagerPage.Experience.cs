@@ -43,9 +43,7 @@ public partial class ModManagerPage
         var hidden = _selectedModPaths.Count(path => !visible.Any(item => string.Equals(item.Info.FilePath, path, StringComparison.OrdinalIgnoreCase)));
         ModSelectionSummary.Text = _selectedModPaths.Count == 0 ? "" : $"已选 {_selectedModPaths.Count} 个" + (_owner.ConfigService.Config.Ux50ShowHiddenModSelections && hidden > 0 ? $"（筛选隐藏 {hidden} 个）" : "");
         ModSelectionSummary.Visibility = _selectedModPaths.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (!_isLoadingMods && !_isLoadingVersions && _mods.Count > 0 && visible.Length == 0)
-        { EmptyHint.Text = "没有符合筛选条件的模组。清空关键词可显示全部；已选项目仍然保留。"; EmptyHint.Visibility = Visibility.Visible; }
-        else if (_mods.Count > 0) EmptyHint.Visibility = Visibility.Collapsed;
+        UpdateModPresentation(visible.Length);
     }
     private void ModSelection_Click(object sender, RoutedEventArgs e)
     {

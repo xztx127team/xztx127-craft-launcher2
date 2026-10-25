@@ -62,7 +62,7 @@ public static partial class UpdateCheckService
         [property: JsonPropertyName("prerelease")] bool Prerelease = false,
         [property: JsonPropertyName("draft")] bool Draft = false);
 
-    /// <summary>主窗口与协议流程就绪后启动：网络失败只记日志；正式版沿用提醒角标，
+    /// <summary>主窗口与协议流程就绪后启动：网络失败只记日志；正式版默认弹出更新确认，
     /// 用户明确加入预览计划时，新的 RC 才展示带三个选择的预览提示。</summary>
     public static void CheckForUpdateInBackground(Func<AppConfig> getConfig)
     {
@@ -145,10 +145,9 @@ public static partial class UpdateCheckService
         var asset = PickAssetForCurrentArch(release.Assets);
         if (instructions.IsRequired(DateOnly.FromDateTime(DateTime.Now)))
             return await OfferRequiredUpdateAsync(release, remoteVersion, localVersion, asset, instructions);
-        if ((backgroundReminder || previewOnly) && instructions.Minor)
+        if ((backgroundReminder || previewOnly) && instructions.Minor && remoteVersion.IsPreview)
         {
-            if (remoteVersion.IsPreview) PublishMinorPreviewReminder(release, localVersion, updatesEnabled, instructions);
-            else PublishUpdateReminder(remoteVersion.Core, localVersion.Core, updatesEnabled, instructions);
+            PublishMinorPreviewReminder(release, localVersion, updatesEnabled, instructions);
             return new(CheckStatus.UpdateAvailable, $"发现次要更新 {release.TagName}，仅显示提醒。");
         }
         if (instructions.Deadline is { } due)
@@ -164,7 +163,13 @@ public static partial class UpdateCheckService
         if (backgroundReminder)
         {
             PublishUpdateReminder(remoteVersion.Core, localVersion.Core, updatesEnabled, instructions);
-            return new(CheckStatus.UpdateAvailable, $"发现新版本 v{FormatVersion(remoteVersion)}，已放入提醒角标。");
+            var now = DateTimeOffset.Now;
+            DateTimeOffset? snoozedUntil = null;
+            if (ConfigService.Active?.Config.Ux50UpdateReminderSnoozes?.TryGetValue(remoteVersion.Core.ToString(), out var until) == true)
+                snoozedUntil = until;
+            if (!LauncherUpdatePolicy.ShouldPromptForStableUpdate(true,
+                    LauncherUpdatePreferences.Read().EffectiveMode(now), snoozedUntil, now))
+                return new(CheckStatus.UpdateAvailable, $"发现新版本 v{FormatVersion(remoteVersion)}，已按提醒偏好处理。");
         }
 
         _ = LauncherUpdateMetadata.FromAsset(asset.Size, asset.Digest);
@@ -310,7 +315,7 @@ public static partial class UpdateCheckService
         LauncherUpdatePlan? plan = null;
         Process? updater = null;
         ProgressDialog? progressDialog = null;
-        var handedOff = false;
+        var handoff = new LauncherUpdateHandoff();
         CheckResult? GetStopReason()
         {
             if (!updatesEnabled()) return new(CheckStatus.UpdatesDisabled, "启动器更新已关闭，本次未替换当前版本。");
@@ -351,27 +356,37 @@ public static partial class UpdateCheckService
                 progressDialog?.Close();
                 if (GetStopReason() != null || Application.Current.MainWindow is not MainWindow owner)
                     return Task.FromResult(false);
-                return owner.RequestExitForUpdateAsync(() => LauncherUpdatePackage.AuthorizeOnClosed(plan, updater));
-            });
+                return owner.RequestExitForUpdateAsync(() => handoff.Commit(() =>
+                {
+                    LauncherUpdatePackage.AuthorizeOnClosed(plan, updater);
+                    Log("窗口已关闭，更新脚本获准替换并重新启动；后续退出清理不再撤销交接。");
+                }));
+            }).Task.ConfigureAwait(false);
             var closed = await closeTask.ConfigureAwait(false);
+            if (handoff.IsCommitted)
+                return new(CheckStatus.Updating, $"已交由后台脚本应用 v{FormatVersion(remoteVersion)} 并重新启动。");
             if (!closed)
             {
-                LauncherUpdatePackage.Abort(plan);
                 Log("关闭启动器被取消，更新辅助进程已收到中止信号，旧版本未替换。");
                 return GetStopReason() ?? new(CheckStatus.Skipped, "已取消关闭启动器，本次更新未应用，当前版本继续运行。");
             }
-            handedOff = true;
-            return new(CheckStatus.Updating, $"已交由辅助进程应用 v{FormatVersion(remoteVersion)} 更新；备份保留，失败将尝试恢复。");
+            throw new IOException("启动器关闭时未完成更新交接，当前版本未授权替换。");
         }
         catch (Exception ex)
         {
-            if (plan != null) { try { LauncherUpdatePackage.Abort(plan); } catch { } }
+            // Closed may shut down the WPF dispatcher before its awaited operation completes.
+            // The synchronous authorization callback is the commit point, not this continuation.
+            if (!handoff.TryCancel())
+            {
+                Log("更新已交接；忽略启动器退出期间的续体异常：" + ex.Message);
+                return new(CheckStatus.Updating, $"后台脚本正在应用 v{FormatVersion(remoteVersion)} 并重新启动。");
+            }
             Log("更新准备失败，未授权替换：" + ex);
             return new(CheckStatus.Failed, "更新准备失败，当前版本未替换：" + ex.Message);
         }
         finally
         {
-            if (!handedOff)
+            if (handoff.TryCancel())
             {
                 if (plan != null) { try { LauncherUpdatePackage.Abort(plan); } catch { } }
                 // Cancelling does not rely on being able to create Abort. The helper
@@ -388,7 +403,7 @@ public static partial class UpdateCheckService
                     catch (Exception ex) { Log("更新辅助进程清理未完成（无关闭授权，不能替换旧版本）：" + ex.Message); }
                 }
                 if (helperStopped && plan != null)
-                    foreach (var path in new[] { plan.StagePath, plan.RestorePath, plan.ReadyPath, plan.AbortPath, plan.AuthorizePath })
+                    foreach (var path in new[] { plan.StagePath, plan.RestorePath, plan.ReadyPath, plan.AbortPath, plan.AuthorizePath, plan.ScriptPath })
                         LauncherUpdatePackage.TryDelete(path);
                 LauncherUpdatePackage.TryDelete(downloadedExe);
                 var dispatcher = Application.Current?.Dispatcher;

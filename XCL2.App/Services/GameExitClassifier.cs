@@ -148,9 +148,7 @@ public static class GameExitClassifier
             // 比这次启动更早（留出几秒时钟/文件系统误差）就是上一局遗留的日志，不属于这次运行。
             if (File.GetLastWriteTime(path) < startedAt.AddSeconds(-10)) return null;
 
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var sr = new StreamReader(fs, detectEncodingFromByteOrderMarks: true);
-            var text = sr.ReadToEnd();
+            var text = DiagnosticLogReader.Read(path);
             if (text.Length > 0)
                 endsMidLine = text[^1] != '\n' && text[^1] != '\r';
             return text;

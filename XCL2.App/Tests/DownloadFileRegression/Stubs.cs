@@ -1,7 +1,7 @@
 namespace XCL2.App.Models
 {
     public enum DownloadSource { Official, BMCLAPI }
-    public sealed class AppConfig
+    public sealed partial class AppConfig
     {
         public DownloadSource Source { get; set; }
         public DownloadMirrorConfig DownloadMirrors { get; set; } = new();

@@ -17,6 +17,7 @@ namespace XCL2.App.Models
     }
     public sealed class GameProcessInfo(Process process, string version, string account, string directory)
     {
+        public Process Process { get; } = process;
         public bool? UseOriginalTouchInput { get; set; }
         public bool TouchModeRequestedAtLaunch { get; set; }
         public bool TouchModeEnabled { get; set; }

@@ -209,7 +209,7 @@ public partial class FirstRunWizardWindow : OverlayDialogControl
         // WPF 自带对话框没有"选文件夹"，用保存对话框变通选目录是常见做法之一，
         // 但为了避免用户误解，这里改用 OpenFolderDialog 风格的 FolderBrowserDialog 替代方案：
         // 直接允许用户手动输入/粘贴路径，同时也提供一个基于"新建文件"曲线选择目录的兜底。
-        var dialog = new Microsoft.Win32.OpenFolderDialog
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog
         {
             Title = "选择游戏文件夹",
             InitialDirectory = Directory.Exists(FolderPathBox.Text) ? FolderPathBox.Text : AppContext.BaseDirectory
@@ -319,7 +319,19 @@ public partial class FirstRunWizardWindow : OverlayDialogControl
     }
 
     /// <summary>内嵌登录版本，照抄 LoginPage.AddMicrosoftEmbedded_Click。</summary>
-    private async void MicrosoftLoginEmbedded_Click(object sender, RoutedEventArgs e)
+    private void MicrosoftLoginEmbedded_Click(object sender, RoutedEventArgs e)
+    {
+        if (WebView2RuntimeDetector.PreferExternalBrowser)
+        {
+            ToastService.ShowInfo(WebView2RuntimeDetector.CompatibilityBrowserMessage);
+            MicrosoftLoginBrowser_Click(sender, e);
+            return;
+        }
+        MicrosoftLoginEmbeddedCore(sender, e);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private async void MicrosoftLoginEmbeddedCore(object sender, RoutedEventArgs e)
     {
         if (!WebView2RuntimeDetector.IsAvailable())
         {

@@ -21,10 +21,13 @@ namespace XCL2.App.Services;
 /// </summary>
 public class AuthServerAuthService
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
+    private readonly HttpClient _http;
 
-    public AuthServerAuthService()
+    public AuthServerAuthService() : this(new HttpClient(AuthEndpointPolicy.CreateCredentialHandler()) { Timeout = TimeSpan.FromSeconds(30) }) { }
+
+    internal AuthServerAuthService(HttpClient http)
     {
+        _http = http;
         _http.DefaultRequestHeaders.UserAgent.Clear();
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("XCL2Launcher", "1.0"));
     }
@@ -65,7 +68,11 @@ public class AuthServerAuthService
                 $"无法连接到认证服务器，请确认地址填写正确、且服务器可以正常访问。原始错误：{ex.Message}");
         }
 
-        var body = await resp.Content.ReadAsStringAsync(ct);
+        using var response = resp;
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if ((int)resp.StatusCode is >= 300 and < 400)
+            throw new AuthStepException("认证服务器登录", "认证服务器要求重定向；为避免将密码转发到其他地址，请核对并填写最终 HTTPS API Root 后重试。", resp.StatusCode);
 
         if (!resp.IsSuccessStatusCode)
         {
@@ -93,6 +100,8 @@ public class AuthServerAuthService
         if (!root.TryGetProperty("accessToken", out var accessTokenEl))
             throw new AuthStepException("认证服务器登录", "登录响应里没有 accessToken 字段，这个服务器可能不是标准的 Yggdrasil 认证服务器。");
         var accessToken = accessTokenEl.GetString() ?? "";
+        if (string.IsNullOrWhiteSpace(accessToken))
+            throw new AuthStepException("认证服务器登录", "服务器返回了空的访问令牌，请重新登录。");
 
         // selectedProfile 在只绑定了一个游戏角色时会直接给出；如果账号下有多个角色但没有
         // selectedProfile，则从 availableProfiles 里取第一个——这是大多数皮肤站单角色场景下
@@ -110,6 +119,9 @@ public class AuthServerAuthService
         var profileName = profile.Value.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? username : username;
         var profileUuid = profile.Value.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
 
+        if (!Guid.TryParse(profileUuid, out _))
+            throw new AuthStepException("获取游戏角色", "服务器返回了无效的玩家 UUID。");
+
         return new Account
         {
             Type = AccountType.AuthServer,
@@ -117,7 +129,8 @@ public class AuthServerAuthService
             Uuid = InsertUuidDashes(profileUuid),
             MinecraftAccessToken = accessToken,
             AuthServerApiRoot = normalizedRoot,
-            AuthServerClientToken = clientToken,
+            AuthServerClientToken = root.TryGetProperty("clientToken", out var returnedClient)
+                && returnedClient.ValueKind == JsonValueKind.String ? returnedClient.GetString() ?? clientToken : clientToken,
             // 皮肤站账户的会话有效期由服务器自行控制（多数实现里跟官方一样是几十小时到几天不等），
             // 这里不去猜测具体时长——启动时如果 accessToken 已经失效，游戏本体登录会话校验失败，
             // 用户重新登录一次即可，比较简单可靠，不引入额外的静默刷新时序复杂度。
@@ -136,9 +149,10 @@ public class AuthServerAuthService
 
     private async Task<string> ResolveApiRootAsync(string input, CancellationToken ct)
     {
-        var candidates = BuildApiRootCandidates(input).ToList();
+        ct.ThrowIfCancellationRequested();
+        var candidates = AuthEndpointPolicy.BuildApiRootCandidates(input).ToList();
         if (candidates.Count == 0)
-            throw new AuthStepException("识别皮肤站地址", "无法识别这个皮肤站地址，请填写完整的认证服务器 API Root。");
+            throw new AuthStepException("识别皮肤站地址", "无法识别这个皮肤站地址，请填写不含账号密码、查询参数或片段的 HTTPS API Root（本机测试可使用 HTTP）。");
 
         foreach (var candidate in candidates)
         {
@@ -148,33 +162,6 @@ public class AuthServerAuthService
 
         throw new AuthStepException("识别皮肤站地址",
             "未能自动检测到这个皮肤站的 Yggdrasil API 地址。请在皮肤站后台或帮助页面查找并填写完整 API Root，例如：https://example.com/api/yggdrasil");
-    }
-
-    private static IEnumerable<string> BuildApiRootCandidates(string input)
-    {
-        var raw = input.Trim().TrimEnd('/');
-        if (string.IsNullOrWhiteSpace(raw)) yield break;
-
-        if (!raw.Contains("://")) raw = "https://" + raw;
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) yield break;
-
-        var noAuthserver = raw.EndsWith("/authserver", StringComparison.OrdinalIgnoreCase)
-            ? raw[..^"/authserver".Length]
-            : raw;
-
-        if (noAuthserver.Contains("/api/yggdrasil", StringComparison.OrdinalIgnoreCase) ||
-            noAuthserver.Contains("/authlib-injector/api", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return noAuthserver;
-        }
-
-        var origin = uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
-        var path = uri.AbsolutePath.Trim('/');
-        if (!string.IsNullOrWhiteSpace(path))
-            yield return $"{origin}/{path}/api/yggdrasil";
-
-        yield return $"{origin}/api/yggdrasil";
-        yield return $"{origin}/authlib-injector/api";
     }
 
     private async Task<bool> LooksLikeYggdrasilApiRootAsync(string apiRoot, CancellationToken ct)
@@ -194,6 +181,7 @@ public class AuthServerAuthService
                    root.TryGetProperty("skinDomains", out _) ||
                    root.TryGetProperty("signaturePublickey", out _);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch
         {
             return false;

@@ -101,6 +101,19 @@ try
     Write("quick-child", new { id = "quick-child", inheritsFrom = "quick", arguments = new { game = new[] { "--quickPlayMultiplayer", "${quickPlayMultiplayer}" } } });
     options.VersionId = "quick-child";
     Check(Preview(options).Count(x => x == "--quickPlayMultiplayer") == 1, "a child repeating its parent's server option does not duplicate Quick Play");
+    foreach (var early in new[] { "13w18a", "13w18b", "13w23b" })
+    {
+        Write(early, new { id = early, mainClass = "net.minecraft.client.main.Main", minecraftArguments = "--username ${auth_player_name} --session ${auth_session} --workDir ${game_directory}" }, jar: true);
+        options = new LauncherService.LaunchOptions { MinecraftDir = root, VersionId = early, JavaPath = java32, GameLanguage = "zh_cn" };
+        launchArguments = Preview(options);
+        var game = launchArguments.Skip(launchArguments.IndexOf("net.minecraft.client.main.Main") + 1).ToArray();
+        Check(game.Length == 6 && !game.Contains("--height") && !game.Contains("--width") && !game.Contains("--lang") && !game.Contains("--gameDir"),
+            "strict early snapshot receives only its declared named arguments: " + early);
+        Check(game.Contains("--workDir") && game.Contains("--session"), "early snapshot workDir/session survive: " + early);
+    }
+    Check(LegacyMinecraftCompatibility.ResolveGameLanguage("zh_cn", new[] { "renamed", "13w23b" }) == "en_US", "13w23b language exception follows inherited metadata after rename");
+    Check(LegacyMinecraftCompatibility.ResolveGameLanguage(null, new[] { "13w23b" }) == null, "unset language remains user controlled");
+    Check(LegacyMinecraftCompatibility.ResolveGameLanguage("zh_cn", new[] { "13w23a", "1.21.1" }) == "zh_cn", "language exception does not spread to other releases");
     Write("missing", new { id = "missing", inheritsFrom = "not-installed" }); options.VersionId = "missing";
     Reject(() => Preview(options), "父版本");
     Write("cycle-a", new { id = "cycle-a", inheritsFrom = "cycle-b" }); Write("cycle-b", new { id = "cycle-b", inheritsFrom = "cycle-a" }); options.VersionId = "cycle-a";

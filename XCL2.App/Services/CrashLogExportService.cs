@@ -5,27 +5,18 @@ using XCL2.App.Models;
 namespace XCL2.App.Services;
 
 /// <summary>
-/// 需求："游戏崩溃的时候，可以选择查看日志和导出完整日志。完整日志包括启动器的日志、
-/// 游戏崩溃前的输出和游戏日志"。
-///
-/// 这里的"完整日志"是三段内容拼接成一份文本，方便用户一次性发给帮忙排查问题的人，
-/// 不用东找一个文件西找一个文件：
-/// 1. 启动器日志——本次启动器会话运行期间的时间线摘要，来自 <see cref="LauncherLogService"/>
-///    的内存缓冲（这时候还没到关闭时刻，文件可能还没落盘，所以直接读缓冲区而不是读文件）。
-/// 2. 游戏崩溃前的输出——崩溃的这个游戏进程自己的 stdout/stderr 滚动缓冲
-///    （<see cref="GameProcessInfo.OutputBuffer"/>），也就是"游戏日志"Tab 里能看到的内容。
-/// 3. 游戏日志——游戏工作目录下 logs/latest.log（Minecraft 自己写盘的日志文件，
-///    内容跟第 2 点的控制台输出有重叠但格式不同，两者都留着方便交叉核对）。
+/// 合并启动器滚动缓冲、游戏进程滚动输出与磁盘日志的诊断片段。
+/// 大文件读取前限制为 512 KiB 首尾片段，并标注截断；原始日志文件保持不变。
 /// </summary>
 public static class CrashLogExportService
 {
-    /// <summary>组装完整的合并日志文本，供"查看日志"预览和"导出完整日志"保存共用同一份内容。</summary>
+    /// <summary>组装有上限的诊断日志文本，供预览与导出共用。</summary>
     public static string BuildCombinedLog(GameProcessInfo? processInfo)
     {
         var sb = new StringBuilder();
 
         sb.AppendLine("========================================");
-        sb.AppendLine("XCL2 崩溃完整日志导出");
+        sb.AppendLine("XCL2 崩溃诊断日志导出");
         sb.AppendLine($"导出时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine("========================================");
         sb.AppendLine();
@@ -55,7 +46,7 @@ public static class CrashLogExportService
         return sb.ToString();
     }
 
-    /// <summary>从游戏进程记录的工作目录里找 logs/latest.log 并读取全文。找不到就返回 null。</summary>
+    /// <summary>从游戏进程记录的工作目录里找 logs/latest.log 并读取有上限的诊断片段。找不到就返回 null。</summary>
     private static string? TryReadGameLatestLog(GameProcessInfo? processInfo)
     {
         if (processInfo == null) return null;
@@ -63,7 +54,7 @@ public static class CrashLogExportService
         {
             var logPath = Path.Combine(processInfo.GameDir, "logs", "latest.log");
             if (File.Exists(logPath))
-                return File.ReadAllText(logPath);
+                return DiagnosticLogReader.Read(logPath, includeHead: true);
         }
         catch { /* 读取失败就当作没有，不阻断其余内容的展示/导出 */ }
         return null;

@@ -212,7 +212,7 @@ internal sealed partial class PluginHostBridge : IDisposable
                     var hidden = state.Hidden.Contains(InstanceDeletionService.BuildKey(root, version.Id));
                     var instance = new PluginInstance(id, Safe(version.Id), Safe(version.McVersion), version.ModLoader?.ToLowerInvariant(),
                         version.ModLoaderVersion == null ? null : Safe(version.ModLoaderVersion), version.IsInstalled, id == state.Selected, hidden);
-                    var isolated = state.Isolation.TryGetValue(version.Id, out var isolate) ? isolate : state.DefaultIsolation;
+                    var isolated = InstanceIsolationPolicy.Resolve(root, version.Id, state.DefaultIsolation, state.Isolation);
                     var javaId = state.JavaOverrides.TryGetValue(version.Id, out var overrideId) ? overrideId : state.SelectedJava;
                     var java = javaId != null && state.Javas.TryGetValue(javaId, out var javaPath) && File.Exists(javaPath) ? javaPath :
                         !string.IsNullOrEmpty(state.Java) && File.Exists(state.Java) ? state.Java : null;

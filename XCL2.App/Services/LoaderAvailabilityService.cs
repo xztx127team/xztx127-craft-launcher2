@@ -25,7 +25,7 @@ namespace XCL2.App.Services;
 /// </summary>
 public static class LoaderAvailabilityService
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    private static readonly HttpClient Http = LauncherHttpClientFactory.Create(TimeSpan.FromSeconds(8));
 
     /// <summary>
     /// 返回 LoaderChoiceDialog 关心的加载器 -> 是否支持该 mcVersion 的字典。

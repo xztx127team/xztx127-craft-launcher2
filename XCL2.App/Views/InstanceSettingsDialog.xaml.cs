@@ -21,6 +21,7 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
     private readonly MainWindow _owner;
     private readonly DispatcherTimer _memoryPreviewTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private CancellationTokenSource? _javaPreviewCancellation;
+    private bool _settingsSaveAccepted;
     private int? _previewJavaBitness;
     private string _previewJavaNote = "Java 尚未匹配；启动前会按实际 Java 位数复核内存上限。";
 
@@ -69,9 +70,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
 
         SkipJavaMismatchPromptCheckDlg.IsChecked = _config.VersionSkipJavaMismatchPrompt.Contains(versionId);
 
-        VersionIsolationOverrideCheckDlg.IsChecked = _config.VersionIsolationOverrides.TryGetValue(versionId, out var isolate)
-            ? isolate
-            : _config.IsolateVersionsByDefault;
+        VersionIsolationOverrideCheckDlg.IsChecked = InstanceIsolationPolicy.Resolve(_folderPath, versionId,
+            _config.IsolateVersionsByDefault, _config.VersionIsolationOverrides);
 
         VersionResourcePackIsolationOverrideCheckDlg.IsChecked = _config.VersionResourcePackIsolationOverrides.TryGetValue(versionId, out var resIsolate)
             ? resIsolate
@@ -332,6 +332,7 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
     /// <summary>把弹窗控件上的值写回配置并保存。</summary>
     private void Save_Click(object sender, RoutedEventArgs e)
     {
+        _settingsSaveAccepted = false;
         int? instanceMin, instanceMax;
         try
         {
@@ -375,7 +376,7 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             return;
         }
 
-        _config.VersionIsolationOverrides[versionId] = VersionIsolationOverrideCheckDlg.IsChecked == true;
+        // Isolation is persisted with this physical instance below, not in the legacy ID-only dictionary.
         _config.VersionResourcePackIsolationOverrides[versionId] = VersionResourcePackIsolationOverrideCheckDlg.IsChecked == true;
 
         if (AutoJoinServerCheckDlg.IsChecked == true)
@@ -431,10 +432,13 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             }
             catch (Exception ex)
             {
-                ErrorPresenter.LogFallback($"镜像写入实例设置失败：{versionDir}", ex);
+                ErrorPresenter.LogFallback($"写入实例设置失败：{versionDir}", ex);
+                MessageBoxDialog.ShowWarning("实例设置未保存，请检查目录写入权限和可用磁盘空间后重试。\n" + ex.Message, "保存失败");
+                return;
             }
         }
 
+        _settingsSaveAccepted = true;
         CloseWith(true);
     }
 
@@ -460,20 +464,21 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
 
     private void OpenLoaderMaintenance_Click(object sender, RoutedEventArgs e)
     {
-        // 修复两处问题：
-        // 1）提示文案自相矛盾——原来的话术让用户"去版本选择页的加载器安装入口与 Mod 管理页
-        //    执行"，但点击后实际调用的是 _owner.NavigateToSettings()，把人带去了完全不相关的
-        //    设置页，说的和做的对不上。
-        // 2）_owner 当时没有 NavigateToVersions 这样的公开方法可用（其它页面都有对应的
-        //    NavigateToXxx，唯独版本选择页没有），所以这个"加载器维护"入口实际上根本走不到
-        //    真正切换/互换加载器、转换版本的功能页面——现在 MainWindow 补上了
-        //    NavigateToVersions()，这里改成跳转到真正提供加载器安装/切换入口的版本选择页，
-        //    文案与实际跳转目标保持一致。
-        var backup = InstanceBackupService.CreateBackupAsync(_folderPath, _version.Id, "加载器维护前备份");
-        _ = backup.ContinueWith(_ => { });
-        CloseWith(false);
-        MessageBoxDialog.ShowInfo("已开始创建加载器维护前备份。即将跳转到版本选择页——加载器切换、互换请使用该版本卡片上的加载器安装入口，模组一键更新请前往 Mod 管理页执行；维护完成后建议同步检查并更新不兼容模组。", "加载器维护");
-        _owner.NavigateToVersions();
+        var dialog = new InstalledVersionComponentsDialog(_owner, _folderPath, _version, deferModNavigation: true);
+        dialog.ShowDialog();
+        if (dialog.Changed) _owner.RefreshSidebar();
+        if (!dialog.NavigateToModsRequested) return;
+        var choice = MessageBoxDialog.ShowThreeChoice("前往 Mod 管理会关闭当前版本设置。要保留这里尚未保存的设置吗？", "前往 Mod 管理",
+            "返回设置", "放弃并前往", "保存并前往");
+        if (choice == XclMessageResult.Cancel) return;
+        if (choice == XclMessageResult.Yes)
+        {
+            Save_Click(sender, e);
+            if (!_settingsSaveAccepted) return;
+            _owner.ConfigService.Save();
+        }
+        else CloseWith(false);
+        _owner.NavigateToModManager();
     }
 
     /// <summary>导出这个版本的启动脚本到实例目录 versions/&lt;id&gt;/xcl/launch.bat。</summary>
@@ -504,9 +509,8 @@ public partial class InstanceSettingsDialog : OverlayDialogControl
             return;
         }
 
-        var isolateVersion = cfg.VersionIsolationOverrides.TryGetValue(versionId, out var isolateOverride)
-            ? isolateOverride
-            : cfg.IsolateVersionsByDefault;
+        var isolateVersion = InstanceIsolationPolicy.Resolve(_folderPath, versionId,
+            cfg.IsolateVersionsByDefault, cfg.VersionIsolationOverrides);
         var autoJoinServer = cfg.VersionAutoJoinServer.TryGetValue(versionId, out var joinAddr) && !string.IsNullOrWhiteSpace(joinAddr)
             ? joinAddr.Trim()
             : null;

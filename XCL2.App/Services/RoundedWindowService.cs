@@ -26,7 +26,7 @@ public static class RoundedWindowService
         void Update()
         {
             if (window.WindowState == WindowState.Minimized) return;
-            var systemCorners = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
+            var systemCorners = WindowsCompatibilityService.Current.SupportsNativeCorners;
             var rounded = window.WindowState == WindowState.Normal
                 && !(window is XCL2.App.Views.MainWindow && WindowChromeService.IsFullScreen);
             var corner = rounded ? (systemCorners ? 8 : radius) : 0;
@@ -44,7 +44,9 @@ public static class RoundedWindowService
                 var preference = rounded ? 2 : 1;
                 if (preference != lastPreference || hwnd != lastHandle)
                 {
-                    _ = DwmSetWindowAttribute(hwnd, 33, ref preference, sizeof(int));
+                    try { _ = DwmSetWindowAttribute(hwnd, 33, ref preference, sizeof(int)); }
+                    catch (EntryPointNotFoundException) { }
+                    catch (DllNotFoundException) { }
                     lastPreference = preference;
                     lastHandle = hwnd;
                 }

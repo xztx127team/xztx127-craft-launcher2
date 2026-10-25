@@ -677,12 +677,8 @@ public class ConfigService
 
     public void AddOrUpdateAccount(Account account)
     {
-        // 每次账户被"新建/登录成功/静默刷新成功"地写入这里，都视为一次成功的在线校验，
-        // 顺手盖个时间戳——这是"令牌保留时效"降级判断的依据（见 AppConfig.
-        // AccountTokenGracePeriodDays 与 MainWindow 里 Java 版账户刷新失败后的降级分支）。
-        // 只对微软账户有意义，但其它类型账户存这个字段也无害，不特殊区分。
-        account.LastVerifiedAtUtc = DateTime.UtcNow;
-
+        // Local profile/skin edits are not an online verification. Only the authentication
+        // service stamps LastVerifiedAtUtc after the complete login chain succeeds.
         var existing = Accounts.FirstOrDefault(a => a.Id == account.Id);
         if (existing != null)
         {
@@ -691,7 +687,7 @@ public class ConfigService
             // 把这个账户的创建时间冲成"现在"，否则"默认高亮最近创建的账户"这个需求
             // 会被每次自动刷新悄悄破坏——账户列表里最早创建的那个，只因为最近登录时
             // 触发了一次静默刷新，就会被误判成"最新创建"。
-            account.CreatedAtUtc = existing.CreatedAtUtc;
+            AccountUpdatePolicy.PreserveLocalPreferences(account, existing);
             Accounts.Remove(existing);
         }
         Accounts.Add(account);

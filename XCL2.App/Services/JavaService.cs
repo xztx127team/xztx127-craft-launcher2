@@ -28,7 +28,7 @@ public record JavaCandidate(string JavawPath, string? Version);
 /// </summary>
 public class JavaService
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(15) };
+    private readonly HttpClient _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(15));
 
     public string RuntimeDir { get; } = Path.Combine(App.DataDir, "runtime");
 
@@ -127,7 +127,7 @@ public class JavaService
                     .Where(File.Exists));
         }
 
-        var javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
+        var javaHome = JavaEnvironmentPaths.NormalizeDirectory(Environment.GetEnvironmentVariable("JAVA_HOME"));
         if (!string.IsNullOrEmpty(javaHome))
         {
             var p = Path.Combine(javaHome, "bin", "javaw.exe");
@@ -155,11 +155,7 @@ public class JavaService
             ErrorPresenter.LogFallback("读取系统 Java 注册表失败，已继续尝试其它 Java 来源。", ex);
         }
 
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-        {
-            var p = Path.Combine(dir.Trim(), "javaw.exe");
-            if (File.Exists(p)) orderedCandidates.Add(p);
-        }
+        orderedCandidates.AddRange(JavaEnvironmentPaths.FindExecutables(JavaEnvironmentPaths.ReadSearchPath()));
 
         orderedCandidates = orderedCandidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (orderedCandidates.Count == 0) return null;
@@ -232,9 +228,15 @@ public class JavaService
     /// 挑选/一键批量登记，而不是只取第一个能用的。跟 ScanWholeDiskForJavaAsync（全盘扫描，
     /// 需要用户二次确认、耗时可能几分钟）是两个不同粒度的功能，不要混用。
     /// </summary>
-    public async Task<List<JavaCandidate>> QuickDetectJavaAsync(CancellationToken ct = default)
+    public Task<List<JavaCandidate>> QuickDetectJavaAsync(CancellationToken ct = default)
+        => QuickDetectJavaAsync(ct, null);
+
+    public async Task<List<JavaCandidate>> QuickDetectJavaAsync(CancellationToken ct,
+        IReadOnlyList<string>? registeredJavaPaths)
     {
-        var orderedCandidates = new List<string>();
+        // Re-probe manually registered paths as well: an in-place update need not
+        // live in any of the known discovery directories.
+        var orderedCandidates = (registeredJavaPaths ?? Array.Empty<string>()).Where(File.Exists).ToList();
 
         if (Directory.Exists(RuntimeDir))
         {
@@ -244,7 +246,7 @@ public class JavaService
                     .Where(File.Exists));
         }
 
-        var javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
+        var javaHome = JavaEnvironmentPaths.NormalizeDirectory(Environment.GetEnvironmentVariable("JAVA_HOME"));
         if (!string.IsNullOrEmpty(javaHome))
         {
             var p = Path.Combine(javaHome, "bin", "javaw.exe");
@@ -392,12 +394,7 @@ public class JavaService
             catch { /* 忽略访问异常，某个发行版没装/没有这个注册表键是正常情况 */ }
         }
 
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';'))
-        {
-            if (string.IsNullOrWhiteSpace(dir)) continue;
-            var p = Path.Combine(dir.Trim(), "javaw.exe");
-            if (File.Exists(p)) orderedCandidates.Add(p);
-        }
+        orderedCandidates.AddRange(JavaEnvironmentPaths.FindExecutables(JavaEnvironmentPaths.ReadSearchPath()));
 
         orderedCandidates = orderedCandidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -706,7 +703,7 @@ public class JavaService
         }
 
         if (request.InstallMode == JavaInstallMode.System)
-            return await DownloadAndRunSystemInstallerAsync(source, progress, ct);
+            return await DownloadAndRunSystemInstallerAsync(source, request.MajorVersion, arch, progress, ct);
 
         return await DownloadAndExtractPortableAsync(source, progress, ct);
     }
@@ -792,7 +789,7 @@ public class JavaService
     /// 系统安装模式：下载 Adoptium 提供的 .msi 安装包并静默安装到系统目录（Program Files）。
     /// 注意：需要用户在弹出的 UAC 提示中确认管理员权限；MSI 安装完成后从注册表探测安装路径。
     /// </summary>
-    private async Task<string> DownloadAndRunSystemInstallerAsync(JavaDownloadSource source,
+    private async Task<string> DownloadAndRunSystemInstallerAsync(JavaDownloadSource source, int requestedMajor, string requestedArch,
         IProgress<ProgressInfo>? progress, CancellationToken ct)
     {
         // 使用官方 installer 清单的 MSI 链接及独立校验值，不从 ZIP 地址推测安装程序。
@@ -837,8 +834,12 @@ public class JavaService
             try { File.Delete(msiPath); } catch { /* 忽略清理失败 */ }
         }
 
-        // 安装完成后尝试从注册表探测新安装的 Java
-        var found = FindJava(null);
+        // An existing portable Java must not hide the newly installed runtime.
+        // Probe all known locations and require the version AND PE architecture requested.
+        var detected = await QuickDetectJavaAsync(ct);
+        var found = JavaEnvironmentPaths.SelectRuntime(detected.Select(candidate =>
+            (candidate.JavawPath, JavaVersionOutputPolicy.ParseMajorValue(candidate.Version), JavaExecutableArchitecture.TryReadArchitecture(candidate.JavawPath))),
+            requestedMajor, requestedArch == "x86" ? "x86" : "amd64");
         if (found == null)
             throw new InvalidOperationException("系统安装似乎已完成，但未能自动探测到 javaw.exe，请在设置中手动指定路径（通常在 C:\\Program Files\\Eclipse Adoptium\\ 下）。");
 

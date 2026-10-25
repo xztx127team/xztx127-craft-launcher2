@@ -29,7 +29,7 @@ public partial class HomePage
 
     private void ApplyPreviewHomeStyles()
     {
-        HomeSurface.CornerRadius = new CornerRadius(_owner.IsNativePreviewOpen ? 8 : 10);
+        HomeSurface.CornerRadius = new CornerRadius(_owner.IsNativePreviewOpen ? 18 : 10);
         HomeSurface.Padding = new Thickness(_owner.IsNativePreviewOpen ? 24 : 30);
         // StaticResource 会保留本页的旧样式对象；全窗模式切换时显式切换这两类局部样式。
         var tileStyle = _owner.IsNativePreviewOpen
@@ -41,6 +41,20 @@ public partial class HomePage
         foreach (var tile in new[] { LaunchTile, AccountsTile, DownloadTile, QuickStartTile, ServerManagerTile, SettingsTile })
             tile.Style = tileStyle;
         LanguageEntryButton.Style = languageStyle;
+        if (_owner.IsNativePreviewOpen)
+        {
+            HomeSurface.SetResourceReference(Border.BorderBrushProperty, "DividerBrush");
+            HomeSurface.BorderThickness = new Thickness(1);
+            LaunchTile.SetResourceReference(Button.BackgroundProperty, "GlowSoftBrush");
+            LaunchTile.SetResourceReference(Button.BorderBrushProperty, "AccentBrush");
+        }
+        else
+        {
+            HomeSurface.ClearValue(Border.BorderBrushProperty);
+            HomeSurface.ClearValue(Border.BorderThicknessProperty);
+            LaunchTile.ClearValue(Button.BackgroundProperty);
+            LaunchTile.ClearValue(Button.BorderBrushProperty);
+        }
         RefreshForSizeChange();
     }
 

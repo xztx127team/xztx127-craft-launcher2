@@ -9,6 +9,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Services/WindowsCompatibilityService.cs" Link="WindowsCompatibilityService.cs" />
+    <Compile Include="../../Models/AppConfig.WindowsCompatibility.cs" Link="AppConfig.WindowsCompatibility.cs" />
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
     <Compile Include="../../Models/AppConfig.UxPresentation.cs" Link="AppConfig.UxPresentation.cs" />

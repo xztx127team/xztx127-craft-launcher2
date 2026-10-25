@@ -62,6 +62,74 @@
             <CheckBox x:Name="SimplifiedModeCheck" Content="简洁模式：侧边栏只保留最常用的几个入口，其余功能收进「更多」"
                       Margin="0,0,0,16" Checked="SimplifiedModeCheck_Changed" Unchecked="SimplifiedModeCheck_Changed"/>
 
+            <Expander x:Name="WindowsCompatibilitySettingsGroup" Header="Windows 兼容模式" Margin="0,0,0,20">
+                <StackPanel Margin="0,10,0,0">
+                    <ComboBox x:Name="WindowsCompatibilityModeCombo" Width="280" HorizontalAlignment="Left"
+                              AutomationProperties.Name="Windows 兼容模式"
+                              SelectionChanged="WindowsCompatibilityModeCombo_SelectionChanged">
+                        <ComboBoxItem Content="自动（Windows 8.1 及更早版本开启）" Tag="Auto"/>
+                        <ComboBoxItem Content="开启兼容模式" Tag="Enabled"/>
+                        <ComboBoxItem Content="关闭兼容模式" Tag="Disabled"/>
+                    </ComboBox>
+                    <TextBlock x:Name="WindowsCompatibilityStatusText" TextWrapping="Wrap" Margin="0,8,0,4"
+                               Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <TextBlock Text="Vista / Windows 7 使用完整兼容层；Windows 8 / 8.1 使用普通兼容层。Windows 10 及以上手动开启时使用普通兼容层。更改遵循本页保存设置；已存在的窗口和连接建议重启后重新建立。"
+                               FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                </StackPanel>
+            </Expander>
+
+            <Expander x:Name="SidebarAppearanceSettingsGroup" Header="侧边栏位置与文字" Margin="0,0,0,20">
+                <StackPanel Margin="0,10,0,0">
+                    <TextBlock Text="新旧界面均可使用。留空的导航名称跟随界面语言；修改名称不会改变入口对应的功能。"
+                               FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" MinWidth="80" MaxWidth="160"/>
+                            <ColumnDefinition Width="3*" MaxWidth="220"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="显示位置" TextWrapping="Wrap" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="SidebarPlacementCombo" Grid.Column="1" AutomationProperties.Name="侧边栏显示位置">
+                            <ComboBoxItem Content="左侧（默认）" Tag="Left"/>
+                            <ComboBoxItem Content="右侧" Tag="Right"/>
+                        </ComboBox>
+                    </Grid>
+                    <CheckBox x:Name="SidebarAutomaticWidthCheck" Content="使用默认侧边栏宽度" Margin="0,0,0,6"
+                              Checked="SidebarDimensionDefault_Changed" Unchecked="SidebarDimensionDefault_Changed"/>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" MinWidth="80" MaxWidth="160"/>
+                            <ColumnDefinition Width="3*" MaxWidth="220"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="展开宽度" TextWrapping="Wrap" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                        <Slider x:Name="SidebarWidthSlider" Grid.Column="1" Minimum="160" Maximum="360" TickFrequency="10"
+                                IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" AutomationProperties.Name="侧边栏展开宽度"/>
+                        <TextBlock Grid.Column="2" Text="{Binding ElementName=SidebarWidthSlider, Path=Value, StringFormat=' {0:0}'}" VerticalAlignment="Center"/>
+                    </Grid>
+                    <CheckBox x:Name="SidebarAutomaticFontSizeCheck" Content="使用默认导航字号" Margin="0,0,0,6"
+                              Checked="SidebarDimensionDefault_Changed" Unchecked="SidebarDimensionDefault_Changed"/>
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*" MinWidth="80" MaxWidth="160"/>
+                            <ColumnDefinition Width="3*" MaxWidth="220"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="导航文字大小" TextWrapping="Wrap" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                        <Slider x:Name="SidebarFontSizeSlider" Grid.Column="1" Minimum="11" Maximum="22" TickFrequency="1"
+                                IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" AutomationProperties.Name="导航文字大小"/>
+                        <TextBlock Grid.Column="2" Text="{Binding ElementName=SidebarFontSizeSlider, Path=Value, StringFormat=' {0:0}'}" VerticalAlignment="Center"/>
+                    </Grid>
+                    <CheckBox x:Name="SidebarShowIconsCheck" Content="展开时显示导航图标" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="SidebarStartCollapsedCheck" Content="下次启动时收起侧边栏" Margin="0,0,0,12"/>
+                    <Expander Header="自定义导航文字" Margin="0,0,0,12">
+                        <StackPanel x:Name="SidebarLabelsPanel" Margin="0,10,0,0"/>
+                    </Expander>
+                    <Button Content="恢复侧边栏默认设置" Style="{StaticResource CompactActionButton}"
+                            HorizontalAlignment="Left" Padding="11,5" Click="ResetSidebarPreferences_Click"/>
+                </StackPanel>
+            </Expander>
+
             <!-- 启动器界面语言：跟下面「游戏内语言」是两个独立设置，见 AppConfig.LauncherLanguage
                  和 Resources/Lang/README.md 的说明。这里跟首页顶部的"🌐 语言"按钮打开的是
                  同一个 LanguageSelectDialog，共享同一份切换逻辑，两处操作互相同步。 -->

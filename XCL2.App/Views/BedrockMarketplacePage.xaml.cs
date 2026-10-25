@@ -475,7 +475,7 @@ public partial class BedrockMarketplacePage : UserControl
     private void Download_Click(object sender, RoutedEventArgs e)
     {
         if (_disposed || FileList.SelectedItem is not BedrockMarketFile selected) return;
-        var dialog = new OpenFolderDialog
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog
         {
             Title = $"选择“{selected.Name}”的保存位置",
             InitialDirectory = _lastSaveDirectory != null && Directory.Exists(_lastSaveDirectory)

@@ -47,12 +47,12 @@
 
         <!-- 步骤内容区 -->
         <Border Grid.Row="2" Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="24">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True" HorizontalScrollBarVisibility="Disabled">
+            <ScrollViewer x:Name="StepContentScroll" VerticalScrollBarVisibility="Auto" services:ScrollWheelBehavior.EnableFastWheel="True" HorizontalScrollBarVisibility="Disabled">
             <Grid>
                 <!-- 整页详情容器：点击步骤3的 Mod 条目时盖住整个步骤内容区，展示 ModDetailPage
                      （AddToWizardList 模式，选具体版本后加入下面的"已选清单"，不在这里直接下载）。
                      跟 DownloadCenterPage.xaml 里 DetailHost 是同一个模式。 -->
-                <ContentControl x:Name="DetailHost" Visibility="Collapsed"/>
+                <ContentControl x:Name="DetailHost" Panel.ZIndex="1" services:PageTransitionBehavior.AnimateOnVisible="True" services:PageTransitionBehavior.TransitionDepth="3" Visibility="Collapsed" Background="{DynamicResource PanelBrush}"/>
 
                 <!-- 步骤 0：选择来源（新下载 / 使用现有实例 / 傻瓜式启动 / 导入整合包） -->
                 <StackPanel x:Name="Step0Panel" Visibility="Visible">

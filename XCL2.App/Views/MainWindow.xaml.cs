@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Diagnostics;
@@ -158,7 +158,9 @@ public partial class MainWindow : Window
     /// <summary>所有确认和异步收尾完成后，进入真正关闭；此后不接受新的窗口操作。</summary>
     private bool _windowCloseCommitted;
     private int _trayTransitionGeneration;
+    private bool _pendingTrayHide;
     private bool _closeRequestAccepted;
+    private bool _handlingCloseRequest;
     private bool _shutdownAfterClose;
     private Action? _completeOverlayDismiss;
     private int _overlayRenderGeneration;
@@ -239,8 +241,7 @@ public partial class MainWindow : Window
     public void EnsureVisibleForDialog()
     {
         if (_isWindowClosed || _windowCloseCommitted) return;
-        ++_trayTransitionGeneration;
-        UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+        CancelPendingTrayHideForActivation();
         WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowRestore);
         if (!IsVisible) Show();
         if (WindowState == WindowState.Minimized)
@@ -253,6 +254,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         RoundedWindowService.Attach(this, RootWindowGrid);
+        DrawerMotionBehavior.Register();
+        _ = new WindowPresentationMotion(this, RootWindowGrid, RootWindowScaleTransform,
+            () => !_windowCloseCommitted && !_isWindowClosed);
 
         // 这个处理器必须在后面的 Java/MC 自动扫描、首次协议/向导等 ContentRendered 处理器
         // 之前注册：第一帧一画出来先通知 App 关闭启动提示窗，然后再启动后台扫描/弹向导。
@@ -508,6 +512,7 @@ public partial class MainWindow : Window
         ApplyCommandLineWindowSize();
         InitializeUxPresentation();
         InitializeResponsiveLayout();
+        InitializeSidebarPreferences();
         EventHandler? initializePerformanceOverlayOnce = null;
         initializePerformanceOverlayOnce = (_, _) =>
         {
@@ -1599,7 +1604,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 启动时自动扫描 AppData + 各磁盘 1/2/3 级目录下的 .minecraft 文件夹，新发现的自动
-    /// 加进"版本选择"页的文件夹列表。扫描本身（MinecraftFolderScanService.ScanAndRegister）
+    /// 加进"版本选择"页的文件夹列表。扫描本身（MinecraftFolderScanService.ScanCandidates）
     /// 全是同步的文件系统 IO，用 Task.Run 丢到线程池执行，避免枚举磁盘目录时卡住 UI 线程；
     /// 扫描完成后用 Dispatcher 切回 UI 线程再保存配置、刷新侧边栏、弹提示——
     /// ConfigService.Config 不是线程安全类型，所有实际修改都必须在 UI 线程上做。
@@ -1610,7 +1615,9 @@ public partial class MainWindow : Window
     {
         try
         {
-            var newlyAdded = await Task.Run(() => MinecraftFolderScanService.ScanAndRegister(ConfigService.Config));
+            var candidates = await Task.Run(MinecraftFolderScanService.ScanCandidates);
+            if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
+            var newlyAdded = MinecraftFolderScanService.RegisterCandidates(ConfigService.Config, candidates);
             if (newlyAdded.Count == 0) return;
 
             ConfigService.Save();
@@ -1689,7 +1696,7 @@ public partial class MainWindow : Window
                 if (existingPaths.Contains(candidate.JavawPath)) continue;
 
                 int? major = candidate.Version != null
-                    ? JavaService.ParseJavaMajorVersion($"\"{candidate.Version}\"")
+                    ? JavaVersionOutputPolicy.ParseMajorValue(candidate.Version)
                     : null;
                 ConfigService.RegisterJava(candidate.JavawPath, major, "Detected");
                 existingPaths.Add(candidate.JavawPath);
@@ -1922,7 +1929,8 @@ public partial class MainWindow : Window
         var cfg = ConfigService.Config;
         if (!cfg.FollowSystemTheme) return;
 
-        var systemIsDark = ThemeService.GetSystemIsDarkMode();
+        // 不支持/注册表缺失/权限失败不代表浅色；保留用户当前主题。
+        if (!ThemeService.TryGetSystemIsDarkMode(out var systemIsDark)) return;
         if (cfg.IsDarkMode == systemIsDark) return; // 已经跟系统一致，不重复应用
 
         cfg.IsDarkMode = systemIsDark;
@@ -2619,19 +2627,15 @@ public partial class MainWindow : Window
     /// <summary>侧边栏当前是否处于"收起"状态。</summary>
     private bool _sidebarCollapsed;
 
-    private const double SidebarExpandedWidthDefault = 180;
-    private const double SidebarExpandedWidthMicrosoftChinese = 220;
     private const double SidebarCollapsedWidth = 56;
 
     /// <summary>
-    /// 展开态侧边栏宽度：简体中文等语言 180 足够放下所有导航文案，不用改；
-    /// 只有微软中文（zh-microsoft）的翻译文案普遍更长（180 会省略号截断），才加宽到 220。
-    /// 语言切换后 LanguageChanged 会重新应用一次（见 OnLanguageChanged）。
+    /// 展开态优先使用设置页的自定义宽度；自动时保留原来的语言/界面尺寸。
+    /// 语言或设置切换后重新应用，不重建当前页面。
     /// </summary>
-    private double SidebarExpandedWidth =>
-        LocalizationService.CurrentLanguageCode == "zh-microsoft"
-            ? SidebarExpandedWidthMicrosoftChinese
-            : SidebarExpandedWidthDefault;
+    private double SidebarExpandedWidth => SidebarPreferences.ExpandedWidth(
+        ConfigService.Config.SidebarExpandedWidth,
+        LocalizationService.CurrentLanguageCode == "zh-microsoft", IsNativePreviewOpen);
 
     private void SidebarCollapseToggle_Click(object sender, RoutedEventArgs e)
     {
@@ -2695,7 +2699,7 @@ public partial class MainWindow : Window
         _sidebarCollapsed = collapsed;
         if (_responsiveLayoutReady && !_compactWindowLayout) _wideSidebarCollapsed = collapsed;
 
-        SidebarColumn.Width = new GridLength(collapsed ? SidebarCollapsedWidth : IsNativePreviewOpen ? Math.Max(192, SidebarExpandedWidth) : SidebarExpandedWidth);
+        SidebarColumn.Width = new GridLength(collapsed ? SidebarCollapsedWidth : SidebarExpandedWidth);
 
         // ===== 修复「收起后图标只剩 1 像素」=====
         // 旧版只改了列宽，没有同步收掉内边距，于是留给图标的净宽被一路吃到只剩 10px：
@@ -2796,6 +2800,7 @@ public partial class MainWindow : Window
     {
         RefreshExperimentalNavVisibility();
         ApplySidebarCollapsedState(_sidebarCollapsed);
+        ApplySidebarPreferences();
     }
 
     /// <summary>
@@ -3209,6 +3214,7 @@ public partial class MainWindow : Window
         var architecture = JavaExecutableArchitecture.TryReadArchitecture(javaPath);
         DownloadQueueService.Instance.StartNew($"补全文件 {versionId}", async (item, ct) =>
         {
+            using var repairLease = ComponentsOperationLock.AcquireForLaunch(folder.Path, versionId);
             var error = await RepairInstanceWithoutLaunchAsync(folder, versionId, item.CreateProgress(), ct, architecture);
             if (error != null) throw new InvalidOperationException(error);
             await Dispatcher.InvokeAsync(() => onSuccess?.Invoke());
@@ -3229,9 +3235,8 @@ public partial class MainWindow : Window
     /// 返回 true 表示可以继续走后面的启动流程；返回 false 表示这次不应该启动
     /// （比如用户选了"删除"、或强行启动的二级确认没通过）。
     /// </summary>
-    private async Task<bool> RunInstanceIntegrityCheckAsync(GameFolder folder, AppConfig cfg, CancellationToken cancelToken, string? architecture = null)
+    private async Task<bool> RunInstanceIntegrityCheckAsync(GameFolder folder, string versionId, AppConfig cfg, CancellationToken cancelToken, string? architecture = null)
     {
-        var versionId = cfg.SelectedVersionId;
         if (!cfg.EnableLaunchHealthCheck || string.IsNullOrEmpty(versionId)) return true;
 
         var mode = GetOrPromptIntegrityCheckMode(cfg);
@@ -3267,7 +3272,9 @@ public partial class MainWindow : Window
         {
             case IncompleteVersionDialog.ResultChoice.RemoveFromList:
                 InstanceDeletionService.HideFromList(cfg, folder.Path, versionId);
-                cfg.SelectedVersionId = null;
+                if (InstanceDeletionService.BuildKey(cfg.SelectedFolderPath ?? "", cfg.SelectedVersionId ?? "") ==
+                    InstanceDeletionService.BuildKey(folder.Path, versionId))
+                    cfg.SelectedVersionId = null;
                 ConfigService.Save();
                 RefreshSidebar();
                 return false;
@@ -3333,6 +3340,8 @@ public partial class MainWindow : Window
         var cfg = ConfigService.Config;
         var account = ConfigService.GetSelectedAccount();
         var folder = cfg.Folders.FirstOrDefault(f => f.Path == cfg.SelectedFolderPath);
+        // Keep the clicked instance stable while account/Java dialogs and asynchronous repair are running.
+        var launchVersionId = cfg.SelectedVersionId;
 
         // 需求修复："一键开始游戏"（以及左下角"启动游戏"）之前完全静默调用
         // GetSelectedAccount()，只会自动选中"上次选中/第一个"账户，用户没有机会在这个时间点
@@ -3388,7 +3397,7 @@ public partial class MainWindow : Window
             NavAccounts_Click(sender, e);
             return;
         }
-        if (folder == null || string.IsNullOrEmpty(cfg.SelectedVersionId))
+        if (folder == null || string.IsNullOrEmpty(launchVersionId))
         {
             MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Choose_A_Minecraft_Folder_And_A_Game_Ver", "请先在“版本选择”中选择 .minecraft 文件夹和游戏版本。"));
             NavVersions_Click(sender, e);
@@ -3407,12 +3416,12 @@ public partial class MainWindow : Window
         // 放在这里（账户确认之后、真正开始跑 Java 检测/参数拼装之前）是因为：再往前放会
         // 在用户还没确认账户时就弹提示，顺序上突兀；再往后放则已经开始下载 Java/补全文件，
         // 白做一堆功。暂停中的下载同样拦，理由见 FindActiveForVersion 的注释。
-        var installingItem = DownloadQueueService.Instance.FindActiveForVersion(folder.Path, cfg.SelectedVersionId);
+        var installingItem = DownloadQueueService.Instance.FindActiveForVersion(folder.Path, launchVersionId);
         if (installingItem != null)
         {
             var paused = installingItem.Status == DownloadQueueItemStatus.Paused;
             MessageBoxDialog.ShowInfo(
-                $"版本「{cfg.SelectedVersionId}」" + (paused ? "的安装还没有完成（当前已暂停）。" : "正在下载安装中。") +
+                $"版本「{launchVersionId}」" + (paused ? "的安装还没有完成（当前已暂停）。" : "正在下载安装中。") +
                 "\n\n这个版本目录里的文件还不完整，现在启动大概率会直接崩溃。\n" +
                 (paused
                     ? "请在标题栏的下载列表里点「继续」把它装完，再启动。"
@@ -3424,6 +3433,10 @@ public partial class MainWindow : Window
 
         try
         {
+            // Cover preparation/repair as well as process creation. LauncherService transfers a second
+            // shared lease to the game process, so this one can end when launch observation completes.
+            using var preparationLease = ComponentsOperationLock.AcquireForLaunch(folder.Path, launchVersionId);
+
             // 微软账户：若 access token 即将过期，先静默刷新。
             // 根因修复（"账户管理显示已登录微软账户，进游戏却变成 Demo 试玩"）：
             // 之前无论刷新成功与否，只要没抛异常就会往下走去启动游戏——刷新失败
@@ -3441,7 +3454,7 @@ public partial class MainWindow : Window
                 if (!string.IsNullOrEmpty(account.MsRefreshToken))
                 {
                     var msAuth = new MicrosoftAuthService();
-                    refreshed = await msAuth.RefreshAsync(account.MsRefreshToken);
+                    refreshed = await msAuth.RefreshAsync(account.MsRefreshToken, cancelToken);
                     refreshFailureReason = msAuth.LastRefreshFailureReason;
                 }
 
@@ -3511,9 +3524,8 @@ public partial class MainWindow : Window
             // 版本隔离设置要提前算出来，因为下面判断"这个版本需要 Java 几"时要扫描正确的
             // mods 目录(隔离开启时是 versions/<id>/mods，关闭时是 .minecraft 根目录下的 mods)，
             // 用错目录会导致扫描不到已安装的 mod，从而漏判 Java 版本要求。
-            var isolateVersion = cfg.VersionIsolationOverrides.TryGetValue(cfg.SelectedVersionId, out var isolateOverride)
-                ? isolateOverride
-                : cfg.IsolateVersionsByDefault;
+            var isolateVersion = InstanceIsolationPolicy.Resolve(folder.Path, launchVersionId,
+                cfg.IsolateVersionsByDefault, cfg.VersionIsolationOverrides);
 
             // 自动匹配 Java，按优先级从高到低：
             //   1) 用户为这个具体版本单独指定的 Java 版本(VersionJavaOverrides)——最高优先级，
@@ -3526,10 +3538,10 @@ public partial class MainWindow : Window
             //      要求的 21，一进游戏 Fabric Loader 直接报 "Incompatible mods found"。
             //   3) 高级模式下用户设置的全局默认版本(cfg.PreferredJavaMajorVersion)。
             var requiredJavaMajor = LauncherService.GetRequiredJavaMajorVersion(
-                folder.Path, cfg.SelectedVersionId, isolateVersion);
+                folder.Path, launchVersionId, isolateVersion);
 
             int? preferMajor;
-            if (cfg.VersionJavaOverrides.TryGetValue(cfg.SelectedVersionId, out var versionOverride) && versionOverride > 0)
+            if (cfg.VersionJavaOverrides.TryGetValue(launchVersionId, out var versionOverride) && versionOverride > 0)
                 preferMajor = versionOverride;
             else if (requiredJavaMajor is > 0)
                 preferMajor = requiredJavaMajor;
@@ -3540,7 +3552,7 @@ public partial class MainWindow : Window
             // 或者虽然没为这个版本单独选、但设了全局默认 Java(SelectedJavaId)，直接用它的路径，
             // 不再走下面的"按主版本号搜索"逻辑——这是用户明确的选择，不需要再猜。
             // 记录的文件如果已经被移动/删除(ResolveJavaPath 返回 null)，则安全回退到旧的搜索逻辑。
-            var javaIdOverride = cfg.VersionJavaIdOverrides.TryGetValue(cfg.SelectedVersionId, out var vjid) ? vjid : cfg.SelectedJavaId;
+            var javaIdOverride = cfg.VersionJavaIdOverrides.TryGetValue(launchVersionId, out var vjid) ? vjid : cfg.SelectedJavaId;
             // Snapshot UI-owned configuration before probing executables on a worker.
             var registeredJavaPaths = ConfigService.GetJavaListInPriorityOrder().Select(entry => entry.JavawPath).ToArray();
             var javaPath = ConfigService.ResolveJavaPath(javaIdOverride);
@@ -3569,7 +3581,7 @@ public partial class MainWindow : Window
             // 直接照用户为这个实例选定的 Java 启动——用户既然已经明确表态"就是要用这个"，
             // 就不应该每次启动都被重新问一遍。跟 EnforceJavaVersionMatch（全局强制切换）是
             // 两码事：那个是"不问、但自动换掉"，这个是"不问、但保留用户选的不换"。
-            var skipMismatchPrompt = cfg.VersionSkipJavaMismatchPrompt.Contains(cfg.SelectedVersionId);
+            var skipMismatchPrompt = cfg.VersionSkipJavaMismatchPrompt.Contains(launchVersionId);
             // --java is an explicit session override; automatic matching must not replace that file.
             if (!explicitCliJava && javaIdOverride != null && javaPath != null && preferMajor is > 0 && !skipMismatchPrompt)
             {
@@ -3704,7 +3716,7 @@ public partial class MainWindow : Window
             // 没配置/配置为空白都传 null，LauncherService 内部会原样跳过 quickPlayMultiplayer
             // 这个参数，行为等同于这个功能上线前——纯增量开关，不影响没设置过的实例。
             string? autoJoinServer = null;
-            if (cfg.VersionAutoJoinServer.TryGetValue(cfg.SelectedVersionId, out var configuredServer)
+            if (cfg.VersionAutoJoinServer.TryGetValue(launchVersionId, out var configuredServer)
                 && !string.IsNullOrWhiteSpace(configuredServer))
             {
                 autoJoinServer = configuredServer.Trim();
@@ -3713,7 +3725,7 @@ public partial class MainWindow : Window
 
             // 每次实际启动重新计算动态内存；实例手动覆盖和全局手动值由同一服务解析。
             // 显示总量/剩余量的选择不改变百分比计算的总物理内存基准。
-            var instanceSettings = InstanceConfigService.TryLoad(Path.Combine(folder.Path, "versions", cfg.SelectedVersionId));
+            var instanceSettings = InstanceConfigService.TryLoad(Path.Combine(folder.Path, "versions", launchVersionId));
             var javaBitness = JavaService.TryGetJavaBitness(javaPath);
             var launchArchitecture = JavaExecutableArchitecture.TryReadArchitecture(javaPath);
             var launchMemory = MemoryOptimizerService.ConstrainForJava(cfg,
@@ -3732,7 +3744,7 @@ public partial class MainWindow : Window
             var options = new LauncherService.LaunchOptions
             {
                 MinecraftDir = folder.Path,
-                VersionId = cfg.SelectedVersionId,
+                VersionId = launchVersionId,
                 JavaPath = javaPath,
                 Account = account,
                 MinMemoryMb = launchMemory.MinMemoryMb,
@@ -3793,7 +3805,7 @@ public partial class MainWindow : Window
             // 而不是像原来那样只有一个"是否自动下载补全"的简单确认框。
             try
             {
-                var shouldContinueLaunch = await RunInstanceIntegrityCheckAsync(folder, cfg, cancelToken, launchArchitecture);
+                var shouldContinueLaunch = await RunInstanceIntegrityCheckAsync(folder, launchVersionId, cfg, cancelToken, launchArchitecture);
                 if (!shouldContinueLaunch) return;
             }
             catch (OperationCanceledException) { return; }
@@ -3862,11 +3874,11 @@ public partial class MainWindow : Window
             }
 
             // 触屏模式 + 26.3 正式版以下的版本：弹二次确认框，选"否"则取消本次启动。
-            if (useTouchMode && !string.IsNullOrEmpty(cfg.SelectedVersionId) &&
+            if (useTouchMode && !string.IsNullOrEmpty(launchVersionId) &&
                 TouchModeVersionPolicy.IsBelowSupported(
-                    Path.Combine(folder.Path, "versions", cfg.SelectedVersionId), cfg.SelectedVersionId))
+                    Path.Combine(folder.Path, "versions", launchVersionId), launchVersionId))
             {
-                LauncherLogService.AppendLine($"[触屏模式] 版本 {cfg.SelectedVersionId} 低于 26.3，已弹出二次确认。");
+                LauncherLogService.AppendLine($"[触屏模式] 版本 {launchVersionId} 低于 26.3，已弹出二次确认。");
                 if (!MessageBoxDialog.ShowConfirm(TouchModeVersionPolicy.WarningMessage, "触屏模式提示"))
                 {
                     ToastService.ShowSuccess(Loc.T("Str_Cs_Launch_Cancelled", "已取消启动。"));
@@ -3874,7 +3886,7 @@ public partial class MainWindow : Window
                 }
             }
 
-            LauncherLogService.AppendLine($"[启动游戏] 账户={account.DisplayLabel} 版本={cfg.SelectedVersionId}");
+            LauncherLogService.AppendLine($"[启动游戏] 账户={account.DisplayLabel} 版本={launchVersionId}");
 
             options.UseTouchMode = useTouchMode;
 
@@ -4098,11 +4110,11 @@ public partial class MainWindow : Window
                     // 模态框，等于在游戏起来之后还要求用户回来点一下，是纯多余的一步。
                     // 改成右下角 Toast，几秒后自己消失，不阻塞任何操作（PCL 就是这个体验）。
                     // 判断标准见 ToastService 类头注释：需要决定的才用模态，只是告知的一律 Toast。
-                    ToastService.ShowSuccess($"游戏已启动：{account.DisplayLabel} - {cfg.SelectedVersionId}");
+                    ToastService.ShowSuccess($"游戏已启动：{account.DisplayLabel} - {launchVersionId}");
                 }
                 else
                 {
-                    ToastService.ShowSuccess($"游戏进程仍在运行（尚未检测到窗口）：{account.DisplayLabel} - {cfg.SelectedVersionId}");
+                    ToastService.ShowSuccess($"游戏进程仍在运行（尚未检测到窗口）：{account.DisplayLabel} - {launchVersionId}");
                 }
 
                 // 已经越过“刚启动就退出”的观察阶段，现在才挂长期退出监视，避免与 exitedEarly
@@ -4303,9 +4315,7 @@ public partial class MainWindow : Window
     // ===================================================================
 
     /// <summary>把某个弹窗内容渲染到 Overlay 层并显示，播放进场动画。
-    /// animateIn=false 用于"弹窗里弹出的子弹窗关闭后，恢复显示上一层"的场景——那种情况
-    /// 更接近"揭开覆盖层露出原来就在那的内容"，用更快、更轻的过渡即可，不需要完整的
-    /// 进场动画，避免用户以为又打开了一个全新的弹窗。</summary>
+    /// animateIn=false 用于子弹窗关闭后恢复上一层：卡片仍播放可调入场，遮罩保持稳定。</summary>
     internal void OverlayRenderEntry(object content, bool animateIn, Action? onShown = null)
     {
         // 新层覆盖关闭中的旧层时，先完成旧层结果，避免丢失模态等待者。
@@ -4318,8 +4328,8 @@ public partial class MainWindow : Window
         UiAnimationHelper.Reset(OverlayCard, scale: OverlayCardScale);
         OverlayRoot.Visibility = Visibility.Visible;
         OverlayContentHost.Content = content;
-        if (!animateIn) { onShown?.Invoke(); return; }
-        UiAnimationHelper.PopupFadeIn(OverlayScrim);
+        // 子弹窗关闭后重新呈现父层也有卡片入场；遮罩保持稳定，避免整页闪烁。
+        if (animateIn) UiAnimationHelper.PopupFadeIn(OverlayScrim);
         UiAnimationHelper.PopupFadeIn(OverlayCard, onShown, OverlayCardScale);
     }
 
@@ -4384,10 +4394,11 @@ public partial class MainWindow : Window
     // 调一次 _dragDropService.Classify——这个方法要打开文件（压缩包类型的甚至要读 zip 目录）
     // 才能判断出"这是 mod / 材质包 / 整合包 / 存档..."，全部同步跑在 UI 线程上。鼠标晃一下
     // 就触发几十次同步文件 IO，每次都卡住 UI 线程一小段时间，视觉上就是"抖一下、画面闪一下"。
-    // 用这两个字段记住"上一次算过的路径集合"和"算出来的结果"，同一批文件只在真正进入窗口/
-    // 换成另一批文件时才重新分类一次，鼠标在窗口内单纯移动不会重复触发这些 IO。
+    // 记录路径快照及后台分类结果；首次悬停也不在UI线程读取压缩包。
+    // 同批文件识别期间不重复排队，离开/Drop后的晚结果由generation丢弃。
     private string[]? _lastDragOverPaths;
     private List<DragDropInstallService.DropKind>? _lastDragOverKinds;
+    private int _dragPreviewGeneration;
 
     /// <summary>拖拽的目标实例目录：当前选中的版本 + 当前的版本隔离设置。
     /// 跟 LauncherService 启动时算出来的游戏目录口径完全一致——隔离开启时是
@@ -4406,9 +4417,8 @@ public partial class MainWindow : Window
                          ?? cfg.Folders.FirstOrDefault();
             if (folder == null) return null;
 
-            var isolate = cfg.VersionIsolationOverrides.TryGetValue(versionId, out var ov)
-                ? ov
-                : cfg.IsolateVersionsByDefault;
+            var isolate = InstanceIsolationPolicy.Resolve(folder.Path, versionId,
+                cfg.IsolateVersionsByDefault, cfg.VersionIsolationOverrides);
 
             return isolate ? Path.Combine(folder.Path, "versions", versionId) : folder.Path;
         }
@@ -4487,12 +4497,12 @@ public partial class MainWindow : Window
 
         try
         {
-            ++_trayTransitionGeneration;
+            // 先取消旧的收到托盘/退场，再恢复窗口；重复激活不能抹掉已经开始的还原动画。
+            CancelPendingTrayHideForActivation();
             WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowRestore);
             if (WindowState == WindowState.Minimized)
                 WindowState = _lastNonMinimizedWindowState;
 
-            UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
             // 窗口可能处于 MinimizeToTray() 之后的 Hide() 状态（还没被 Close()，只是不可见），
             // 这种情况下 Show() 能正常把它拿回来，跟"仅关闭启动器"那种已 Close() 的情况不同。
             Show();
@@ -4530,12 +4540,23 @@ public partial class MainWindow : Window
         if (!_closeRequestAccepted) _explicitExitRequested = false;
     }
 
+    private void CancelPendingTrayHideForActivation()
+    {
+        var resetContent = _pendingTrayHide || !IsVisible || WindowState == WindowState.Minimized;
+        ++_trayTransitionGeneration;
+        _pendingTrayHide = false;
+        // 弹窗/管道可能连续请求激活已还原的窗口；只取消真正的退场，不吃掉还原首帧。
+        if (resetContent)
+            UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+    }
+
     /// <summary>隐藏主窗口、显示托盘图标——"关闭按钮默认最小化到托盘"和四选一提示里的
     /// "返回任务栏托盘"选项共用这一个方法。</summary>
     private void MinimizeToTray()
     {
         if (_isWindowClosed || _windowCloseCommitted) return;
         var generation = ++_trayTransitionGeneration;
+        _pendingTrayHide = true;
         _trayIcon?.Show();
         // 从前台切到后台：先把窗口内容淡出，动画播完（视觉上已经看不见了）再真正 Hide()，
         // 收到托盘没有任务栏上的目标位置，保留一次轻量内容过渡。
@@ -4546,7 +4567,10 @@ public partial class MainWindow : Window
             onCompleted: () => Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (generation == _trayTransitionGeneration && !_isWindowClosed && !_windowCloseCommitted)
+                {
+                    _pendingTrayHide = false;
                     Hide();
+                }
             })), kind: AnimationKind.WindowMinimize);
     }
 
@@ -4556,6 +4580,13 @@ public partial class MainWindow : Window
         Dispatcher.VerifyAccess();
         ArgumentNullException.ThrowIfNull(authorizeOnClosed);
         if (_updateExitCompletion is { } existing) return existing.Task;
+        // The updater's own queue item has completed before this callback. Any remaining
+        // running/paused/waiting/cleanup item belongs to work that a restart would interrupt.
+        if (DownloadQueueService.Instance.HasActive)
+        {
+            ToastService.ShowWarning("仍有下载、暂停、排队或清理任务。请先完成或取消这些任务，再更新启动器；当前任务不会被中断。");
+            return Task.FromResult(false);
+        }
         if (_isWindowClosed || _closeRequestAccepted || _pluginExitPreparing || _closeLifecycleBackupRunning)
             return Task.FromResult(false);
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -4614,8 +4645,7 @@ public partial class MainWindow : Window
     private void RestoreFromTray()
     {
         if (_isWindowClosed || _windowCloseCommitted) return;
-        ++_trayTransitionGeneration;
-        UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
+        CancelPendingTrayHideForActivation();
         WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowRestore);
         Show();
         WindowState = _lastNonMinimizedWindowState;
@@ -4756,6 +4786,7 @@ public partial class MainWindow : Window
         if (WindowState == WindowState.Minimized || _isWindowClosed || _windowCloseCommitted) return;
         _snapLayouts?.Close();
         ++_trayTransitionGeneration;
+        _pendingTrayHide = false;
         UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
         WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowMinimize);
         SystemCommands.MinimizeWindow(this);
@@ -4766,6 +4797,7 @@ public partial class MainWindow : Window
         if (_windowCloseCommitted || _isWindowClosed) return;
         _snapLayouts?.Close();
         ++_trayTransitionGeneration;
+        _pendingTrayHide = false;
         UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
         WindowChromeService.ApplyNativeTransitionPreference(this, AnimationKind.WindowFullscreen);
         if (WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(this);
@@ -4842,6 +4874,16 @@ public partial class MainWindow : Window
     /// （这是"贴在桌面"这个功能本身的代价，明确告知用户，不是意外行为）；
     /// "取消"则拦下这次关闭，两边都不动。没有任何便签在开时直接放行，不打扰。</summary>
     private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // Overlay confirmation dialogs pump dispatcher messages, so close can reenter
+        // before the current confirmation returns or an asynchronous cleanup completes.
+        if (_handlingCloseRequest) { e.Cancel = true; return; }
+        _handlingCloseRequest = true;
+        try { await HandleClosingAsync(e); }
+        finally { _handlingCloseRequest = false; }
+    }
+
+    private async Task HandleClosingAsync(System.ComponentModel.CancelEventArgs e)
     {
         if (_processExitPreparing) { e.Cancel = true; return; }
         if (_pluginExitPreparing) { e.Cancel = true; return; }
@@ -5100,13 +5142,14 @@ public partial class MainWindow : Window
         SystemCommands.ShowSystemMenu(this, screenPos);
     }
 
-    /// <summary>原生状态切换只同步 UI；不再在 DWM 过渡后重播内容淡入。</summary>
+    /// <summary>先清理旧过渡并同步标题栏，WindowPresentationMotion 再等待真实恢复帧播放内容过渡。</summary>
     private void MainWindow_StateChanged(object? sender, EventArgs e)
     {
         UpdateMaximizeRestoreIcon();
         if (DownloadQueuePopup != null) DownloadQueuePopup.IsOpen = false;
         _snapLayouts?.Close();
         ++_trayTransitionGeneration;
+        _pendingTrayHide = false;
         if (IsVisible) _trayIcon?.Hide();
         if (!_windowCloseCommitted)
             UiAnimationHelper.Reset(RootWindowGrid, RootWindowMoveTransform, RootWindowScaleTransform);
@@ -5151,30 +5194,61 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MainWindow_DragOver(object sender, DragEventArgs e)
+    private async void MainWindow_DragOver(object sender, DragEventArgs e)
     {
-        if (!e.Data.GetDataPresent(DataFormats.FileDrop))
+        string[] incoming;
+        try
         {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetData(DataFormats.FileDrop) is not string[] paths)
+            {
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+            incoming = paths;
+        }
+        catch
+        {
+            // Virtual-file providers may fail while materializing their IDataObject.
+            // Hover must not crash the async-void handler or keep an obsolete preview.
+            ++_dragPreviewGeneration;
+            _lastDragOverPaths = null;
+            _lastDragOverKinds = null;
+            DragHintLayer.Visibility = Visibility.Collapsed;
             e.Effects = DragDropEffects.None;
             e.Handled = true;
             return;
         }
-
-        var paths = (string[])e.Data.GetData(DataFormats.FileDrop)!;
         e.Effects = DragDropEffects.Copy;
         e.Handled = true;
+        DragHintLayer.Visibility = Visibility.Visible;
 
-        // 只有当这次拖进来的文件集合跟上次算过的不一样时，才重新分类（涉及文件 IO）；
-        // 同一批文件在窗口内来回晃动鼠标，这里直接复用上一次的结果，不再反复触发 IO。
         List<DragDropInstallService.DropKind> kinds;
-        if (_lastDragOverPaths != null && _lastDragOverKinds != null && _lastDragOverPaths.SequenceEqual(paths))
+        if (_lastDragOverPaths != null && _lastDragOverPaths.SequenceEqual(incoming))
         {
+            // 同一批路径仍在识别时不再排队，避免每次鼠标移动都打开压缩包。
+            if (_lastDragOverKinds == null) return;
             kinds = _lastDragOverKinds;
         }
         else
         {
-            kinds = paths.Select(_dragDropService.Classify).ToList();
+            var paths = incoming.ToArray();
+            var generation = ++_dragPreviewGeneration;
             _lastDragOverPaths = paths;
+            _lastDragOverKinds = null;
+            DragHintTitle.Text = "正在识别拖入内容…";
+            DragHintDetail.Text = $"共 {paths.Length} 项，识别完成后会显示安装目标。";
+            try { kinds = await Task.Run(() => paths.Select(_dragDropService.Classify).ToList()); }
+            catch (Exception ex)
+            {
+                if (generation != _dragPreviewGeneration || _isWindowClosed) return;
+                DragHintTitle.Text = "无法识别拖入内容";
+                DragHintDetail.Text = "请检查文件是否仍然存在或可读。";
+                ErrorPresenter.LogTechnicalDetail("[拖入预览] " + ex);
+                return;
+            }
+            // DragLeave/Drop/另一批文件之后的旧结果不得重新显示拖入遮罩。
+            if (generation != _dragPreviewGeneration || _isWindowClosed || Dispatcher.HasShutdownStarted) return;
             _lastDragOverKinds = kinds;
         }
 
@@ -5243,25 +5317,32 @@ public partial class MainWindow : Window
     /// <summary>internal 而非 private：VersionSelectPage 里"导入整合包..."按钮要复用这同一套
     /// 流程（新建实例 / 装进已有实例，取决于 ModpackDropCreatesNewInstance 设置），
     /// 不用再抄一遍装整合包的逻辑。</summary>
-    internal async Task ImportDroppedModpackAsync(string modpackPath)
+    internal Task ImportDroppedModpackAsync(string modpackPath)
     {
         var cfg = ConfigService.Config;
         var folder = cfg.Folders.FirstOrDefault(f => f.Path == cfg.SelectedFolderPath)
                      ?? cfg.Folders.FirstOrDefault();
-        if (folder == null)
+        return ImportDroppedModpackAsync(modpackPath, folder?.Path, cfg.ModpackDropCreatesNewInstance);
+    }
+
+    private async Task ImportDroppedModpackAsync(string modpackPath, string? folderPath, bool createsNewInstance)
+    {
+        var cfg = ConfigService.Config;
+        if (string.IsNullOrWhiteSpace(folderPath) || !Directory.Exists(folderPath))
         {
             ToastService.ShowWarning(Loc.T("Str_Cs_No_Minecraft_Folder_Is_Configured_So_The", "还没有配置 .minecraft 文件夹，无法导入整合包。"));
             return;
         }
 
         var installer = new ModpackInstallService(cfg);
-        var req = installer.ReadRequirements(modpackPath);
+        var req = await Task.Run(() => installer.ReadRequirements(modpackPath));
+        if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
 
         // ---------- 走"从零新建实例"这条路 ----------
-        if (cfg.ModpackDropCreatesNewInstance)
+        if (createsNewInstance)
         {
             var suggested = ModpackInstallService.MakeUniqueInstanceName(
-                folder.Path,
+                folderPath,
                 string.IsNullOrWhiteSpace(req.Name) ? Path.GetFileNameWithoutExtension(modpackPath) : req.Name!);
 
             var nameDialog = new NewInstanceNameDialog(suggested, req.McVersion, req.Loader, req.LoaderVersion);
@@ -5269,7 +5350,7 @@ public partial class MainWindow : Window
 
             var instanceName = nameDialog.InstanceName;
             if (!await ImportPreviewDialog.ConfirmAsync(modpackPath,
-                InstanceUxService.GetVersionDirectory(folder.Path, instanceName), instanceName,
+                InstanceUxService.GetVersionDirectory(folderPath, instanceName), instanceName,
                 ImportPreviewKind.ModpackArchive)) return;
 
             // Forge/NeoForge 的安装器必须用本地 Java 跑；Fabric/Quilt 不需要。
@@ -5284,10 +5365,10 @@ public partial class MainWindow : Window
             try
             {
                 var result = await installer.InstallToNewInstanceAsync(
-                    modpackPath, folder.Path, instanceName, javaExe, progressDialog.Progress);
+                    modpackPath, folderPath, instanceName, javaExe, progressDialog.Progress);
 
                 // 装完直接把新实例设为当前选中，用户点启动就能玩，不用自己再去版本列表找一遍。
-                NotifyInstanceImported(folder.Path, result.InstanceId);
+                NotifyInstanceImported(folderPath, result.InstanceId);
 
                 if (result.FailedFiles.Count > 0)
                 {
@@ -5321,14 +5402,15 @@ public partial class MainWindow : Window
         // ---------- 退回旧行为：装进用户选的已有/新建目录（不下载本体和加载器）----------
         var folderService = new FolderService();
         List<GameVersion> existing;
-        try { existing = folderService.ScanVersions(folder.Path); }
+        try { existing = await Task.Run(() => folderService.ScanVersions(folderPath)); }
         catch { existing = new List<GameVersion>(); }
+        if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
 
         var suggestedLegacy = Path.GetFileNameWithoutExtension(modpackPath);
         var dialog = new ModpackTargetVersionDialog(suggestedLegacy, existing);
         if (OverlayDialogService.ShowModal(dialog) != true) return;
 
-        var targetDir = Path.Combine(folder.Path, "versions", dialog.TargetVersionId);
+        var targetDir = Path.Combine(folderPath, "versions", dialog.TargetVersionId);
         if (!await ImportPreviewDialog.ConfirmAsync(modpackPath, targetDir,
             dialog.TargetVersionId, ImportPreviewKind.ModpackArchive)) return;
 
@@ -5341,7 +5423,7 @@ public partial class MainWindow : Window
             {
                 var r = await service.ImportMrpackAsync(modpackPath, targetDir,
                     new Progress<string>(msg => pd.Progress.Report(new ProgressInfo(msg, 0, 1, ""))));
-                NotifyInstanceImported(folder.Path, dialog.TargetVersionId);
+                NotifyInstanceImported(folderPath, dialog.TargetVersionId);
 
                 if (r.FailedFiles.Count > 0)
                 {
@@ -5358,7 +5440,7 @@ public partial class MainWindow : Window
             else
             {
                 await Task.Run(() => service.Import(modpackPath, targetDir));
-                NotifyInstanceImported(folder.Path, dialog.TargetVersionId);
+                NotifyInstanceImported(folderPath, dialog.TargetVersionId);
                 ToastService.ShowSuccess($"整合包已导入到「{dialog.TargetVersionId}」");
             }
         }
@@ -5376,6 +5458,7 @@ public partial class MainWindow : Window
     private void MainWindow_DragLeave(object sender, DragEventArgs e)
     {
         DragHintLayer.Visibility = Visibility.Collapsed;
+        ++_dragPreviewGeneration;
         _lastDragOverPaths = null;
         _lastDragOverKinds = null;
     }
@@ -5391,7 +5474,7 @@ public partial class MainWindow : Window
     /// 按"当前页面 + 设置项"决定每个拖入文件的去向，必要时弹内嵌选择框问用户。
     /// 返回 null 表示用户取消了整个操作。
     /// </summary>
-    private async Task<Dictionary<string, DragDropInstallService.DropKind>?> ResolveDropKindsAsync(string[] paths)
+    private async Task<Dictionary<string, DragDropInstallService.DropKind>?> ResolveDropKindsAsync(string[] paths, bool onServerPage)
     {
         var cfg = ConfigService.Config;
         var overrides = new Dictionary<string, DragDropInstallService.DropKind>(StringComparer.OrdinalIgnoreCase);
@@ -5403,16 +5486,16 @@ public partial class MainWindow : Window
             // ---------- .jar：按页面决定装给客户端还是服务端 ----------
             if (ext == ".jar")
             {
-                var target = IsOnServerManagerPage ? cfg.ServerPageJarDropTarget : cfg.DefaultJarDropTarget;
+                var target = onServerPage ? cfg.ServerPageJarDropTarget : cfg.DefaultJarDropTarget;
 
                 if (target == DropJarTarget.Ask)
                 {
-                    var dlg = new DropJarTargetDialog(path, IsOnServerManagerPage);
+                    var dlg = new DropJarTargetDialog(path, onServerPage);
                     if (OverlayDialogService.ShowModal(dlg) != true) return null;
                     target = dlg.SelectedTarget;
                     if (dlg.Remember)
                     {
-                        if (IsOnServerManagerPage) cfg.ServerPageJarDropTarget = target;
+                        if (onServerPage) cfg.ServerPageJarDropTarget = target;
                         else cfg.DefaultJarDropTarget = target;
                         try { ConfigService.Save(); } catch { }
                     }
@@ -5425,7 +5508,9 @@ public partial class MainWindow : Window
             }
 
             // ---------- .zip 且内容认不出来：按设置决定问不问 ----------
-            if (_dragDropService.IsAmbiguousZip(path))
+            var ambiguousZip = await Task.Run(() => _dragDropService.IsAmbiguousZip(path));
+            if (_isWindowClosed || Dispatcher.HasShutdownStarted) return null;
+            if (ambiguousZip)
             {
                 var def = cfg.ZipDropDefault;
                 if (def == DropZipDefault.Ask)
@@ -5462,24 +5547,52 @@ public partial class MainWindow : Window
     private async void MainWindow_Drop(object sender, DragEventArgs e)
     {
         DragHintLayer.Visibility = Visibility.Collapsed;
+        ++_dragPreviewGeneration;
         _lastDragOverPaths = null;
         _lastDragOverKinds = null;
-        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        e.Handled = true;
+        try
+        {
+            if (!e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
+            await HandleFileDropAsync(paths.ToArray());
+        }
+        catch (Exception ex)
+        {
+            if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
+            ErrorPresenter.ShowFriendlyError("无法读取拖入内容，请检查文件是否仍然存在或可访问。", ex.ToString(), "拖入失败");
+        }
+    }
 
+    private async Task HandleFileDropAsync(string[] incoming)
+    {
         // 插件导入与“把内容装进某个 MC 实例”是两套独立流程。只识别用户本次直接拖入的
         // 插件文件，不递归扫描拖入文件夹里的 DLL/EXE，避免把游戏目录里的本地库误当插件。
-        var dropped = ((string[])e.Data.GetData(DataFormats.FileDrop)!)
-            .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var pluginFiles = dropped.Where(path => File.Exists(path) && _dragDropService.Classify(path) == DragDropInstallService.DropKind.Plugin).ToArray();
+        var dropped = incoming.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        // Capture the target before asynchronous classification so changing the selected instance
+        // while a large archive is being inspected cannot redirect this drop to another instance.
+        var dropTarget = ResolveDropTargetInstanceDir();
+        var dropOnServerPage = IsOnServerManagerPage;
+        var dropConfig = ConfigService.Config;
+        var dropFolderPath = (dropConfig.Folders.FirstOrDefault(folder => folder.Path == dropConfig.SelectedFolderPath)
+            ?? dropConfig.Folders.FirstOrDefault())?.Path;
+        var dropCreatesNewInstance = dropConfig.ModpackDropCreatesNewInstance;
+        var dropServer = ServerInstanceService.Instances.FirstOrDefault(instance => instance.IsDefault)
+            ?? ServerInstanceService.Instances.FirstOrDefault();
+        var dropServerDirectory = dropServer?.Directory;
+        var dropServerName = dropServer?.DisplayName;
+        ToastService.ShowInfo("正在识别拖入内容…");
+        var pluginFiles = await Task.Run(() => dropped.Where(path => File.Exists(path) && _dragDropService.Classify(path) == DragDropInstallService.DropKind.Plugin).ToArray());
+        if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
         if (pluginFiles.Length > 0) ImportPluginFiles(pluginFiles);
 
         var remainingRoots = dropped.Where(path => !pluginFiles.Contains(path, StringComparer.OrdinalIgnoreCase)).ToArray();
-        var paths = DragDropInstallService.Expand(remainingRoots)
-            .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var paths = await Task.Run(() => DragDropInstallService.Expand(remainingRoots)
+            .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
         if (paths.Length == 0) return;
 
         // 先把"每个文件该怎么处理"定下来（可能会弹选择框），再动手装。
-        var overrides = await ResolveDropKindsAsync(paths);
+        var overrides = await ResolveDropKindsAsync(paths, dropOnServerPage);
         if (overrides == null) return;  // 用户取消
 
         // 服务端 jar 单独走服务端安装路径，不需要客户端实例目录。
@@ -5487,12 +5600,12 @@ public partial class MainWindow : Window
                                   .Select(kv => kv.Key).ToList();
         if (serverJars.Count > 0)
         {
-            await InstallJarsToSelectedServerAsync(serverJars);
+            await InstallJarsToServerAsync(serverJars, dropServerDirectory, dropServerName);
             foreach (var j in serverJars) overrides.Remove(j);
             if (overrides.Count == 0 && paths.Length == serverJars.Count) return;
         }
 
-        var target = ResolveDropTargetInstanceDir();
+        var target = dropTarget;
         if (target == null)
         {
             ToastService.ShowWarning(Loc.T("Str_Drop_NoInstance", "请先在「版本选择」里选一个游戏版本，再拖入文件。"));
@@ -5501,12 +5614,18 @@ public partial class MainWindow : Window
 
         var remaining = paths.Where(p => !serverJars.Contains(p)).ToArray();
         if (remaining.Length == 0) return;
+        if (!Directory.Exists(target))
+        {
+            ToastService.ShowWarning("拖入时选定的实例目录已不存在，本次安装已取消。");
+            return;
+        }
 
         DragDropInstallService.DropResult result;
         try
         {
-            var mods = remaining.Where(p => (overrides.TryGetValue(p, out var forced) ? forced : _dragDropService.Classify(p))
-                == DragDropInstallService.DropKind.Mod).ToArray();
+            var mods = await Task.Run(() => remaining.Where(p => (overrides.TryGetValue(p, out var forced) ? forced : _dragDropService.Classify(p))
+                == DragDropInstallService.DropKind.Mod).ToArray());
+            if (_isWindowClosed || Dispatcher.HasShutdownStarted) return;
             var plans = await ModInstallConfirmation.PrepareAsync(mods, Path.Combine(target, "mods"));
             if (plans == null) return;
             result = await Task.Run(() => _dragDropService.InstallMany(remaining, target, null, overrides, plans));
@@ -5525,7 +5644,7 @@ public partial class MainWindow : Window
 
         // 整合包：按设置决定"从零建新实例"还是"装进已有实例"。
         foreach (var modpack in result.Modpacks)
-            await ImportDroppedModpackAsync(modpack);
+            await ImportDroppedModpackAsync(modpack, dropFolderPath, dropCreatesNewInstance);
         if (result.Modpacks.Count > 0)
             (MainContent.Content as ModManagerPage)?.RefreshFromExternalChange();
 
@@ -5600,21 +5719,16 @@ public partial class MainWindow : Window
     /// 在「服务端管理」页拖 jar 时走这条路（需求："在服务器管理页面拖入 jar 文件，
     /// 默认会给服务器安装"）。没有选中服务器时提示用户先选一个，而不是默默装到客户端去。
     /// </summary>
-    private async Task InstallJarsToSelectedServerAsync(List<string> jarPaths)
+    private async Task InstallJarsToServerAsync(List<string> jarPaths, string? directory, string? displayName)
     {
-        // ServerInstance 上标了 IsDefault 的优先，没有就取第一个。
-        // （服务端实例没有像客户端 SelectedVersionId 那样的"当前选中"配置项，
-        //  IsDefault 是这个模型里已有的、语义最接近的字段。）
-        var instance = ServerInstanceService.Instances.FirstOrDefault(i => i.IsDefault)
-                       ?? ServerInstanceService.Instances.FirstOrDefault();
-
-        if (instance == null || string.IsNullOrEmpty(instance.Directory))
+        // The drop owns a directory snapshot. Never re-read a different default server after awaiting IO.
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
         {
             ToastService.ShowWarning(Loc.T("Str_Cs_No_Server_Exists_Yet_So_Server_Mods_Can_", "还没有创建服务器实例，无法安装服务端 Mod。请先到「服务端管理」新建一个。"));
             return;
         }
 
-        var modsDir = Path.Combine(instance.Directory, "mods");
+        var modsDir = Path.Combine(directory, "mods");
         var ok = 0;
         var failed = new List<string>();
         try
@@ -5638,7 +5752,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (ok > 0) ToastService.ShowSuccess($"已给服务器「{instance.DisplayName}」安装 {ok} 个 Mod");
+        if (ok > 0) ToastService.ShowSuccess($"已给服务器「{displayName}」安装 {ok} 个 Mod");
         if (failed.Count > 0) ToastService.ShowWarning($"有 {failed.Count} 个没装上：{string.Join("；", failed.Take(3))}");
     }
 

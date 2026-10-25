@@ -14,8 +14,8 @@ namespace XCL2.App.Services;
 ///   1) 用户自己导入的头像照片（Account.AvatarPhotoPath，任意图片，跟 Minecraft 皮肤无关）；
 ///   未配置皮肤/选择 Steve 的离线账户在照片之后直接渲染内嵌默认 Steve PNG 的正脸。
 ///   2) <see cref="AccountAvatarCacheService"/> 后台从服务器查到的"当前公开皮肤"缓存文件——
-///      覆盖皮肤站(AuthServer)账户、正版(Microsoft)账户，以及 Custom/Alex 的
-///      离线账户，皮肤随时可能在服务器端被换掉，这份缓存比下面的本地文件更"新"；
+///      仅用于皮肤站(AuthServer)与正版(Microsoft)账户；离线账户始终保留本地选择，
+///      不把同名正版玩家误当作同一个人；
 ///   3) 绑定了自定义 Minecraft 皮肤（Account.CustomSkinPath）时，从皮肤贴图截出正脸——
 ///      多数是第 2 档还没来得及查到结果、或本来就没有服务器端皮肤可查时的本地兜底；
 ///   4) 都没有——不管是"离线账户还没设置皮肤"还是"选了史蒂夫/艾利克斯默认骨架且服务器

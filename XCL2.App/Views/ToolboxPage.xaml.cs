@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -1331,7 +1331,7 @@ public partial class ToolboxPage : UserControl
 
     private void AchSetBedrockDir_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择已安装的 MC 基岩版所在文件夹（例如 …\\Minecraft for Windows\\Content）" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择已安装的 MC 基岩版所在文件夹（例如 …\\Minecraft for Windows\\Content）" };
         if (dialog.ShowDialog() != true) return;
 
         _owner.ConfigService.Config.BedrockManualInstallDir = dialog.FolderName;
@@ -1450,7 +1450,7 @@ public partial class ToolboxPage : UserControl
 
     private void DlBrowseDir_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择保存目录" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择保存目录" };
         if (!string.IsNullOrWhiteSpace(DlSaveDirBox.Text) && Directory.Exists(DlSaveDirBox.Text))
             dialog.InitialDirectory = DlSaveDirBox.Text;
 

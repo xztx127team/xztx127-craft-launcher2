@@ -223,7 +223,7 @@ public static class OverlayDialogService
 
     private static void ScheduleShownEntry(OverlayEntry entry)
     {
-        // 0 强度 / 恢复父层时 onShown 同步调用；低于 Render 的队列仍保证先呈现原弹窗，
+        // 0 强度时 onShown 同步调用；低于 Render 的队列仍保证先呈现原弹窗，
         // 再执行任意 DLL 工厂或打开订阅者。已关闭、被子层覆盖的条目不能重新激活。
         var host = _host;
         if (host is null || entry.Tcs.Task.IsCompleted) return;

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AnimationOption.cs" Link="Models/AnimationOption.cs" />
+    <Compile Include="../../Models/NoAnimationOptimization.cs" Link="Models/NoAnimationOptimization.cs" />
+    <Compile Include="../../Services/AnimationSettingsService.cs" Link="Services/AnimationSettingsService.cs" />
+    <Compile Include="../../Services/StartupAnimationPreferences.cs" Link="Services/StartupAnimationPreferences.cs" />
+  </ItemGroup>
+</Project>

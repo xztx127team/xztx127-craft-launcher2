@@ -56,7 +56,9 @@ public static class JobObjectCpuLimiter
     /// </summary>
     public static IntPtr TryLimitCpu(System.Diagnostics.Process process, int cpuPercent)
     {
-        if (!OperatingSystem.IsWindows()) return IntPtr.Zero;
+        // CPU rate control was introduced in Windows 8. Priority changes do not emulate a
+        // percentage cap, so report unavailable rather than silently promising a false cap.
+        if (!WindowsCompatibilityService.Current.SupportsCpuRateControl) return IntPtr.Zero;
         if (cpuPercent is < 1 or > 100) return IntPtr.Zero;
 
         IntPtr job = IntPtr.Zero;

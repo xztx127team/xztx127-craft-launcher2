@@ -71,11 +71,19 @@ public partial class ServerManagerPage : UserControl
     /// </summary>
     private bool _initialized;
     private string _serverListFilter = "all";
+    private IInputElement? _detailReturnFocus;
 
     public ServerManagerPage(MainWindow owner)
     {
         _owner = owner;
         InitializeComponent();
+        KeyDown += (_, e) =>
+        {
+            if (e.Handled || e.Key != Key.Escape || Keyboard.Modifiers != ModifierKeys.None
+                || DetailHost.Visibility != Visibility.Visible) return;
+            HideServerResourceDetail();
+            e.Handled = true;
+        };
 
         McVersionCombo.ItemsSource = _mcVersions;
         BuildVersionCombo.ItemsSource = _buildVersions;
@@ -163,6 +171,11 @@ public partial class ServerManagerPage : UserControl
     {
         if (!_initialized) return; // InitializeComponent() 过程中触发的事件：控件树还没解析完，直接跳过
         if (sender is not RadioButton rb) return;
+        DetailHost.Visibility = Visibility.Collapsed;
+        DetailHost.Content = null;
+        _detailReturnFocus = null;
+        foreach (var panel in ListPanelsHost.Children.OfType<FrameworkElement>())
+            PageTransitionBehavior.SetTransitionDirection(panel, 1);
         var tag = rb.Tag as string;
         if (tag == "instances") _instanceRefreshNeeded = true;
         else CancelInstanceRefresh();
@@ -174,6 +187,7 @@ public partial class ServerManagerPage : UserControl
         // 具体资源类型），不再是两个分开的入口/占位符。左侧点"插件下载"时把面板内的类型选择器
         // 也同步切到"插件"，点"资源包"时切到"资源包"，避免出现"点插件却看到材质包"的错觉。
         ServerResourcePanel.Visibility = tag is "plugins" or "resourcepack" ? Visibility.Visible : Visibility.Collapsed;
+        ListPanelsHost.Visibility = Visibility.Visible;
 
         if (tag == "instances") ResumeInstanceRefresh();
         if (tag == "plugins")
@@ -315,7 +329,7 @@ public partial class ServerManagerPage : UserControl
 
     private void BrowseTargetDir_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择服务端安装位置" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择服务端安装位置" };
         if (System.IO.Directory.Exists(TargetDirBox.Text)) dialog.InitialDirectory = TargetDirBox.Text;
         if (dialog.ShowDialog() == true)
             TargetDirBox.Text = dialog.FolderName;
@@ -1829,6 +1843,10 @@ public partial class ServerManagerPage : UserControl
 
     private void ShowServerResourceDetail(ModDetailPage page)
     {
+        if (DetailHost.Visibility != Visibility.Visible) _detailReturnFocus = Keyboard.FocusedElement;
+        ListPanelsHost.Visibility = Visibility.Hidden;
+        page.UseHostPageTransition();
+        PageTransitionBehavior.SetTransitionDirection(DetailHost, 1);
         DetailHost.Content = page;
         DetailHost.Visibility = Visibility.Visible;
     }
@@ -1837,6 +1855,10 @@ public partial class ServerManagerPage : UserControl
     {
         DetailHost.Visibility = Visibility.Collapsed;
         DetailHost.Content = null;
+        PageTransitionBehavior.SetTransitionDirection(ServerResourcePanel, -1);
+        ListPanelsHost.Visibility = Visibility.Visible;
+        if (_detailReturnFocus is UIElement { IsVisible: true, IsEnabled: true } focus) Keyboard.Focus(focus);
+        _detailReturnFocus = null;
     }
 
     private static string ServerResourceProjectTypeSlug(ModrinthResourceType type) => type switch

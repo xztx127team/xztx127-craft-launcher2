@@ -65,7 +65,7 @@ public class DownloadService : IDisposable
 
     private DownloadService(DownloadSource source, int maxConcurrency, int speedLimitKBps, bool smartThrottle, bool useSharedUserLimit, HttpClient? http = null)
     {
-        _http = http ?? new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        _http = http ?? LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(10));
         _ownsHttp = http == null;
         _source = source;
         _maxConnections = Math.Clamp(maxConcurrency, 1, 16);
@@ -517,7 +517,8 @@ public class DownloadService : IDisposable
         ct.ThrowIfCancellationRequested();
         DownloadTransferPolicy.TrackTarget(destPath);
         using (DownloadTransferPolicy.BeginPhase("校验"))
-            if (File.Exists(destPath) && await Task.Run(() => VerifySha1(destPath, expectedSha1, ct), ct).ConfigureAwait(false)) return;
+            if (File.Exists(destPath) && await Task.Run(() =>
+                VerifySha1(destPath, expectedSha1, ct, IsArchivePath(destPath), expectedSize), ct).ConfigureAwait(false)) return;
 
         Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
 
@@ -545,7 +546,7 @@ public class DownloadService : IDisposable
                         await DownloadTransferPolicy.WaitRetryAsync(TimeSpan.FromMilliseconds(400 + Random.Shared.Next(300)), ct,
                             lastError?.Message);
                     await DownloadFromSingleUrlAsync(candidate, destPath, expectedSha1,
-                        allowResume: attempt == 1, ct, expectedSize);
+                        allowResume: !string.IsNullOrWhiteSpace(expectedSha1), ct, expectedSize);
 
                     DownloadEndpoints.ReportSuccess(candidate);
                     return;
@@ -595,7 +596,10 @@ public class DownloadService : IDisposable
         DownloadTransferPolicy.TrackTemporary(part, resumable: true, targetPath: destPath);
 
         long existing = 0;
-        if (allowResume && File.Exists(part))
+        // Only a trusted content hash can bind a previous fragment to this resource.
+        // A length or URL alone cannot detect changed content, and retrying a verified
+        // resource must keep its fragment instead of restarting the second round at zero.
+        if (allowResume && !string.IsNullOrWhiteSpace(expectedSha1) && File.Exists(part))
         {
             try { existing = new FileInfo(part).Length; }
             catch (Exception ex) when (ex is not Plugins.PluginFlowCanceledException)
@@ -743,10 +747,10 @@ public class DownloadService : IDisposable
         ct.ThrowIfCancellationRequested();
 
         using var verifying = DownloadTransferPolicy.BeginPhase("校验");
-        if (!await Task.Run(() => VerifySha1(part, expectedSha1, ct), ct).ConfigureAwait(false))
+        if (!await Task.Run(() => VerifySha1(part, expectedSha1, ct, IsArchivePath(destPath)), ct).ConfigureAwait(false))
         {
             TryDelete(part);
-            throw new IOException($"文件校验失败(SHA1 不匹配)：{Path.GetFileName(destPath)}");
+            throw new IOException($"文件校验失败（摘要不匹配、内容为空或归档不完整）：{Path.GetFileName(destPath)}");
         }
 
         ct.ThrowIfCancellationRequested();
@@ -904,23 +908,37 @@ public class DownloadService : IDisposable
         catch { /* 忽略清理失败，不影响主流程报错 */ }
     }
 
-    private static bool VerifySha1(string path, string expectedSha1, CancellationToken ct = default)
+    private static bool IsArchivePath(string path) =>
+        Path.GetExtension(path).Equals(".jar", StringComparison.OrdinalIgnoreCase) ||
+        Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase);
+
+    private static bool VerifySha1(string path, string expectedSha1, CancellationToken ct = default,
+        bool requireArchive = false, long? expectedSize = null)
     {
         ct.ThrowIfCancellationRequested();
-        // 需求："尽量不要崩溃"——修一个会导致"两个启动器都崩"的根因：Fabric/Quilt 等
-        // "name+url"风格的库条目本身没有官方 sha1（expectedSha1 传空字符串），之前这里对
-        // 空 sha1 直接 return true，等于只要文件在磁盘上"存在"就永远当成"已验证"，哪怕
-        // 是下载中途网络中断/磁盘写满留下的 0 字节或半截文件，也再也不会被重新下载——
-        // 直到某天真正启动游戏，Java 因为这个 jar 里缺类(比如 org.lwjgl.system.CallbackI
-        // 这种 lwjgl 核心类)而崩溃，且用户换别的启动器（共用同一份 libraries 目录）一样崩，
-        // 因为问题根本不在启动器，在这个文件本身从一开始就没验证过完整性。
-        // 没有 sha1 可比对时，至少做"文件非空"这一层最基本的健全性检查：0 字节文件几乎
-        // 不可能是真正下载完整的 jar，判定为未通过校验、触发重新下载。这不是完整的哈希校验
-        // （没有 sha1 就是没有，没法做到 100%），但能拦住"下载中断留下空文件"这个最常见、
-        // 后果也最隐蔽的情况。
-        if (string.IsNullOrEmpty(expectedSha1))
+        if (expectedSize is > 0)
         {
-            try { return new FileInfo(path).Length > 0; }
+            try { if (new FileInfo(path).Length != expectedSize.Value) return false; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        }
+        // Loader libraries may omit hashes; reject empty content and malformed JAR/ZIP
+        // structures, but do not claim publisher integrity without an expected digest.
+        if (string.IsNullOrWhiteSpace(expectedSha1))
+        {
+            try
+            {
+                if (new FileInfo(path).Length <= 0) return false;
+                // Fabric/Quilt library metadata may lack a digest. A nonempty HTML
+                // response or truncated JAR is not a usable library; validate its
+                // directory before cache reuse or atomic publication. This does not
+                // establish authenticity when no publisher hash is available.
+                if (requireArchive)
+                {
+                    using var archive = ZipFile.OpenRead(path);
+                    _ = archive.Entries.Count;
+                }
+                return true;
+            }
             catch { return false; }
         }
         try

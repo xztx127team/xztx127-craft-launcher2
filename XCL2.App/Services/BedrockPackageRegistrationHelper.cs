@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Windows.Management.Deployment;
 
 namespace XCL2.App.Services;
@@ -45,6 +46,7 @@ public static class BedrockPackageRegistrationHelper
     /// </summary>
     public static bool IsDeveloperModeEnabled()
     {
+        if (!BedrockLaunchService.IsOsSupported) return false;
         // 直接用注册表 API 读取，不再启动 powershell.exe（脚本调用容易被安全软件启发式拦截）。
         // 同时检查 64 位视图，避免 32 位进程被重定向到 WOW6432Node 读不到值。
         const string valueName = "AllowDevelopmentWithoutDevLicense";
@@ -76,6 +78,7 @@ public static class BedrockPackageRegistrationHelper
     /// <summary>打开"系统 - 开发者选项"设置页，引导用户手动开启。</summary>
     public static void OpenDeveloperModeSettings()
     {
+        EnsureSupported();
         Process.Start(new ProcessStartInfo("ms-settings:developers") { UseShellExecute = true });
     }
 
@@ -95,15 +98,19 @@ public static class BedrockPackageRegistrationHelper
     /// 和本方法注册的都算）。</summary>
     public static bool IsRegistered()
     {
-        try
-        {
-            var pm = new PackageManager();
-            return pm.FindPackagesForUser(string.Empty, PackageFamilyName).Any();
-        }
+        if (!BedrockLaunchService.IsOsSupported) return false;
+        try { return IsRegisteredNative(); }
         catch
         {
             return false;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool IsRegisteredNative()
+    {
+        var pm = new PackageManager();
+        return pm.FindPackagesForUser(string.Empty, PackageFamilyName).Any();
     }
 
     /// <summary>
@@ -114,8 +121,19 @@ public static class BedrockPackageRegistrationHelper
     /// </summary>
     /// <param name="extractedDir">DownloadClientAsync 返回的解压目录。</param>
     /// <param name="progress">注册进度回调（百分比 0-100 + 当前阶段文字）。</param>
-    public static async Task RegisterAsync(string extractedDir, IProgress<(int Percent, string State)>? progress = null,
+    public static Task RegisterAsync(string extractedDir, IProgress<(int Percent, string State)>? progress = null,
         CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        EnsureSupported();
+        return RegisterNativeAsync(extractedDir, progress, ct);
+    }
+
+    // WinRT types live only in this leaf state machine. The old-system guard above must run
+    // before the runtime tries to resolve PackageManager or deployment interfaces.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static async Task RegisterNativeAsync(string extractedDir, IProgress<(int Percent, string State)>? progress,
+        CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var manifestPath = FindAppxManifest(extractedDir);
@@ -127,7 +145,7 @@ public static class BedrockPackageRegistrationHelper
         var manifestUri = new Uri(manifestPath);
         var pm = new PackageManager();
 
-        var tcs = new TaskCompletionSource();
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var deployment = pm.RegisterPackageAsync(manifestUri, null,
             DeploymentOptions.DevelopmentMode);
 
@@ -137,13 +155,30 @@ public static class BedrockPackageRegistrationHelper
         };
         deployment.Completed = (result, status) =>
         {
-            if (status == Windows.Foundation.AsyncStatus.Error)
-                tcs.TrySetException(new InvalidOperationException(
-                    $"注册基岩版客户端包失败：{result.GetResults().ErrorText}"));
-            else if (status == Windows.Foundation.AsyncStatus.Canceled)
-                tcs.TrySetCanceled();
-            else
-                tcs.TrySetResult();
+            try
+            {
+                if (status == Windows.Foundation.AsyncStatus.Canceled)
+                {
+                    tcs.TrySetCanceled(ct.IsCancellationRequested ? ct : new CancellationToken(true));
+                    return;
+                }
+                // A failed WinRT operation may throw from GetResults itself. Complete the
+                // Task in either case instead of letting the COM callback strand the await.
+                var details = result.GetResults();
+                if (status == Windows.Foundation.AsyncStatus.Error)
+                    tcs.TrySetException(new InvalidOperationException(
+                        $"注册基岩版客户端包失败：{details.ErrorText}"));
+                else
+                    tcs.TrySetResult();
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                tcs.TrySetCanceled(ct);
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(new InvalidOperationException("注册基岩版客户端包失败：" + ex.Message, ex));
+            }
         };
 
         using var cancellation = ct.Register(() => { try { deployment.Cancel(); } catch { } });
@@ -160,6 +195,7 @@ public static class BedrockPackageRegistrationHelper
         IProgress<(int Percent, string State)>? progress = null, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        EnsureSupported();
         if (!IsDeveloperModeEnabled())
             throw new InvalidOperationException(
                 "系统未开启开发者模式，侧载（非 Microsoft Store 安装）方式注册应用包可能会被拒绝。\n" +
@@ -174,5 +210,11 @@ public static class BedrockPackageRegistrationHelper
         ct.ThrowIfCancellationRequested();
         progress?.Report((100, "启动游戏"));
         BedrockLaunchService.Launch();
+    }
+
+    private static void EnsureSupported()
+    {
+        if (!BedrockLaunchService.IsOsSupported)
+            throw new PlatformNotSupportedException(BedrockLaunchService.UnsupportedOsMessage);
     }
 }

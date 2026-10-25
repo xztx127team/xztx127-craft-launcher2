@@ -57,73 +57,75 @@ public static class MinecraftFolderScanService
     /// 需求原文也是明确写"1、2、3 级目录"。</summary>
     private const int MaxDepth = 3;
 
-    /// <summary>
-    /// 执行一次扫描并把新发现的 .minecraft 目录以 GameFolder 形式加入 config.Folders
-    /// （复用 FolderService.AddFolder，保持"添加文件夹"这个动作只有一处实现）。
-    /// 返回本次新增的文件夹列表（可能为空），调用方可以用这个列表决定要不要弹提示告知用户。
-    ///
-    /// 全程包在 try/catch 里、每个候选目录单独判断异常：扫描不到、没权限访问某个分区
-    /// 都不应该让启动器直接崩掉或者卡住——枚举目录失败（权限不足、盘符没插盘等）的分区
-    /// 直接跳过，不影响其余分区正常扫描。
-    /// </summary>
-    public static List<GameFolder> ScanAndRegister(AppConfig config)
+    /// <summary>只发现路径，不读取或修改共享配置；可在工作线程调用。</summary>
+    public static List<string> ScanCandidates()
     {
-        var folderService = new FolderService();
-        var found = new List<string>();
-
-        // 1. AppData\Roaming\.minecraft（官方启动器默认位置，命中率最高，优先扫这里）
-        try
-        {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (!string.IsNullOrEmpty(appData))
-            {
-                var candidate = Path.Combine(appData, FolderName);
-                if (Directory.Exists(candidate) && !HasExcludeMarker(candidate)) found.Add(candidate);
-            }
-        }
-        catch { /* 拿不到 AppData 路径就跳过，不影响后续磁盘扫描 */ }
-
-        // 2. 每个已就绪的逻辑磁盘分区，往下探 1~3 级目录
+        var roots = new List<string>();
         try
         {
             foreach (var drive in DriveInfo.GetDrives())
-            {
-                if (!SafeIsReady(drive)) continue;
-                ScanDriveForMinecraftFolders(drive.RootDirectory.FullName, found);
-            }
+                if (SafeIsReady(drive)) roots.Add(drive.RootDirectory.FullName);
         }
-        catch { /* 极端情况下 DriveInfo.GetDrives() 本身失败也不应该拖垮启动流程 */ }
-
-        // 去重 + 跟已有配置比对，只留下真正"新发现"的
-        var existingNormalized = config.Folders
-            .Select(f => NormalizePath(f.Path))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        var newlyAdded = new List<GameFolder>();
-        foreach (var path in found.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var normalized = NormalizePath(path);
-            if (existingNormalized.Contains(normalized)) continue;
-
-            var folder = folderService.AddFolder(config, path, GuessDisplayName(path));
-            newlyAdded.Add(folder);
-            existingNormalized.Add(normalized); // 防止同一次扫描内的重复路径被加两次
-        }
-
-        return newlyAdded;
+        catch { /* 无法枚举磁盘时仍尝试 AppData */ }
+        string? appData = null;
+        try { appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData); }
+        catch { }
+        return ScanCandidates(roots, appData);
     }
+
+    internal static List<string> ScanCandidates(IEnumerable<string> roots, string? appData)
+    {
+        var found = new List<string>();
+        if (!string.IsNullOrWhiteSpace(appData))
+        {
+            var candidate = Path.Combine(appData, FolderName);
+            if (Directory.Exists(candidate) && !HasExcludeMarker(candidate)) found.Add(candidate);
+        }
+        foreach (var root in roots)
+            ScanDriveForMinecraftFolders(root, found);
+        return found.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>在配置所属线程提交扫描快照，按提交时的配置去重，保留扫描期间的手动修改。</summary>
+    public static List<GameFolder> RegisterCandidates(AppConfig config, IEnumerable<string> candidates)
+    {
+        var existing = config.Folders.Select(folder => NormalizePath(folder.Path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var added = new List<GameFolder>();
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate));
+                // 发现到提交之间可能被移动、拔出或添加排除标记。自动扫描不能重新创建目录。
+                if (!Directory.Exists(path) || HasExcludeMarker(path) || !existing.Add(NormalizePath(path))) continue;
+                var folder = new GameFolder { Path = path, Name = GuessDisplayName(path) };
+                config.Folders.Add(folder);
+                added.Add(folder);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            { /* 一个失效候选不影响其他目录 */ }
+        }
+        return added;
+    }
+
+    /// <summary>同步兼容入口；UI 应分别在后台扫描、配置所属线程提交。</summary>
+    public static List<GameFolder> ScanAndRegister(AppConfig config)
+        => RegisterCandidates(config, ScanCandidates());
 
     /// <summary>逐级递归查找名字是 .minecraft 的子目录，最多下探 MaxDepth 层。
     /// 找到一个 .minecraft 目录就不再往它内部继续递归——.minecraft 目录内部本身可能有
     /// 几百个 mod/资源文件，没必要也不应该在里面继续找"更深一层的 .minecraft"。</summary>
     private static void ScanDriveForMinecraftFolders(string dir, List<string> found, int depth = 0)
     {
-        if (depth > MaxDepth) return;
+        if (depth >= MaxDepth || HasExcludeMarker(dir)) return;
 
-        IEnumerable<string> subDirs;
+        string[] subDirs;
         try
         {
-            subDirs = Directory.EnumerateDirectories(dir);
+            // EnumerateDirectories 的异常也可能发生在 MoveNext；在 try 内物化，
+            // 防止一个断开的目录中断整个磁盘其余兄弟目录的扫描。
+            subDirs = Directory.GetDirectories(dir);
         }
         catch
         {
@@ -147,6 +149,11 @@ public static class MinecraftFolderScanService
             // 既不把它收进自动发现列表（哪怕它就叫 .minecraft），也不再往它内部递归查找。
             // 只影响自动扫描；用户手动"添加已有文件夹"不受此限制。
             if (HasExcludeMarker(sub)) continue;
+            try
+            {
+                if ((File.GetAttributes(sub) & FileAttributes.ReparsePoint) != 0) continue;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { continue; }
 
             if (string.Equals(name, FolderName, StringComparison.OrdinalIgnoreCase))
             {

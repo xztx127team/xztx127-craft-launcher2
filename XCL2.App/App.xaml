@@ -167,6 +167,7 @@
                  情况），所有引用方都会自动跟着刷新，不依赖 Style 有没有被摘装过，从根上避免这个
                  时序问题。 -->
             <Style TargetType="ToolTip">
+                <Setter Property="services:PageTransitionBehavior.PopupFadeOnVisible" Value="True"/>
                 <Setter Property="Background" Value="{DynamicResource PanelBrush}"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
                 <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush2}"/>

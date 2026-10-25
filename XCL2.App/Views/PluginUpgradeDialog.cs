@@ -249,7 +249,7 @@ internal sealed class PluginUpgradeDialog : OverlayDialogControl, IDisposable
             }
             else
             {
-                var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择导出位置（将在其中新建 " + name + " 文件夹）" };
+                var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择导出位置（将在其中新建 " + name + " 文件夹）" };
                 if (picker.ShowDialog() != true) return;
                 destination = Path.Combine(picker.FolderName, name);
                 for (var i = 2; File.Exists(destination) || Directory.Exists(destination); i++) destination = Path.Combine(picker.FolderName, name + "-" + i);

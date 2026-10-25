@@ -19,14 +19,14 @@ public partial class AiAssistantSettingsDialog : Window
 
         var panel = new AiAssistantSettingsPanel(current);
         PanelHost.Content = panel;
-        panel.UnsavedChangesPrompt = () => MessageBox.Show(this, "AI 助手设置尚未保存，是否保存本次修改？",
+        panel.UnsavedChangesPrompt = () => OwnedMessageDialog.Show(this, "AI 助手设置尚未保存，是否保存本次修改？",
             "保存 AI 助手设置", MessageBoxButton.YesNoCancel, MessageBoxImage.Question) switch
         {
             MessageBoxResult.Yes => XclMessageResult.Yes,
             MessageBoxResult.No => XclMessageResult.No,
             _ => XclMessageResult.Cancel
         };
-        panel.SettingsWarningPrompt = (message, title) => MessageBox.Show(this, message, title,
+        panel.SettingsWarningPrompt = (message, title) => OwnedMessageDialog.Show(this, message, title,
             MessageBoxButton.OK, MessageBoxImage.Warning);
         panel.Saved += (_, config) => Result = config;
         panel.RequestClose += (_, accepted) =>

@@ -3,5 +3,6 @@
   <ItemGroup>
     <Compile Include="../../Services/GameLogDiagnostics.cs" Link="GameLogDiagnostics.cs" />
     <Compile Include="../../Services/GameExitClassifier.cs" Link="GameExitClassifier.cs" />
+    <Compile Include="../../Services/DiagnosticLogReader.cs" Link="DiagnosticLogReader.cs" />
   </ItemGroup>
 </Project>

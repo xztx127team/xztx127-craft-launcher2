@@ -1755,28 +1755,28 @@ public static class ThemeService
     }
 
     /// <summary>
-    /// 读取 Windows 系统当前的"应用深浅色"主题设置（设置-个性化-颜色-选择您的模式），
-    /// 供"跟随系统"功能使用。对应注册表键
-    /// HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize
-    /// 下的 AppsUseLightTheme（DWORD，0=深色，1=浅色，Win10 1809+ 才有）。
-    /// 读取失败（键不存在/极老系统/权限问题等）时兜底返回 false（浅色），不抛异常，
-    /// 避免"跟随系统"功能因为读取不到系统状态就把整个启动器搞崩溃。
+    /// 尝试读取系统应用主题。本应用仅在 Windows 10 1809（17763）及以上启用该检测；
+    /// 不支持、值缺失/无效或访问失败时返回 false，调用方应保留当前主题。
     /// </summary>
-    public static bool GetSystemIsDarkMode()
+    public static bool TryGetSystemIsDarkMode(out bool isDarkMode)
     {
+        isDarkMode = false;
+        if (!WindowsCompatibilityService.Current.SupportsSystemTheme) return false;
         try
         {
             using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                 @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            var value = key?.GetValue("AppsUseLightTheme");
-            if (value is int i) return i == 0;
+            return SystemThemeDetectionPolicy.TryParseThemeValue(key?.GetValue("AppsUseLightTheme"), out isDarkMode);
         }
         catch
         {
-            // 忽略：兜底返回浅色。
+            return false;
         }
-        return false;
     }
+
+    /// <summary>保留原公共接口；无法检测时保持当前配色，而非强行切换为浅色。</summary>
+    public static bool GetSystemIsDarkMode()
+        => TryGetSystemIsDarkMode(out var isDarkMode) ? isDarkMode : CurrentIsDarkMode;
 
     /// <summary>用于设置页"色系"下拉框的中文显示名，UI 展示用，不参与持久化。</summary>
     public static string GetDisplayName(string skin) => skin switch

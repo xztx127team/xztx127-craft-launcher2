@@ -1,5 +1,4 @@
 using System.IO;
-using XCL2.App.Models;
 
 namespace XCL2.App.Services;
 
@@ -19,7 +18,12 @@ namespace XCL2.App.Services;
 public static class JunkCleanupService
 {
     public record JunkScanResult(List<JunkItem> Items, long TotalBytes);
-    public record JunkItem(string Path, long SizeBytes, string Category);
+    public record JunkItem(string Path, long SizeBytes, string Category)
+    {
+        // Bind deletion to an actual scan and detect files replaced while confirmation was open.
+        internal string? ScanRoot { get; init; }
+        internal DateTime ScannedLastWriteUtc { get; init; }
+    }
 
     /// <summary>崩溃报告/历史日志超过这个天数才视为"可清理"，避免删掉玩家刚遇到还没来得及
     /// 反馈的崩溃记录。</summary>
@@ -27,39 +31,52 @@ public static class JunkCleanupService
 
     public static JunkScanResult Scan(string minecraftDir)
     {
+        minecraftDir = Path.GetFullPath(minecraftDir);
+        ArchiveImportSafety.CheckLinks(minecraftDir);
         var items = new List<JunkItem>();
 
-        void AddIfExists(string path, string category)
+        void AddIfExists(string path, string category, bool oldOnly = false)
         {
-            if (File.Exists(path))
+            try
             {
-                items.Add(new JunkItem(path, new FileInfo(path).Length, category));
+                ArchiveImportSafety.CheckLinks(path);
+                var info = new FileInfo(path);
+                if (!info.Exists || !IsAllowedCandidate(minecraftDir, path)) return;
+                if (oldOnly && info.LastWriteTimeUtc >= DateTime.UtcNow.AddDays(-OldFileThresholdDays)) return;
+                items.Add(new JunkItem(path, info.Length, category)
+                { ScanRoot = minecraftDir, ScannedLastWriteUtc = info.LastWriteTimeUtc });
             }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { }
         }
 
         void ScanDirOldFiles(string dir, string pattern, string category)
         {
-            if (!Directory.Exists(dir)) return;
-            var cutoff = DateTime.Now.AddDays(-OldFileThresholdDays);
-            foreach (var file in Directory.GetFiles(dir, pattern, SearchOption.TopDirectoryOnly))
+            try
             {
-                try
-                {
-                    var info = new FileInfo(file);
-                    if (info.LastWriteTime < cutoff)
-                        items.Add(new JunkItem(file, info.Length, category));
-                }
-                catch { /* 单个文件读取失败跳过，不影响整体扫描 */ }
+                ArchiveImportSafety.CheckLinks(dir);
+                if (!Directory.Exists(dir)) return;
+                foreach (var file in Directory.EnumerateFiles(dir, pattern, SearchOption.TopDirectoryOnly))
+                    AddIfExists(file, category, oldOnly: true);
             }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { }
         }
 
         void ScanDirAllFiles(string dir, string category)
         {
-            if (!Directory.Exists(dir)) return;
-            foreach (var file in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+            var pending = new Stack<string>(); pending.Push(dir);
+            while (pending.Count > 0)
             {
-                try { items.Add(new JunkItem(file, new FileInfo(file).Length, category)); }
-                catch { /* 忽略单个文件失败 */ }
+                var current = pending.Pop();
+                try
+                {
+                    ArchiveImportSafety.CheckLinks(current);
+                    if (!Directory.Exists(current)) continue;
+                    foreach (var file in Directory.EnumerateFiles(current, "*", SearchOption.TopDirectoryOnly))
+                        AddIfExists(file, category);
+                    foreach (var child in Directory.EnumerateDirectories(current))
+                        if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) == 0) pending.Push(child);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { }
             }
         }
 
@@ -79,12 +96,14 @@ public static class JunkCleanupService
 
         // hs_err_pid*.log：JVM 崩溃时在 .minecraft 根目录生成的原生崩溃转储文件，
         // 排查完一次问题之后基本不会再看，但经常被遗忘在目录里越积越多。
-        foreach (var file in Directory.Exists(minecraftDir)
-                     ? Directory.GetFiles(minecraftDir, "hs_err_pid*.log", SearchOption.TopDirectoryOnly)
-                     : Array.Empty<string>())
+        try
         {
-            AddIfExists(file, "JVM崩溃转储");
+            foreach (var file in Directory.Exists(minecraftDir)
+                         ? Directory.EnumerateFiles(minecraftDir, "hs_err_pid*.log", SearchOption.TopDirectoryOnly)
+                         : Array.Empty<string>())
+                AddIfExists(file, "JVM崩溃转储");
         }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException) { }
 
         return new JunkScanResult(items, items.Sum(i => i.SizeBytes));
     }
@@ -99,7 +118,10 @@ public static class JunkCleanupService
         {
             try
             {
-                if (!File.Exists(item.Path)) continue;
+                if (string.IsNullOrEmpty(item.ScanRoot) || !IsAllowedCandidate(item.ScanRoot, item.Path)) continue;
+                ArchiveImportSafety.CheckLinks(item.Path);
+                var current = new FileInfo(item.Path);
+                if (!current.Exists || current.Length != item.SizeBytes || current.LastWriteTimeUtc != item.ScannedLastWriteUtc) continue;
                 File.Delete(item.Path);
                 deletedCount++;
                 freedBytes += item.SizeBytes;
@@ -107,6 +129,23 @@ public static class JunkCleanupService
             catch { /* 单个文件删除失败（可能正被占用），跳过继续处理其它文件 */ }
         }
         return (deletedCount, freedBytes);
+    }
+
+    private static bool IsAllowedCandidate(string root, string path)
+    {
+        var relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(path));
+        if (Path.IsPathRooted(relative)) return false;
+        var parts = relative.Replace('\\', '/').Split('/');
+        if (parts.Any(part => part is "" or "." or "..")) return false;
+        if (parts.Length == 1)
+            return parts[0].StartsWith("hs_err_pid", StringComparison.OrdinalIgnoreCase) &&
+                parts[0].EndsWith(".log", StringComparison.OrdinalIgnoreCase);
+        if (parts[0].Equals("webcache", StringComparison.OrdinalIgnoreCase) ||
+            parts[0].Equals("webcache2", StringComparison.OrdinalIgnoreCase) ||
+            parts[0].Equals(".mixin.out", StringComparison.OrdinalIgnoreCase)) return true;
+        return parts.Length == 2 &&
+            (parts[0].Equals("logs", StringComparison.OrdinalIgnoreCase) && parts[1].EndsWith(".log.gz", StringComparison.OrdinalIgnoreCase) ||
+             parts[0].Equals("crash-reports", StringComparison.OrdinalIgnoreCase) && parts[1].EndsWith(".txt", StringComparison.OrdinalIgnoreCase));
     }
 
     public static string FormatBytes(long bytes)

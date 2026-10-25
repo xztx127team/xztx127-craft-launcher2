@@ -73,7 +73,7 @@ public sealed class WorldArchivePage : UserControl
         header.Children.Add(new TextBlock { Text = "管理客户端与服务器的 Java 版世界，让每一次探索都有备份。", Opacity = .7, Margin = new Thickness(0, 4, 0, 12) });
         var toolbar = _toolbar;
         Add(toolbar, "刷新", async () => await RefreshAsync());
-        Add(toolbar, "添加存档目录", async () => { var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择客户端或服务器的 Java 版世界目录（包含 level.dat）" }; if (ShowOwnedDialog(picker) == true) await RunAsync(async () => { Select(await Task.Run(() => WorldArchiveService.Read(picker.FolderName))); _tabs.SelectedIndex = 0; _status.Text = "已打开存档，可编辑、备份或检查修复。"; }); });
+        Add(toolbar, "添加存档目录", async () => { var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择客户端或服务器的 Java 版世界目录（包含 level.dat）" }; if (ShowOwnedDialog(picker) == true) await RunAsync(async () => { Select(await Task.Run(() => WorldArchiveService.Read(picker.FolderName))); _tabs.SelectedIndex = 0; _status.Text = "已打开存档，可编辑、备份或检查修复。"; }); });
         Add(toolbar, "修复其他存档", RepairOtherAsync);
         Add(toolbar, "查看投影 / 结构文件", OpenStructureAsync); header.Children.Add(toolbar); page.Children.Add(header);
         var body = _body; body.Margin = new Thickness(0, 10, 0, 10);
@@ -470,7 +470,7 @@ public sealed class WorldArchivePage : UserControl
     }
     private async Task RepairOtherAsync()
     {
-        var picker = new Microsoft.Win32.OpenFolderDialog { Title = "选择需要检查或修复的客户端／服务器世界目录" };
+        var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择需要检查或修复的客户端／服务器世界目录" };
         if (LauncherOwner is not { } owner) { _status.Text = "无法找到启动器主窗口，请重新打开存档页。"; return; }
         if (picker.ShowDialog(owner) != true) return;
         var sameWorld = string.Equals(_selected?.Path, picker.FolderName, StringComparison.OrdinalIgnoreCase);

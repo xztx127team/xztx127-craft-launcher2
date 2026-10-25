@@ -349,16 +349,23 @@ public partial class VersionSelectPage : UserControl
         WatchSelectedFolder();
     }
 
-    private void AddFolder_Click(object sender, RoutedEventArgs e)
+    private async void AddFolder_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "选择 .minecraft 文件夹" };
-        if (dialog.ShowDialog() == true)
+        if (ExistingFolderLayout.SelectedIndex == 1)
+        {
+            await ImportExternalInstancesAsync();
+            return;
+        }
+        var dialog = new CompatibleFolderDialog { Title = "选择 .minecraft 文件夹" };
+        if (dialog.ShowDialog() != true) return;
+        try
         {
             var folder = _folderService.AddFolder(_owner.ConfigService.Config, dialog.FolderName);
             _owner.ConfigService.Save();
-            _folders.Add(folder);
+            if (!_folders.Contains(folder)) _folders.Add(folder);
             FolderListBox.SelectedItem = folder;
         }
+        catch (Exception ex) { ErrorPresenter.ShowFriendlyError("添加游戏目录失败。", ex.ToString(), "添加失败"); }
     }
 
     /// <summary>"导入整合包..."按钮：跟拖拽整合包进窗口是同一条路，只是不用拖，直接弹文件选择框。
@@ -573,6 +580,7 @@ public partial class VersionSelectPage : UserControl
         {
             if (_owner.ConfigService.Config.Ux50RenamePreview && !MessageBoxDialog.ShowConfirm(
                 $"原名称：{v.Id}\n新名称：{dlg.NewName}\n目标目录：{InstanceUxService.GetVersionDirectory(folderPath, dlg.NewName)}\n\n确认后才会重命名实例。", "重命名预览")) return;
+            EnsureInstanceMutationAllowed(folderPath, v.Id);
             InstanceDeletionService.Rename(_owner.ConfigService.Config, folderPath, v.Id, dlg.NewName);
             InstanceUxService.Rename(_owner.ConfigService.Config, folderPath, v.Id, dlg.NewName);
             _owner.ConfigService.Save();
@@ -605,7 +613,7 @@ public partial class VersionSelectPage : UserControl
         DeleteInstance(v);
     }
 
-    private void DeleteInstance(GameVersion v)
+    private async void DeleteInstance(GameVersion v)
     {
         var folderPath = GetSelectedFolderPath();
         if (string.IsNullOrEmpty(folderPath)) return;
@@ -618,7 +626,8 @@ public partial class VersionSelectPage : UserControl
         if (choiceDlg.Choice == DeleteInstanceChoiceDialog.DeleteChoice.RemoveFromList)
         {
             InstanceDeletionService.HideFromList(cfg, folderPath, v.Id);
-            cfg.SelectedVersionId = null;
+            if (InstanceDeletionService.BuildKey(cfg.SelectedFolderPath ?? "", cfg.SelectedVersionId ?? "") ==
+                InstanceDeletionService.BuildKey(folderPath, v.Id)) cfg.SelectedVersionId = null;
             _owner.ConfigService.Save();
             _owner.RefreshSidebar();
             RefreshInstalledVersions();
@@ -630,7 +639,9 @@ public partial class VersionSelectPage : UserControl
             // 回收站可撤销，不需要再追加 xztx127 确认这道门槛。
             try
             {
-                InstanceDeletionService.DeleteToRecycleBin(cfg, folderPath, v.Id);
+                EnsureInstanceMutationAllowed(folderPath, v.Id);
+                using var mutation = ComponentsOperationLock.AcquireForMaintenance(folderPath, v.Id);
+                await InstanceDeletionService.DeleteToRecycleBinAsync(cfg, folderPath, v.Id);
                 _owner.ConfigService.Save();
                 _owner.RefreshSidebar();
                 RefreshInstalledVersions();
@@ -650,7 +661,9 @@ public partial class VersionSelectPage : UserControl
 
         try
         {
-            InstanceDeletionService.DeletePermanently(cfg, folderPath, v.Id);
+            EnsureInstanceMutationAllowed(folderPath, v.Id);
+            using var mutation = ComponentsOperationLock.AcquireForMaintenance(folderPath, v.Id);
+            await InstanceDeletionService.DeletePermanentlyAsync(cfg, folderPath, v.Id);
             _owner.ConfigService.Save();
             _owner.RefreshSidebar();
             RefreshInstalledVersions();
@@ -714,6 +727,18 @@ public partial class VersionSelectPage : UserControl
         var dlg = new InstanceSettingsDialog(_owner, folderPath, v);
         if (OverlayDialogService.ShowModal(dlg) != true) return;
 
+        _owner.RefreshSidebar();
+    }
+
+    private async void ManageComponents_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameVersion version }) return;
+        var root = GetSelectedFolderPath();
+        if (string.IsNullOrWhiteSpace(root)) return;
+        var dialog = new InstalledVersionComponentsDialog(_owner, root, version);
+        dialog.ShowDialog();
+        if (!dialog.Changed) return;
+        await RefreshInstalledVersionsAsync();
         _owner.RefreshSidebar();
     }
 

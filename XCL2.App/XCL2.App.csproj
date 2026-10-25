@@ -10,9 +10,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>XCL2</AssemblyName>
     <RootNamespace>XCL2.App</RootNamespace>
-    <Version>2.2.24</Version>
-    <AssemblyVersion>2.2.24.0</AssemblyVersion>
-    <FileVersion>2.2.24.0</FileVersion>
+    <Version>2.2.25</Version>
+    <AssemblyVersion>2.2.25.0</AssemblyVersion>
+    <FileVersion>2.2.25.0</FileVersion>
     <Platforms>AnyCPU</Platforms>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -32,8 +32,16 @@
     <Using Remove="System.Drawing" />
   </ItemGroup>
 
+  <!-- R7 replaced the old code-only dialog with the XAML partial implementation.
+       An overwrite extraction does not remove deleted source files, so explicitly
+       exclude that retired file before the WPF temporary project collects Compile. -->
+  <ItemGroup>
+    <Compile Remove="Views\InstalledVersionComponentsDialog.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.5" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
     <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />

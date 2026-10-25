@@ -238,10 +238,26 @@ public sealed class WindowPlacementService : IDisposable
         {
             var point = new POINT { X = screen.Bounds.Left + screen.Bounds.Width / 2, Y = screen.Bounds.Top + screen.Bounds.Height / 2 };
             var monitor = MonitorFromPoint(point, 2);
-            if (GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 && dpi > 0) return dpi / 96d;
+            if (WindowsCompatibilityService.Current.SupportsPerMonitorDpi
+                && GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 && dpi > 0) return dpi / 96d;
         }
         catch (EntryPointNotFoundException) { }
         catch (DllNotFoundException) { }
+        // Vista / Windows 7 / Windows 8 have system DPI, not per-monitor DPI.
+        // Assuming 96 here makes restored windows too small at 125% / 150% scaling.
+        var dc = IntPtr.Zero;
+        try
+        {
+            dc = GetDC(IntPtr.Zero);
+            if (dc != IntPtr.Zero)
+            {
+                var dpi = GetDeviceCaps(dc, 88 /* LOGPIXELSX */);
+                if (dpi > 0) return dpi / 96d;
+            }
+        }
+        catch (EntryPointNotFoundException) { }
+        catch (DllNotFoundException) { }
+        finally { if (dc != IntPtr.Zero) ReleaseDC(IntPtr.Zero, dc); }
         return 1;
     }
 
@@ -251,4 +267,7 @@ public sealed class WindowPlacementService : IDisposable
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(POINT point, uint flags);
     [DllImport("shcore.dll")] private static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
+    [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hwnd, IntPtr dc);
+    [DllImport("gdi32.dll")] private static extern int GetDeviceCaps(IntPtr dc, int index);
 }

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/JavaEnvironmentPaths.cs" Link="JavaEnvironmentPaths.cs" />
+    <Compile Include="../../Services/JavaVersionOutputPolicy.cs" Link="JavaVersionOutputPolicy.cs" />
+    <Compile Include="../../Services/JavaRegistrationRefreshPolicy.cs" Link="JavaRegistrationRefreshPolicy.cs" />
+    <Compile Include="../../Models/InstalledJava.cs" Link="InstalledJava.cs" />
+    <Compile Include="../../Services/JavaRuntimeCompatibility.cs" Link="JavaRuntimeCompatibility.cs" />
+  </ItemGroup>
+</Project>

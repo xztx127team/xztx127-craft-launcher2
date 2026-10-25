@@ -904,6 +904,8 @@ public class BedrockClientDownloadService
         IProgress<ProgressInfo>? progress = null, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        if (!BedrockLaunchService.IsOsSupported)
+            throw new PlatformNotSupportedException(BedrockLaunchService.UnsupportedOsMessage);
         if (!Directory.Exists(installDir))
             throw new InvalidOperationException($"安装目录不存在：{installDir}");
         if (File.Exists(Path.Combine(installDir, IncompleteInstallationMarker)))

@@ -368,6 +368,18 @@ public partial class HomePage : UserControl
     {
         if (_followSystemThemeToggleInitializing) return;
         var cfg = _owner.ConfigService.Config;
+        if (FollowSystemThemeToggle.IsChecked == true && !WindowsCompatibilityService.Current.SupportsSystemTheme)
+        {
+            // 保留当前手动配色和按时间循环；不能把读取失败伪装成系统浅色。
+            _followSystemThemeToggleInitializing = true;
+            try { FollowSystemThemeToggle.IsChecked = false; }
+            finally { _followSystemThemeToggleInitializing = false; }
+            cfg.FollowSystemTheme = false;
+            _owner.ConfigService.Save();
+            UpdateFollowSystemThemeToggleText();
+            ToastService.Show(SystemThemeDetectionPolicy.UnsupportedMessage, ToastService.ToastKind.Warning, 10);
+            return;
+        }
         cfg.FollowSystemTheme = FollowSystemThemeToggle.IsChecked == true;
 
         if (cfg.FollowSystemTheme && cfg.AutoThemeCycleEnabled)

@@ -29,16 +29,13 @@ public partial class ModpackService
     public async Task<MrpackImportResult> ImportCurseForgeAsync(string path, string destination,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
-        using var metadata = new HttpClient { Timeout = TimeSpan.FromSeconds(45) };
+        using var metadata = CurseForgeApiTransport.CreateClient();
         var key = new CurseForgeKeyService().TryGetKey();
         return await ImportCurseForgeCoreAsync(path, destination, async (project, file, token) =>
         {
             if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("此 CurseForge 整合包需要解析文件清单，请先在设置中配置可用的 CurseForge API Key；尚未写入内容。");
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.curseforge.com/v1/mods/{project}/files/{file}");
-            request.Headers.TryAddWithoutValidation("x-api-key", key);
-            using var response = await metadata.SendAsync(request, token);
-            response.EnsureSuccessStatusCode();
-            var json = await response.Content.ReadAsStringAsync(token);
+            var json = await CurseForgeApiTransport.GetStringAsync(metadata,
+                $"https://api.curseforge.com/v1/mods/{project}/files/{file}", key, token);
             using var document = JsonDocument.Parse(json);
             var data = document.RootElement.GetProperty("data");
             if (data.GetProperty("id").GetInt32() != file || data.GetProperty("modId").GetInt32() != project)
@@ -105,7 +102,7 @@ public partial class ModpackService
         if (downloads.Count == 0 && overrides.Length == 0) throw new InvalidDataException("此 CurseForge 包没有可导入的必需模组或附带文件。");
         // All required metadata and destinations are validated before touching instance content.
         foreach (var entry in overrides) ArchiveImportSafety.Extract(entry.Entry, destination, entry.Relative, ct);
-        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        using var http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(5));
         foreach (var (file, target) in downloads)
         {
             ct.ThrowIfCancellationRequested(); ArchiveImportSafety.CheckLinks(target);

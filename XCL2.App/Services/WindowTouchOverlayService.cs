@@ -79,7 +79,9 @@ public static class WindowTouchOverlayService
                 bool CanTakeOver() => entry.Allowed && TouchGameWindow.BelongsTo(window.Handle, window.Pid);
                 var backend = TouchGameWindow.Detect(window.Handle);
                 // gamePid=0 禁止现有游戏悬浮层按 PID 自动换绑；许可回调负责精确 HWND 的存活检查。
-                ITouchOverlayWindow overlay = backend is TouchGameBackend.Glfw or TouchGameBackend.Lwjgl2
+                var supportsPointer = !WindowsCompatibilityService.Current.IsWindows
+                    || WindowsCompatibilityService.Current.SupportsPointerInput;
+                ITouchOverlayWindow overlay = supportsPointer && backend is (TouchGameBackend.Glfw or TouchGameBackend.Lwjgl2)
                     ? new TouchOverlayWindow(window.Handle, config.TouchOverlayButtonScale,
                         config.TouchOverlayOpacityPercent, config.TouchOverlayLookSensitivity, 0, CanTakeOver,
                         forceTouchpad: true)

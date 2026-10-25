@@ -11,5 +11,10 @@
     <Compile Include="../../Services/UiAnimationHelper.cs" Link="Services/UiAnimationHelper.cs" />
     <Compile Include="../../Services/UiRenderScheduler.cs" Link="Services/UiRenderScheduler.cs" />
     <Compile Include="../../Services/PageTransitionBehavior.cs" Link="Services/PageTransitionBehavior.cs" />
+    <Compile Include="../../Services/WindowPresentationMotion.cs" Link="Services/WindowPresentationMotion.cs" />
+    <Compile Include="../../Services/DrawerMotionBehavior.cs" Link="Services/DrawerMotionBehavior.cs" />
+    <Compile Include="../../Views/InstanceConflictDialog.xaml.cs" Link="Views/InstanceConflictDialog.xaml.cs" />
+    <Page Include="../../Views/InstanceConflictDialog.xaml" Link="Views/InstanceConflictDialog.xaml" />
+    <Compile Include="../../Views/OwnedMessageDialog.cs" Link="Views/OwnedMessageDialog.cs" />
   </ItemGroup>
 </Project>

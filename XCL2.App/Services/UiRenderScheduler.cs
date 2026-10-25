@@ -9,7 +9,8 @@ namespace XCL2.App.Services;
 /// <summary>让已排队的 Loaded、布局和一次合成提交先完成；不在 Rendering 回调中执行页面业务。</summary>
 public static class UiRenderScheduler
 {
-    public static Task<bool> AfterRenderAsync(FrameworkElement element, CancellationToken cancellationToken = default)
+    public static Task<bool> AfterRenderAsync(FrameworkElement element, CancellationToken cancellationToken = default,
+        bool waitForVisible = false)
     {
         element.Dispatcher.VerifyAccess();
         if (cancellationToken.IsCancellationRequested || element.Dispatcher.HasShutdownStarted)
@@ -56,6 +57,9 @@ public static class UiRenderScheduler
             window = Window.GetWindow(element);
             if (!element.IsVisible || window?.WindowState == WindowState.Minimized)
             {
+                // Show 的窗口可见事件可能早于内容的 Loaded/IsVisible 传播。
+                // 恢复准备保留起点，等内容真的可见再挂 Rendering，不提前消耗时钟。
+                if (waitForVisible && window?.WindowState != WindowState.Minimized) return;
                 Finish(false);
                 return;
             }
@@ -65,10 +69,16 @@ public static class UiRenderScheduler
             fallback.Start();
         }
         void Loaded(object sender, RoutedEventArgs e) => Arm();
-        void Unloaded(object sender, RoutedEventArgs e) => Finish(false);
+        void Unloaded(object sender, RoutedEventArgs e)
+        {
+            // 快速 Hide→Show 时旧 Unloaded 可能仍在队列里。尚未挂上渲染监听的准备
+            // 等待新 Loaded；真正已开始呈现后再卸载则取消。调用者的 Reset 仍可随时取消。
+            if (armed || !waitForVisible) Finish(false);
+        }
         void VisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
             if (armed && !(bool)e.NewValue) Finish(false);
+            else if (waitForVisible && (bool)e.NewValue) Arm();
         }
         void WindowStateChanged(object? sender, EventArgs e)
         {

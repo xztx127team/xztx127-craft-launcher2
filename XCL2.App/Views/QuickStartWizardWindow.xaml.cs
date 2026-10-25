@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using XCL2.App.Models;
 using XCL2.App.Services;
 
@@ -79,18 +80,40 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
     /// <summary>步骤3"已选清单"：点进 ModDetailPage（AddToWizardList 模式）选中具体版本后加入这里，
     /// 步骤5下载时按这里锁定的 InlineVersionEntry 下载，不再自动匹配"最新版"。</summary>
     private readonly ObservableCollection<WizardModSelection> _modSelections = new();
+    private IInputElement? _detailReturnFocus;
+    private double _detailReturnScrollOffset;
 
     /// <summary>整页详情显示/收起，同 DownloadCenterPage.ShowDetail/HideDetail 的写法。</summary>
     private void ShowDetail(ModDetailPage page)
     {
+        if (DetailHost.Visibility != Visibility.Visible)
+        {
+            _detailReturnFocus = Keyboard.FocusedElement;
+            _detailReturnScrollOffset = StepContentScroll.VerticalOffset;
+        }
+        Step3Panel.Visibility = Visibility.Hidden;
+        page.UseHostPageTransition();
+        PageTransitionBehavior.SetTransitionDirection(DetailHost, 1);
         DetailHost.Content = page;
         DetailHost.Visibility = Visibility.Visible;
+        StepContentScroll.ScrollToTop();
     }
 
-    private void HideDetail()
+    private void HideDetail() => HideDetail(animateReturn: true);
+
+    private void HideDetail(bool animateReturn)
     {
+        var wasVisible = DetailHost.Visibility == Visibility.Visible;
         DetailHost.Visibility = Visibility.Collapsed;
         DetailHost.Content = null;
+        if (_step == 3) Step3Panel.Visibility = Visibility.Visible;
+        if (wasVisible && animateReturn && _step == 3)
+        {
+            PageTransitionBehavior.Replay(Step3Panel, depth: 2, direction: -1);
+            StepContentScroll.ScrollToVerticalOffset(_detailReturnScrollOffset);
+            if (_detailReturnFocus is UIElement { IsVisible: true, IsEnabled: true } focus) Keyboard.Focus(focus);
+        }
+        _detailReturnFocus = null;
     }
 
     /// <summary>导入整合包成功后会跳过"选版本/选Mod/选资源包"，标记这个状态，步骤 5 的下载编排
@@ -299,7 +322,7 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
 
     private void BrowseExistingFolder_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择 .minecraft 文件夹位置" };
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择 .minecraft 文件夹位置" };
 
         // 修复编译错误 CS1503：见 CreateServerWindow.xaml.cs 同类注释——
         // ShowDialog 要 Window，改用 Window.GetWindow(this) 找到宿主 MainWindow。
@@ -595,7 +618,7 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
 
     private void BrowseFolder_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new Microsoft.Win32.OpenFolderDialog
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog
         {
             Title = "选择游戏文件夹",
             InitialDirectory = Directory.Exists(FolderPathBox.Text) ? FolderPathBox.Text : AppContext.BaseDirectory
@@ -958,6 +981,7 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
+        if (DetailHost.Visibility == Visibility.Visible) { HideDetail(); return; }
         if (_step <= 0) return;
         // 使用现有实例/已导入整合包：第 5 步往回退，跳过 2/3/4，直接回到第 1 步（账户）。
         if (_step == 5 && (_useExistingInstance || _importedModpack))
@@ -982,6 +1006,9 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
     private void GoToStep(int step)
     {
         CancelSourceScans();
+        HideDetail(animateReturn: false);
+        var previousStep = _step;
+        UiAnimationHelper.Reset(GetStepPanel(previousStep));
         _step = Math.Clamp(step, 0, TotalSteps);
 
         Step0Panel.Visibility = _step == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -990,6 +1017,11 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
         Step3Panel.Visibility = _step == 3 ? Visibility.Visible : Visibility.Collapsed;
         Step4Panel.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
         Step5Panel.Visibility = _step == 5 ? Visibility.Visible : Visibility.Collapsed;
+        if (_step != previousStep)
+        {
+            StepContentScroll.ScrollToTop();
+            PageTransitionBehavior.Replay(GetStepPanel(_step), depth: 2, direction: _step < previousStep ? -1 : 1);
+        }
 
         var accent = (System.Windows.Media.Brush)FindResource("AccentBrush");
         var gray = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDD, 0xDD, 0xDD));
@@ -1008,6 +1040,16 @@ public partial class QuickStartWizardWindow : OverlayDialogControl
         if (_step == 4 && _resourceResults.Count == 0) _ = RunResourceSearchAsync();
         if (_step == 5) UpdateSummary();
     }
+
+    private FrameworkElement GetStepPanel(int step) => step switch
+    {
+        0 => Step0Panel,
+        1 => Step1Panel,
+        2 => Step2Panel,
+        3 => Step3Panel,
+        4 => Step4Panel,
+        _ => Step5Panel
+    };
 
     private void UpdateSummary()
     {

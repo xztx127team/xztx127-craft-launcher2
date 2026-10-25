@@ -1,4 +1,4 @@
-namespace XCL2.App.Models { public sealed class AppConfig { public List<GameFolder> Folders { get; set; } = new(); }
+namespace XCL2.App.Models { public sealed partial class AppConfig { public List<GameFolder> Folders { get; set; } = new(); }
  public sealed class GameFolder { public string Name { get; set; } = ""; public string Path { get; set; } = ""; }
  public sealed class GameVersion { public string Id { get; set; } = ""; public string McVersion { get; set; } = ""; public string FolderPath { get; set; } = ""; public string? ModLoader { get; set; } public string? ModLoaderVersion { get; set; } public bool IsInstalled { get; set; } }
  public enum IntegrityCheckMode { Simple, Strict } public enum ServerCoreType { Forge, NeoForge } }

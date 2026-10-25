@@ -12,7 +12,43 @@ namespace XCL2.App.Services;
 /// 仅为每次游戏启动的输入模式选择提供系统通知，不改变其它弹窗/Toast 的行为。
 /// Toolkit 为便携版 WPF 注册桌面通知身份和 COM 激活，通知中心中的按钮也能回到本进程。
 /// </summary>
-internal sealed class InputModePromptService : IDisposable
+internal static class InputModePromptService
+{
+    internal static InputModeSelectDialog Show(Window owner, bool defaultTouch, int countdownSeconds,
+        Action restoreOwner, CancellationToken cancellationToken)
+    {
+        owner.Dispatcher.VerifyAccess();
+        cancellationToken.ThrowIfCancellationRequested();
+        if (WindowsCompatibilityService.Current.SupportsNativeToasts)
+            return NativeInputModePromptService.Show(owner, defaultTouch, countdownSeconds, restoreOwner, cancellationToken);
+        // The action dialog itself is the fallback on systems without WinRT notifications.
+        // Restore it first so a minimized launcher cannot wait invisibly for a choice.
+        restoreOwner();
+        var dialog = new InputModeSelectDialog(defaultTouch, countdownSeconds);
+        using var registration = cancellationToken.Register(() =>
+        {
+            if (owner.Dispatcher.HasShutdownStarted || owner.Dispatcher.HasShutdownFinished) return;
+            try
+            {
+                owner.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (OverlayDialogService.IsOpen(dialog)) dialog.Close();
+                }));
+            }
+            catch (InvalidOperationException) when (owner.Dispatcher.HasShutdownStarted || owner.Dispatcher.HasShutdownFinished)
+            {
+                // Cancellation can race the shutdown after the first dispatcher check.
+            }
+        });
+        cancellationToken.ThrowIfCancellationRequested();
+        dialog.ShowDialog();
+        return dialog;
+    }
+}
+
+// Isolate WinRT fields and handlers from the legacy caller, rather than JIT-loading them
+// before an in-method version check can select the WPF fallback.
+internal sealed class NativeInputModePromptService : IDisposable
 {
     private const string NotificationGroup = "input-mode";
     private readonly Window _owner;
@@ -29,18 +65,19 @@ internal sealed class InputModePromptService : IDisposable
     private bool _notificationUnavailable;
     private bool _fallbackPending;
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static InputModeSelectDialog Show(Window owner, bool defaultTouch, int countdownSeconds,
         Action restoreOwner, CancellationToken cancellationToken)
     {
         owner.Dispatcher.VerifyAccess();
         cancellationToken.ThrowIfCancellationRequested();
         var dialog = new InputModeSelectDialog(defaultTouch, countdownSeconds);
-        using var prompt = new InputModePromptService(owner, dialog, restoreOwner, cancellationToken);
+        using var prompt = new NativeInputModePromptService(owner, dialog, restoreOwner, cancellationToken);
         dialog.ShowDialog();
         return dialog;
     }
 
-    private InputModePromptService(Window owner, InputModeSelectDialog dialog, Action restoreOwner,
+    private NativeInputModePromptService(Window owner, InputModeSelectDialog dialog, Action restoreOwner,
         CancellationToken cancellationToken)
     {
         _owner = owner;

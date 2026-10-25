@@ -78,6 +78,9 @@ public partial class SettingsPage
             if (_pendingAnimationPreview is { } pending
                 && _animationControls.TryGetValue(pending, out var controls)
                 && controls.Intensity.IsMouseCaptureWithin) return;
+            if (_pendingAnimationPreview is { } timed
+                && _notificationDurationControls.TryGetValue(timed, out var duration)
+                && duration.IsMouseCaptureWithin) return;
             timer.Stop();
             var kind = _pendingAnimationPreview;
             _pendingAnimationPreview = null;

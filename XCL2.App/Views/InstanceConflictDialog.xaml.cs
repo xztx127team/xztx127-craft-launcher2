@@ -20,6 +20,15 @@ public partial class InstanceConflictDialog : Window
     public InstanceConflictDialog()
     {
         InitializeComponent();
+        AnimationSettingsService.LoadStartupPreferences();
+        // 首次打开以及 Hide/Show 后都重新准备入场；与主窗口无关，避免多开时提示瞬间跳出。
+        IsVisibleChanged += (_, args) =>
+        {
+            if (Content is not FrameworkElement card) return;
+            if ((bool)args.NewValue) UiAnimationHelper.PopupFadeIn(card);
+            else UiAnimationHelper.Reset(card);
+        };
+        Closed += (_, _) => { if (Content is FrameworkElement card) UiAnimationHelper.Reset(card); };
     }
 
     private void KeepBothRunning_Click(object sender, RoutedEventArgs e)

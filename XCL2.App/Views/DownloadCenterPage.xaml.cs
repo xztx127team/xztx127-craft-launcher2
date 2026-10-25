@@ -24,16 +24,11 @@ namespace XCL2.App.Views;
 /// </summary>
 public partial class DownloadCenterPage : UserControl
 {
-    /// <summary>下载前询问保存目录：默认建议目录优先用"这次会话里上一次用户手动选过的目录"
-    /// (_lastChosenDownloadDir)，会话里还没选过时才回退用调用方传入的 defaultDir（当前实例
-    /// 对应的隔离目录）。用户也可以点"选择其他目录"调起系统资源管理器（Windows 原生文件夹
-    /// 选择框，跟游戏版本/Mod站点的"另存为"体验一致，是社区启动器的标配功能）另存到任意位置。
-    /// 无论用户最终是直接确认默认建议、还是重新选了别的目录，选定结果都会更新
-    /// _lastChosenDownloadDir，供同一会话内下一次下载继续沿用。
-    /// 返回 null 表示用户取消了本次下载（这种情况不更新会话记忆，维持上一次的选择）。</summary>
+    /// <summary>按当前实例及内容类别记住保存目录；切换目标不沿用另一实例的目录。
+    /// 返回 null 表示取消，本次取消不改变记忆。</summary>
     private string? PromptSaveDirectory(string defaultDir, string itemName)
     {
-        var suggestedDir = _lastChosenDownloadDir ?? defaultDir;
+        var suggestedDir = _downloadDirectoryMemory.Resolve(defaultDir);
 
         var choice = MessageBoxDialog.ShowYesNoCancel(
             $"「{itemName}」将下载到：\n{suggestedDir}\n\n点击「是」使用该目录，点击「否」选择其他目录，点击「取消」放弃本次下载。",
@@ -42,21 +37,21 @@ public partial class DownloadCenterPage : UserControl
         if (choice == XclMessageResult.Cancel) return null;
         if (choice == XclMessageResult.Yes)
         {
-            _lastChosenDownloadDir = suggestedDir;
+            _downloadDirectoryMemory.Remember(defaultDir, suggestedDir);
             return suggestedDir;
         }
 
         // 用户选"否"：调起 Windows 原生资源管理器文件夹选择框，起始位置用当前建议目录，
         // 而不是每次都回到默认目录——同一会话内连续下载多个东西到同一个自定义目录时，
         // 不用每次都重新点好几层文件夹。
-        var dialog = new Microsoft.Win32.OpenFolderDialog
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog
         {
             Title = "选择下载保存目录",
             InitialDirectory = Directory.Exists(suggestedDir) ? suggestedDir : null
         };
         if (dialog.ShowDialog() != true) return null;
 
-        _lastChosenDownloadDir = dialog.FolderName;
+        _downloadDirectoryMemory.Remember(defaultDir, dialog.FolderName);
         return dialog.FolderName;
     }
 
@@ -108,21 +103,8 @@ public partial class DownloadCenterPage : UserControl
     /// </summary>
     private bool _initialized;
 
-    /// <summary>
-    /// 需求："如果在同一个会话中（没有切换页面，也没有关闭启动器、退出页面等），
-    /// 上一次选择的文件夹默认就是下一个下 mod 下载的文件夹"。
-    ///
-    /// 这是纯粹的"这一次运行期间"的会话状态，不落盘、不写进 AppConfig——重新打开启动器后
-    /// 应该回到"默认跟随当前选中实例"这个基准行为，而不是被上次关闭前的选择永久覆盖掉
-    /// （用户可能下一次开着的是完全不同的一个实例/整合包，继续沿用旧会话选的目录反而更容易出错）。
-    /// 只要这个 DownloadCenterPage 实例本身没有被销毁重建（也就是用户没有整个关掉/重开
-    /// 启动器、且一直待在同一次运行里），这个字段就会一直保留最近一次用户在
-    /// PromptSaveDirectory 里主动选择的目录，下次再下载 Mod/资源/整合包/地图时用它做默认建议。
-    ///
-    /// 为 null 表示这次会话里用户还没手动选过（也可能用户每次都直接确认了默认目录，
-    /// 没有点"选择其他目录"），这种情况下继续走各自原有的"默认跟随当前实例"逻辑。
-    /// </summary>
-    private string? _lastChosenDownloadDir;
+    /// <summary>保存位置记忆按默认目标目录分组，避免实例或内容类别互相污染。</summary>
+    private readonly DownloadDirectoryMemory _downloadDirectoryMemory = new();
 
     /// <summary>
     /// 记录每个分类是否已经自动加载过一次数据。切分类回来时（比如 游戏版本→Mod→游戏版本）
@@ -179,19 +161,32 @@ public partial class DownloadCenterPage : UserControl
     private int _resourcePageIndex;
     private int _mapPageIndex;
     private int _versionPageIndex;
+    private IInputElement? _detailReturnFocus;
 
-    /// <summary>整页详情组件显示/收起：显示时不隐藏底下的 DockPanel 各面板——它们的筛选条件/
-    /// 分页页码天然保留，回退直接露出原样，不需要额外保存/恢复状态。</summary>
+    /// <summary>Retain the list instance and its scroll/filter state while the detail
+    /// page owns focus. Hidden content cannot receive clicks or keyboard traversal.</summary>
     private void ShowDetail(ModDetailPage page)
     {
+        if (DetailHost.Visibility != Visibility.Visible) _detailReturnFocus = Keyboard.FocusedElement;
+        ListPanelsHost.Visibility = Visibility.Hidden;
+        page.UseHostPageTransition();
+        PageTransitionBehavior.SetTransitionDirection(DetailHost, 1);
         DetailHost.Content = page;
+        PreviewFluentTheme.ApplyTo(page);
         DetailHost.Visibility = Visibility.Visible;
     }
 
-    private void HideDetail()
+    private void HideDetail() => HideDetail(restoreFocus: true);
+
+    private void HideDetail(bool restoreFocus)
     {
         DetailHost.Visibility = Visibility.Collapsed;
         DetailHost.Content = null;
+        foreach (var panel in ListPanelsHost.Children.OfType<FrameworkElement>())
+            PageTransitionBehavior.SetTransitionDirection(panel, -1);
+        ListPanelsHost.Visibility = Visibility.Visible;
+        if (restoreFocus && _detailReturnFocus is UIElement { IsVisible: true, IsEnabled: true } focus) Keyboard.Focus(focus);
+        _detailReturnFocus = null;
     }
 
     public DownloadCenterPage(MainWindow owner)
@@ -199,6 +194,14 @@ public partial class DownloadCenterPage : UserControl
         _owner = owner;
         InitializeComponent();
         InitializeContextHints();
+        InitializePreviewDownloads();
+        KeyDown += (_, e) =>
+        {
+            if (e.Handled || e.Key != Key.Escape || Keyboard.Modifiers != ModifierKeys.None
+                || DetailHost.Visibility != Visibility.Visible) return;
+            HideDetail();
+            e.Handled = true;
+        };
         OnlineListBox.ItemsSource = _online;
         ResourceListBox.ItemsSource = _resources;
         FavoritesListBox.ItemsSource = _favorites;
@@ -288,6 +291,9 @@ public partial class DownloadCenterPage : UserControl
         if (!_initialized) return; // InitializeComponent() 过程中触发的事件：控件树还没解析完，直接跳过
         if (sender is not RadioButton rb) return;
         var tag = rb.Tag as string ?? "";
+        if (DetailHost.Visibility == Visibility.Visible) HideDetail(restoreFocus: false);
+        foreach (var panel in ListPanelsHost.Children.OfType<FrameworkElement>())
+            PageTransitionBehavior.SetTransitionDirection(panel, 1);
 
         VersionPanel.Visibility = Visibility.Collapsed;
         ModPanel.Visibility = Visibility.Collapsed;
@@ -312,7 +318,7 @@ public partial class DownloadCenterPage : UserControl
                     var hadNoText = string.IsNullOrWhiteSpace(ModGameVersionBox.Text);
                     SyncGameVersionBox(ModGameVersionBox);
                     var justFilled = hadNoText && !string.IsNullOrWhiteSpace(ModGameVersionBox.Text);
-                    if (_autoLoadedCategories.Add("mod") || justFilled) _ = RunModSearchAsync();
+                    if (!_applyingSearchPreset && (_autoLoadedCategories.Add("mod") || justFilled)) _ = RunModSearchAsync();
                 }
                 break;
             case "resourcepack":
@@ -1182,45 +1188,18 @@ public partial class DownloadCenterPage : UserControl
     }
 
     /// <summary>
-    /// 计算 Mod 实际应该下载到的目录：跟 GetEffectiveResourceDir 不同，Mod 没有"全局共用"这个选项——
-    /// 一个 mod jar 是否兼容，直接跟它所在的那个具体版本（MC 版本+加载器+加载器版本）绑定，
-    /// 装错版本轻则不生效重则直接把游戏炸了，绝对不能像材质包那样多个版本共用一份。
-    ///
-    /// 根因（之前"下载 Mod 默认存到 .minecraft/mods 而不是当前选中版本的 mods"）：
-    /// 旧代码在 DownloadModInlineAsync 里直接把 folder.Path（.minecraft 根目录）传给
-    /// PromptSaveDirectory 当默认目录，ModrinthService.DownloadResourceAsync / 
-    /// CurseForgeService.DownloadModAsync 内部又会在传入目录后面拼接一层 "mods"，
-    /// 两者一叠加，结果就是不论当前选中哪个版本，Mod 永远被存进 
-    /// "<正在使用的 .minecraft 文件夹>/mods"这个全局共用目录——这既不是"隔离"，
-    /// 也完全没有实际读这个 mod 的加载器认（Fabric/Forge 只认自己 gameDir 下的 mods，
-    /// 不会去 .minecraft 根目录找），下载看起来"成功"了，实际游戏里完全看不到这个 mod。
-    ///
-    /// 修复：永远返回"当前选中版本自己的目录"（有 SelectedVersionId 时），
-    /// 跟 LauncherService.BuildArguments 里 gameDir 的算法保持一致（都是
-    /// .minecraft/versions/&lt;版本号&gt;），下载的目标目录和游戏实际读取 mods 的目录
-    /// 永远是同一个，不会出现"下载成功但游戏里看不到"这种错觉。
-    /// 没有选中任何已安装版本时（比如用户还没装过任何版本），没有地方可以隔离，
-    /// 回退到 .minecraft 根目录，跟以前的行为一致，只是加一个提示，防止用户对着一个
-    /// "还没绑定到任何具体版本"的下载摸不着头脑。
-    ///
-    /// 二次修复（"社区资源自动选择的文件夹不完整"）：这个方法之前返回的是"版本根目录"
-    /// （.../versions/&lt;id&gt;），**不包含**最后那层 "mods" 子目录，指望调用方后续下载时
-    /// 再拼接一层。但 DownloadModInlineAsync 为了支持"用户可以在弹出的资源管理器里任选
-    /// 一个自定义目录、所见即所得"，统一传的是 appendCategorySubdir:false（表示"调用方给的
-    /// 就是最终落点，不要再自动拼子目录"）。两者一叠加：只要用户直接确认默认建议（没有手动
-    /// 换目录），mod jar 就会被直接扔进"版本根目录"本身，而不是它下面的 mods/ 子目录——
-    /// 文件夹路径"看起来选对了"（确实是当前版本的目录），但缺了最后一层，游戏的 mod
-    /// 加载器根本不会去版本根目录扫描 jar，表现跟老 bug 一样：下载成功、游戏里却看不到。
-    /// 现在直接在这里把 "mods" 拼好、返回完整路径，PromptSaveDirectory 弹窗里给用户看到的
-    /// 默认建议就是这个已经补全的完整路径；用户如果选"选择其他目录"另外挑了自定义位置，
-    /// 那个自定义位置依然按"所见即所得"原样使用，不受影响。
+    /// Mod downloads share the exact effective game directory used by the launcher
+    /// and the installed-mod manager, including per-instance isolation overrides.
+    /// The returned path already ends in mods because installers use it verbatim.
     /// </summary>
     private string GetEffectiveModDir(string folderPath, out bool hasSelectedVersion)
     {
-        var versionId = _owner.ConfigService.Config.SelectedVersionId;
-        hasSelectedVersion = !string.IsNullOrEmpty(versionId);
-        var versionRoot = hasSelectedVersion ? Path.Combine(folderPath, "versions", versionId!) : folderPath;
-        return Path.Combine(versionRoot, "mods");
+        var config = _owner.ConfigService.Config;
+        var versionId = config.SelectedVersionId;
+        hasSelectedVersion = !string.IsNullOrWhiteSpace(versionId);
+        var gameDirectory = ModManagementPresentation.GameDirectory(folderPath, versionId,
+            config.IsolateVersionsByDefault, config.VersionIsolationOverrides);
+        return Path.Combine(gameDirectory, "mods");
     }
 
     /// <summary>
@@ -2020,7 +1999,7 @@ public partial class DownloadCenterPage : UserControl
         // 默认是当前选中版本自己的目录（GetEffectiveModDir，跟随版本隔离，保证游戏能识别到；
         // 修复了之前默认存到 .minecraft 根目录 mods 文件夹、游戏读不到的问题），
         // 用户也可以选择另存到别处；同一会话内上一次选过的目录会被记住，作为下一次的默认建议
-        // （见 PromptSaveDirectory / _lastChosenDownloadDir 注释）。
+        // （见 PromptSaveDirectory / _downloadDirectoryMemory 注释）。
         var effectiveModDir = GetEffectiveModDir(folder.Path, out var hasSelectedVersion);
         if (!hasSelectedVersion)
         {

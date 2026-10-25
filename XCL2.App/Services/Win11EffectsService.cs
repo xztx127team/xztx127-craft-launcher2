@@ -100,15 +100,19 @@ public static class Win11EffectsService
 
         var state = WindowStates.GetValue(window, _ => new WindowEffectState());
         var transparent = ThemeService.CurrentGlobalTransparencyEnabled && ThemeService.CurrentGlobalOpacityPercent < 100;
-        var corner = window is MainWindow || enabled || CurrentWinUi3Enabled ? DWMWCP_ROUND : DWMWCP_DEFAULT;
-        var backdrop = enabled && !transparent
+        var compatibility = WindowsCompatibilityService.Current;
+        var corner = compatibility.SupportsNativeCorners && (window is MainWindow || enabled || CurrentWinUi3Enabled)
+            ? DWMWCP_ROUND : DWMWCP_DEFAULT;
+        var backdrop = compatibility.SupportsSystemBackdrop && enabled && !transparent
             ? (window is MainWindow ? (int)CurrentMainWindowMaterial : DWMSBT_TRANSIENTWINDOW)
             : DWMSBT_NONE;
         var nativeChanged = !state.HasApplied || state.Corner != corner || state.Backdrop != backdrop;
         if (nativeChanged)
         {
-            _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, ref corner, sizeof(int));
-            var result = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref backdrop, sizeof(int));
+            if (compatibility.IsAtLeast(10, 0, 22000))
+                _ = TrySetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, corner);
+            var result = compatibility.IsAtLeast(10, 0, 22621)
+                ? TrySetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, backdrop) : -1;
             var requestedBackdrop = backdrop != DWMSBT_NONE && result == 0;
             var margins = requestedBackdrop
                 ? new MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 }
@@ -128,13 +132,13 @@ public static class Win11EffectsService
                     Bottom = (int)Math.Ceiling(Math.Max(0, frame.Bottom) * dpi.DpiScaleY)
                 };
             }
-            var frameResult = DwmExtendFrameIntoClientArea(hwnd, ref margins);
+            var frameResult = TryExtendFrame(hwnd, ref margins);
             state.BackdropApplied = requestedBackdrop && frameResult == 0;
             if (requestedBackdrop && !state.BackdropApplied)
             {
                 // 扩展 frame 失败时也撤销 backdrop，保留 WPF 正常底色。
                 var none = DWMSBT_NONE;
-                _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, ref none, sizeof(int));
+                _ = TrySetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, none);
             }
             state.Corner = corner;
             state.Backdrop = backdrop;
@@ -175,5 +179,19 @@ public static class Win11EffectsService
             // 正常重绘即可；+1/-1 尺寸操作会打断最小化/恢复动画并额外触发两次布局。
             _ = RedrawWindow(hwnd, IntPtr.Zero, IntPtr.Zero, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
         }
+    }
+
+    private static int TrySetWindowAttribute(IntPtr hwnd, int attribute, int value)
+    {
+        try { return DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int)); }
+        catch (DllNotFoundException) { return -1; }
+        catch (EntryPointNotFoundException) { return -1; }
+    }
+
+    private static int TryExtendFrame(IntPtr hwnd, ref MARGINS margins)
+    {
+        try { return DwmExtendFrameIntoClientArea(hwnd, ref margins); }
+        catch (DllNotFoundException) { return -1; }
+        catch (EntryPointNotFoundException) { return -1; }
     }
 }

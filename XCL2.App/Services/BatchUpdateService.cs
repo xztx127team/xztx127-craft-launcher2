@@ -10,6 +10,7 @@ namespace XCL2.App.Services;
 public class UpdateCandidate
 {
     public string CurrentFilePath { get; set; } = "";
+    public string CurrentSha1 { get; set; } = "";
     public string CurrentFileName => Path.GetFileName(CurrentFilePath);
     public bool IsCurrentlyDisabled { get; set; }
     public string DisplayName { get; set; } = "";
@@ -53,7 +54,7 @@ public class BatchUpdateService : IDisposable
 
     public BatchUpdateService()
     {
-        _http = new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+        _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(3));
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("XCL2-Launcher", "1.0"));
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(+https://github.com/xztx127-craft/xcl2)"));
     }
@@ -123,17 +124,18 @@ public class BatchUpdateService : IDisposable
         if (string.IsNullOrEmpty(projectId)) return null;
 
         // 第二步：查这个项目在目标游戏版本 + 加载器下，最新的一个版本是什么。
-        var loaderFilter = string.IsNullOrWhiteSpace(loader) ? "" : $"&loaders=[\"{Uri.EscapeDataString(loader.ToLowerInvariant())}\"]";
-        var versionsUrl = $"{ModrinthBaseUrl}/project/{projectId}/version?game_versions=[\"{Uri.EscapeDataString(mcVersion)}\"]{loaderFilter}";
+        var isMod = (isDisabled ? filePath[..^".disabled".Length] : filePath).EndsWith(".jar", StringComparison.OrdinalIgnoreCase);
+        var effectiveLoader = ModUpdateSelectionPolicy.ResolveLoader(root, loader, isMod);
+        if (string.IsNullOrWhiteSpace(mcVersion) || isMod && string.IsNullOrWhiteSpace(effectiveLoader)) return null;
+        var loaderFilter = string.IsNullOrWhiteSpace(effectiveLoader) ? "" : "&loaders=" + Uri.EscapeDataString(JsonSerializer.Serialize(new[] { effectiveLoader }));
+        var versionsUrl = $"{ModrinthBaseUrl}/project/{Uri.EscapeDataString(projectId)}/version?game_versions=" +
+            Uri.EscapeDataString(JsonSerializer.Serialize(new[] { mcVersion.Trim() })) + loaderFilter;
         using var versionsResp = await _http.GetAsync(versionsUrl, ct);
         if (!versionsResp.IsSuccessStatusCode) return null;
         var versionsJson = await versionsResp.Content.ReadAsStringAsync(ct);
         using var versionsDoc = JsonDocument.Parse(versionsJson);
         var versionsArr = versionsDoc.RootElement;
-        if (versionsArr.GetArrayLength() == 0) return null;
-
-        // Modrinth 按发布时间倒序返回，第一条就是当前筛选条件下最新的版本。
-        var latest = versionsArr[0];
+        if (!ModUpdateSelectionPolicy.TrySelect(root, versionsArr, mcVersion, loader, isMod, out var latest)) return null;
         var latestVersionId = latest.GetProperty("id").GetString() ?? "";
         var latestVersionNumber = latest.TryGetProperty("version_number", out var lvn) ? lvn.GetString() ?? "" : "";
         var currentVersionId = root.TryGetProperty("id", out var vid) ? vid.GetString() ?? "" : "";
@@ -159,6 +161,7 @@ public class BatchUpdateService : IDisposable
         return new UpdateCandidate
         {
             CurrentFilePath = filePath,
+            CurrentSha1 = sha1,
             IsCurrentlyDisabled = isDisabled,
             DisplayName = displayName,
             ProjectId = projectId,
@@ -224,6 +227,9 @@ public class BatchUpdateService : IDisposable
                 var old = ModUpdateSnapshotStore.ResolveFile(folderPath, candidate.CurrentFileName);
                 if (!string.Equals(old, Path.GetFullPath(candidate.CurrentFilePath), StringComparison.OrdinalIgnoreCase))
                     throw new IOException("更新候选不属于所选目录。");
+                if (!File.Exists(old) || !string.IsNullOrEmpty(candidate.CurrentSha1) &&
+                    !string.Equals(ComputeSha1(old), candidate.CurrentSha1, StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("检查更新后原文件已改变或被移除，请重新检查更新。");
                 ModUpdateSnapshotStore.ResolveFile(folderPath, candidate.NewFileName);
                 var finalName = candidate.NewFileName + (candidate.IsCurrentlyDisabled ? ".disabled" : "");
                 ModUpdateSnapshotStore.ResolveFile(folderPath, finalName);
@@ -253,6 +259,9 @@ public class BatchUpdateService : IDisposable
                         string? Before(string name, string path) => snapshot == null ? ModUpdateSnapshotStore.Hash(path)
                             : snapshot.Files.Single(file => string.Equals(file.Name, name, StringComparison.OrdinalIgnoreCase)).BeforeHash;
                         var oldHash = Before(c.CurrentFileName, oldPath); var targetHash = Before(finalName, finalPath);
+                        if (!string.IsNullOrEmpty(c.CurrentSha1) &&
+                            !string.Equals(ComputeSha1(oldPath), c.CurrentSha1, StringComparison.OrdinalIgnoreCase))
+                            throw new IOException("检查更新后原文件已改变，请重新检查更新。");
                         Directory.CreateDirectory(staging);
                         var tempPath = Path.Combine(staging, "download.bin");
                         await DownloadEndpoints.DownloadFileWithFallbackAsync(_http, c.NewDownloadUrl, DownloadEndpoints.PreferMirror,

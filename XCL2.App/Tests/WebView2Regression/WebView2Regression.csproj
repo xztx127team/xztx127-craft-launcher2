@@ -11,6 +11,8 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../Services/WindowsCompatibilityService.cs" Link="WindowsCompatibilityService.cs" />
+    <Compile Include="../../Models/AppConfig.WindowsCompatibility.cs" Link="AppConfig.WindowsCompatibility.cs" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
     <Compile Include="../../Services/EmbeddedWebView.cs" Link="Services/EmbeddedWebView.cs" />
     <Compile Include="../../Services/ExternalLinkService.cs" Link="Services/ExternalLinkService.cs" />

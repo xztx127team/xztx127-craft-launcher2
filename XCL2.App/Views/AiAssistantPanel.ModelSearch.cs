@@ -93,6 +93,8 @@ public partial class AiAssistantPanel
     {
         if (Application.Current.MainWindow is MainWindow launcher)
             await launcher.RevokeAiTermsAsync(confirmationOwner: Window.GetWindow(this));
+        else if (Window.GetWindow(this) is { } owner)
+            OwnedMessageDialog.Show(owner, "暂时无法找到启动器主窗口，请重新打开 AI 助手后再试。", "关闭 AI 助手", MessageBoxButton.OK, MessageBoxImage.Information);
         else
             MessageBox.Show("暂时无法找到启动器主窗口，请重新打开 AI 助手后再试。", "关闭 AI 助手", MessageBoxButton.OK, MessageBoxImage.Information);
     }

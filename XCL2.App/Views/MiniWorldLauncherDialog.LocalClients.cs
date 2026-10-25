@@ -156,7 +156,7 @@ internal sealed partial class MiniWorldLauncherDialog
     private async Task ScanLocalDirectoryAsync(MiniWorldSource? source = null, MiniWorldVersion? version = null)
     {
         if (_scanningLocal || _closed) return;
-        var picker = new OpenFolderDialog { Title = "选择已安装或已完整解压的游戏文件夹" };
+        var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择已安装或已完整解压的游戏文件夹" };
         if (version != null && Directory.Exists(VersionDirectory(version))) picker.InitialDirectory = VersionDirectory(version);
         if (picker.ShowDialog() != true) return;
         var ct = _catalogCancellation.Token;

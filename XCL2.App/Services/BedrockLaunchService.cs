@@ -61,10 +61,9 @@ public static class BedrockLaunchService
     /// 基岩版官方系统要求：Windows 10 及以上（分发渠道 Microsoft Store 本身也要求 Win10+，
     /// Win7/Win8.1 没有 Store，且基岩版依赖的 UWP 应用包模型在 Win7/8 上不存在，
     /// 不是"技术上能不能凑合跑"的问题，是系统层面压根没有这套机制）。
-    /// 用 Environment.OSVersion.Version.Major 判断：Win10/11 内核版本号都是 10.x，
-    /// Win7 是 6.1，Win8/8.1 是 6.2/6.3——所以 Major >= 10 就是 Win10 及以上。
+    /// 使用共享的实际 Windows 版本检测；应用兼容模式不能补上 UWP 包模型。
     /// </summary>
-    public static bool IsOsSupported => Environment.OSVersion.Version.Major >= 10;
+    public static bool IsOsSupported => WindowsCompatibilityService.Current.IsAtLeast(10);
 
     /// <summary>系统不支持时给用户看的说明文案，UI 层直接复用，避免各处措辞不一致。</summary>
     public const string UnsupportedOsMessage =
@@ -85,6 +84,7 @@ public static class BedrockLaunchService
     /// </summary>
     public static async Task<bool> IsInstalledAsync(CancellationToken ct = default)
     {
+        if (!IsOsSupported) return false;
         try
         {
             var psi = new ProcessStartInfo("powershell.exe",
@@ -132,6 +132,7 @@ public static class BedrockLaunchService
     /// </summary>
     public static void Launch()
     {
+        if (!IsOsSupported) throw new PlatformNotSupportedException(UnsupportedOsMessage);
         // Process.Start 的返回值这里不需要长期持有（前面类注释已经说明：这条路径唤起的是
         // 系统另起的独立应用，跟这个返回的 Process 对象没有稳定的对应关系，没法也不该拿它
         // 做后续监控），但仍然要 Dispose——不然每点一次「启动基岩版」就泄漏一个内核句柄。

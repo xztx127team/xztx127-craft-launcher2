@@ -8,8 +8,17 @@ using System.Windows.Media.Media3D;
 namespace XCL2.App.Services;
 
 /// <summary>Fluent visual resources for existing, fully interactive WPF pages.</summary>
-internal static class PreviewFluentTheme
+public static class PreviewFluentTheme
 {
+    // Local page surfaces can opt into the preview without changing legacy
+    // values. Inheritance also reaches controls instantiated from templates.
+    public static readonly DependencyProperty IsActiveProperty = DependencyProperty.RegisterAttached(
+        "IsActive", typeof(bool), typeof(PreviewFluentTheme),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits));
+
+    public static bool GetIsActive(DependencyObject element) => (bool)element.GetValue(IsActiveProperty);
+    public static void SetIsActive(DependencyObject element, bool value) => element.SetValue(IsActiveProperty, value);
+
     private sealed record SavedResource(bool Existed, object? Value);
     private static readonly Dictionary<object, SavedResource> Original = new();
     private static readonly Dictionary<Style, Style> EnabledStyles = new();
@@ -19,8 +28,35 @@ internal static class PreviewFluentTheme
     // Detached cached pages (including the ordinary AI page) can return after
     // several toggles. Keep their original style without retaining dead pages.
     private static readonly ConditionalWeakTable<Style, Style> StyleOrigins = new();
+    private static readonly ConditionalWeakTable<DependencyObject, object> ThemeScopes = new();
     private static bool _enabled;
+    private static bool _hasPreviewStyles;
     internal static bool IsEnabled => _enabled;
+
+    static PreviewFluentTheme()
+    {
+        // StaticResource references inside a DataTemplate are captured before
+        // its future/recycled rows are created. Migrate each newly loaded local
+        // style too, otherwise rows created after a toggle keep the old mode.
+        EventManager.RegisterClassHandler(typeof(FrameworkElement), FrameworkElement.LoadedEvent,
+            new RoutedEventHandler(OnElementLoaded), handledEventsToo: true);
+    }
+
+    private static void OnElementLoaded(object sender, RoutedEventArgs args)
+    {
+        if (!_hasPreviewStyles || sender is not FrameworkElement element
+            || !ReferenceEquals(sender, args.OriginalSource)) return;
+        if (ThemeScopes.TryGetValue(element, out _)) element.SetCurrentValue(IsActiveProperty, _enabled);
+        ApplyLocalStyle(element);
+    }
+
+    private static void ApplyLocalStyle(FrameworkElement element)
+    {
+        // A DynamicResource/Binding expression must remain an expression.
+        if (element.ReadLocalValue(FrameworkElement.StyleProperty) is not Style style) return;
+        var replacement = Resolve(style);
+        if (!ReferenceEquals(style, replacement)) element.Style = replacement;
+    }
 
     internal static void SetEnabled(bool enabled, FrameworkElement root)
     {
@@ -71,22 +107,27 @@ internal static class PreviewFluentTheme
             foreach (var pair in DerivedStyles) Replacements[pair.Key] = pair.Value;
         }
         _enabled = enabled;
+        _hasPreviewStyles |= enabled;
         ApplyTo(root);
+        foreach (var window in application.Windows.OfType<Window>().ToArray())
+            if (!ReferenceEquals(window, root) && window.Dispatcher.CheckAccess()) ApplyTo(window);
     }
 
     internal static void ApplyTo(DependencyObject root)
     {
+        ThemeScopes.GetValue(root, _ => new object());
+        root.SetCurrentValue(IsActiveProperty, _enabled);
         var seen = new HashSet<DependencyObject>();
         var pending = new Stack<DependencyObject>(); pending.Push(root);
         while (pending.TryPop(out var current))
         {
             if (!seen.Add(current)) continue;
+            // A detail/page can have been a detached ApplyTo root earlier. Its
+            // local value must follow the window toggle or it masks inheritance
+            // and leaves preview-only surfaces active after switching back.
+            if (ThemeScopes.TryGetValue(current, out _)) current.SetCurrentValue(IsActiveProperty, _enabled);
             // Keep dynamic resource references and style bindings intact.
-            if (current is FrameworkElement element && element.ReadLocalValue(FrameworkElement.StyleProperty) is Style style)
-            {
-                var replacement = Resolve(style);
-                if (!ReferenceEquals(style, replacement)) element.Style = replacement;
-            }
+            if (current is FrameworkElement element) ApplyLocalStyle(element);
             if (current is Popup { Child: { } child }) pending.Push(child);
             if (current is Visual or Visual3D)
                 for (int i = 0; i < VisualTreeHelper.GetChildrenCount(current); i++) pending.Push(VisualTreeHelper.GetChild(current, i));

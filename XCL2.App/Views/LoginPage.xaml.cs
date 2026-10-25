@@ -141,7 +141,19 @@ public partial class LoginPage : UserControl
         }
     }
 
-    private async void AddMicrosoftEmbedded_Click(object sender, RoutedEventArgs e)
+    private void AddMicrosoftEmbedded_Click(object sender, RoutedEventArgs e)
+    {
+        if (WebView2RuntimeDetector.PreferExternalBrowser)
+        {
+            ToastService.ShowInfo(WebView2RuntimeDetector.CompatibilityBrowserMessage);
+            AddMicrosoft_Click(sender, e);
+            return;
+        }
+        AddMicrosoftEmbeddedCore(sender, e);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private async void AddMicrosoftEmbeddedCore(object sender, RoutedEventArgs e)
     {
         // WebView2 相关类型只在真正点击"内嵌登录"这里才会被用到/加载，不会跟主界面一起加载
         // (MainWindow/App.xaml 都不引用 WebView2 控件)。这里先做一次轻量探测：本机是否已经

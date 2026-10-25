@@ -19,6 +19,8 @@ internal sealed class WinUiPreviewHost : IDisposable
     private Process? _process;
     internal WinUiPreviewHost(MainWindow owner, Action onClosed)
     {
+        if (!WindowsCompatibilityService.Current.SupportsWinUi)
+            throw new PlatformNotSupportedException("当前系统或兼容模式不支持原生 WinUI 预览；请继续使用启动器的 WPF 界面。");
         _owner = owner; _onClosed = onClosed;
         var exe = Path.Combine(AppContext.BaseDirectory, "WinUI.Preview", "XCL2.WinUI.Preview.exe");
         if (!File.Exists(exe)) throw new FileNotFoundException("未找到 WinUI 3 预览程序。请在 Windows 上重新构建 XCL2.App（默认会一并构建其 WinUI.Preview 子项目），或双击源码根目录 build.cmd 发布。请勿使用 SkipNativePreview=true，并分发生成的完整目录（包含 WinUI.Preview）。", exe);

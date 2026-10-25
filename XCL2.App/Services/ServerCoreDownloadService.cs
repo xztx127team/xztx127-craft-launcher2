@@ -38,7 +38,7 @@ namespace XCL2.App.Services;
 /// </summary>
 public class ServerCoreDownloadService
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(15) };
+    private readonly HttpClient _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(15));
 
     private const string MojangManifestUrl = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
     private const string PaperApiBase = "https://fill.papermc.io/v3";
@@ -762,14 +762,11 @@ public class ServerCoreDownloadService
         };
 
         using var process = new Process { StartInfo = psi };
-        var outputLines = new List<string>();
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) { outputLines.Add(e.Data); progress?.Report(e.Data); } };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) { outputLines.Add(e.Data); progress?.Report(e.Data); } };
-
+        ct.ThrowIfCancellationRequested();
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        await process.WaitForExitAsync(ct);
+        var captured = await InstallerOutputCapture.WaitForExitAsync(process, TimeSpan.FromMinutes(10),
+            "服务端 Forge 安装器", targetDir, progress, ct);
+        var outputLines = captured.Snapshot();
 
         if (process.ExitCode != 0)
         {
@@ -824,14 +821,11 @@ public class ServerCoreDownloadService
         };
 
         using var process = new Process { StartInfo = psi };
-        var outputLines = new List<string>();
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) { outputLines.Add(e.Data); progress?.Report(e.Data); } };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) { outputLines.Add(e.Data); progress?.Report(e.Data); } };
-
+        ct.ThrowIfCancellationRequested();
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        await process.WaitForExitAsync(ct);
+        var captured = await InstallerOutputCapture.WaitForExitAsync(process, TimeSpan.FromMinutes(45),
+            "Spigot BuildTools", targetDir, progress, ct);
+        var outputLines = captured.Snapshot();
 
         if (process.ExitCode != 0)
         {

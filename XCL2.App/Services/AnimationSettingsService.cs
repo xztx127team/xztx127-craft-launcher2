@@ -26,6 +26,20 @@ public enum AnimationKind
 public static class AnimationSettingsService
 {
     private static readonly string[] OptionKeys = Enum.GetNames<AnimationKind>();
+    private static StartupAnimationPreferences? _startupPreferences;
+
+    /// <summary>仅由主窗口创建前的独立提示调用；正式 ConfigService 存在后自动优先使用正式配置。</summary>
+    public static void LoadStartupPreferences()
+    {
+        if (ConfigService.Active != null || _startupPreferences != null) return;
+        _startupPreferences = StartupAnimationPreferences.Read(new[]
+        {
+            System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XCL2", "config.json"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "XCL2", "Json", "config.json"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "json", "config.json"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "xcl2", "config.json")
+        });
+    }
 
     static AnimationSettingsService()
     {
@@ -40,7 +54,7 @@ public static class AnimationSettingsService
     }
 
     private static bool SystemRequestsReducedMotion
-        => (ConfigService.Active?.Config.FollowSystemReducedMotion ?? true) && !SystemParameters.ClientAreaAnimation;
+        => (ConfigService.Active?.Config.FollowSystemReducedMotion ?? _startupPreferences?.FollowSystemReducedMotion ?? true) && !SystemParameters.ClientAreaAnimation;
 
     public static readonly IReadOnlyList<(AnimationKind Kind, string Label)> Options =
         new (AnimationKind Kind, string Label)[]
@@ -69,23 +83,23 @@ public static class AnimationSettingsService
     private static PreviewState? _preview;
 
     private sealed record EffectiveState(double Speed, bool NoAnimations,
-        NoAnimationOptimization Optimization, double[] Intensities);
+        NoAnimationOptimization Optimization, double[] Intensities, double[] Durations);
     private static EffectiveState? _lastNotifiedState;
 
     public static event Action? Changed;
 
     public static bool NoAnimationModeEnabled
         => App.StartupArgs.DisableAnimations || SystemRequestsReducedMotion ||
-           (_preview?.NoAnimations ?? ConfigService.Active?.Config.CompletelyDisableAnimations ?? false);
+           (_preview?.NoAnimations ?? ConfigService.Active?.Config.CompletelyDisableAnimations ?? _startupPreferences?.CompletelyDisableAnimations ?? false);
 
     public static NoAnimationOptimization OptimizationPreference
-        => _preview?.Optimization ?? ConfigService.Active?.Config.NoAnimationOptimization ?? NoAnimationOptimization.Balanced;
+        => _preview?.Optimization ?? ConfigService.Active?.Config.NoAnimationOptimization ?? _startupPreferences?.NoAnimationOptimization ?? NoAnimationOptimization.Balanced;
 
     public static double SpeedRatio
     {
         get
         {
-            var percent = _preview?.SpeedPercent ?? ConfigService.Active?.Config.AnimationSpeedPercent ?? 75;
+            var percent = _preview?.SpeedPercent ?? ConfigService.Active?.Config.AnimationSpeedPercent ?? _startupPreferences?.AnimationSpeedPercent ?? 75;
             return double.IsFinite(percent) ? Math.Clamp(percent / 100, 0.25, 1) : 0.75;
         }
     }
@@ -94,6 +108,9 @@ public static class AnimationSettingsService
     public static TimeSpan Duration(int milliseconds, AnimationKind kind)
     {
         if (!IsEnabled(kind)) return TimeSpan.Zero;
+        // “0.2 秒”是实际过渡时长，不再被全局速度再次缩放；入场与退场共用同一个值。
+        if (kind is AnimationKind.Popup or AnimationKind.Toast)
+            return TimeSpan.FromSeconds(GetEffectiveOption(kind).DurationSeconds);
         var reference = Math.Max(0, milliseconds);
         return TimeSpan.FromMilliseconds(kind == AnimationKind.SkinHurt ? reference : reference * 0.75 / SpeedRatio);
     }
@@ -106,14 +123,12 @@ public static class AnimationSettingsService
         if ((uint)index >= (uint)OptionKeys.Length) return 0;
         var preview = _preview;
         var config = ConfigService.Active?.Config;
-        if (!(preview?.Enabled ?? config?.EnableUiAnimations ?? true)
-            || (preview?.LowPerformance ?? config?.LowPerformanceMode ?? false)
-            || (kind == AnimationKind.Page && !(preview?.PageEnabled ?? config?.EnablePageAnimations ?? true)))
+        if (!(preview?.Enabled ?? config?.EnableUiAnimations ?? _startupPreferences?.EnableUiAnimations ?? true)
+            || (preview?.LowPerformance ?? config?.LowPerformanceMode ?? _startupPreferences?.LowPerformanceMode ?? false)
+            || (kind == AnimationKind.Page && !(preview?.PageEnabled ?? config?.EnablePageAnimations ?? _startupPreferences?.EnablePageAnimations ?? true)))
             return 0;
 
-        var settings = preview?.Settings ?? config?.AnimationSettings;
-        if (settings == null || !settings.TryGetValue(OptionKeys[index], out var option) || option == null)
-            return 1; // 旧配置没有这个分类时沿用默认效果。
+        var option = GetEffectiveOption(kind);
         if (!option.Enabled) return 0;
         var percent = option.IntensityPercent;
         return double.IsFinite(percent) ? Math.Clamp(percent / 100, 0, 1) : 1;
@@ -123,7 +138,8 @@ public static class AnimationSettingsService
 
     private static EffectiveState CaptureEffectiveState()
         => new(SpeedRatio, NoAnimationModeEnabled, OptimizationPreference,
-            Options.Select(option => Intensity(option.Kind)).ToArray());
+            Options.Select(option => Intensity(option.Kind)).ToArray(),
+            Options.Select(option => Duration(200, option.Kind).TotalMilliseconds).ToArray());
 
     public static void NotifyChanged()
     {
@@ -135,8 +151,19 @@ public static class AnimationSettingsService
         if (previous != null && previous.Speed == current.Speed
             && previous.NoAnimations == current.NoAnimations
             && previous.Optimization == current.Optimization
-            && previous.Intensities.SequenceEqual(current.Intensities)) return;
+            && previous.Intensities.SequenceEqual(current.Intensities)
+            && previous.Durations.SequenceEqual(current.Durations)) return;
         Changed?.Invoke();
+    }
+
+    private static AnimationOption DefaultOption(AnimationKind kind)
+        => new() { IntensityPercent = kind is AnimationKind.Popup or AnimationKind.Toast ? 30 : 100 };
+
+    private static AnimationOption GetEffectiveOption(AnimationKind kind)
+    {
+        var settings = _preview?.Settings ?? ConfigService.Active?.Config.AnimationSettings ?? _startupPreferences?.AnimationSettings;
+        return settings != null && settings.TryGetValue(kind.ToString(), out var option) && option != null
+            ? option : DefaultOption(kind);
     }
 
     public static AnimationOption GetOption(AppConfig config, AnimationKind kind)
@@ -144,8 +171,12 @@ public static class AnimationSettingsService
         var index = (int)kind;
         if ((uint)index >= (uint)OptionKeys.Length
             || !config.AnimationSettings.TryGetValue(OptionKeys[index], out var option) || option == null)
-            return new AnimationOption();
-        return new AnimationOption { Enabled = option.Enabled, IntensityPercent = option.IntensityPercent };
+            return DefaultOption(kind);
+        return new AnimationOption
+        {
+            Enabled = option.Enabled, IntensityPercent = option.IntensityPercent,
+            DurationSeconds = option.DurationSeconds
+        };
     }
 
     public static void SetPreview(AppConfig config)

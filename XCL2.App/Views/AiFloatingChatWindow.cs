@@ -239,20 +239,28 @@ internal sealed class AiFloatingChatWindow : Window, IGlobalWindowTreatmentExemp
             closeApproved = true;
             _ = dialog.Dispatcher.BeginInvoke(new Action(dialog.Close));
         };
+        var closeRequestPending = false;
         dialog.Closing += (_, e) =>
         {
             if (closeApproved) return;
             e.Cancel = true;
-            settings.RequestDismiss();
+            if (closeRequestPending) return;
+            closeRequestPending = true;
+            // 完成当前 Closing 栈后再打开 owner-owned 确认，避免模态窗口关闭重入。
+            dialog.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                closeRequestPending = false;
+                if (dialog.IsVisible) settings.RequestDismiss();
+            }));
         };
-        settings.UnsavedChangesPrompt = () => MessageBox.Show(dialog, "AI 助手设置尚未保存，是否保存本次修改？", "保存 AI 助手设置",
+        settings.UnsavedChangesPrompt = () => OwnedMessageDialog.Show(dialog, "AI 助手设置尚未保存，是否保存本次修改？", "保存 AI 助手设置",
             MessageBoxButton.YesNoCancel, MessageBoxImage.Question) switch
         {
             MessageBoxResult.Yes => XclMessageResult.Yes,
             MessageBoxResult.No => XclMessageResult.No,
             _ => XclMessageResult.Cancel
         };
-        settings.SettingsWarningPrompt = (message, title) => MessageBox.Show(dialog, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+        settings.SettingsWarningPrompt = (message, title) => OwnedMessageDialog.Show(dialog, message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
         settings.Saved += (_, config) =>
         {
             _launcher.AiAssistantConfig = config;

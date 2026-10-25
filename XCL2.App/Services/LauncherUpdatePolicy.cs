@@ -52,6 +52,10 @@ internal static class LauncherUpdatePolicy
     internal static bool CanInstall(bool updatesEnabled, bool userConfirmed)
         => updatesEnabled && userConfirmed;
 
+    internal static bool ShouldPromptForStableUpdate(bool automatic, LauncherReminderMode mode,
+        DateTimeOffset? snoozedUntil, DateTimeOffset now)
+        => !automatic || mode == LauncherReminderMode.Normal && (!snoozedUntil.HasValue || snoozedUntil.Value <= now);
+
     internal static Version? ExtractVersion(string? tag)
     {
         if (string.IsNullOrWhiteSpace(tag)) return null;

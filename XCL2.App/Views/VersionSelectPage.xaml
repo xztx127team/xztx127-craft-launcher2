@@ -65,6 +65,11 @@
                     </ListBox>
 
                     <TextBlock Text="{DynamicResource Str_Ui_Add_Or_Import}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="13" Margin="0,20,0,8"/>
+                    <ComboBox x:Name="ExistingFolderLayout" SelectedIndex="0" Margin="0,0,0,6"
+                              ToolTip=".minecraft 直接加入目录；第三方 instance(s) 读取元数据并导入独立副本。">
+                        <ComboBoxItem Content=".minecraft（添加目录）"/>
+                        <ComboBoxItem Content="instance(s)（导入副本）"/>
+                    </ComboBox>
                     <Button Content="{DynamicResource Str_Ui_Add_Existing_Folder}" Style="{StaticResource SideNavButton}" Click="AddFolder_Click"/>
 
                     <!-- 导入整合包：跟拖拽安装走同一条 ImportDroppedModpackAsync 流程，
@@ -168,6 +173,7 @@
                                             <MenuItem Header="{DynamicResource Str_Ui_Open_On_The_Chinese_Minecraft_Wiki}"
                                                       Tag="{Binding}" Click="ViewOnWiki_Click"/>
                                             <Separator/>
+                                            <MenuItem Header="版本与组件..." Tag="{Binding}" Click="ManageComponents_Click"/>
                                             <MenuItem Header="重命名..." Tag="{Binding}" Click="RenameInstance_Click"/>
                                             <MenuItem Header="删除..." Tag="{Binding}" Click="DeleteInstance_Click"/>
                                         </ContextMenu>
@@ -226,6 +232,7 @@
                                         <Button.ContextMenu>
                                             <ContextMenu Opened="PluginInstanceMenu_Opened">
                                                 <MenuItem Header="{DynamicResource Str_Ui_Instance_Settings}" Tag="{Binding}" Click="OpenInstanceSettings_Click"/>
+                                                <MenuItem Header="版本与组件..." Tag="{Binding}" Click="ManageComponents_Click"/>
                                                 <Separator/>
                                                 <MenuItem Header="重命名..." Tag="{Binding}" Click="RenameInstance_Click"/>
                                                 <MenuItem Header="删除..." Tag="{Binding}" Click="DeleteInstance_Click"/>

@@ -37,6 +37,9 @@ public static class ToastService
     {
         public required ItemsControl Owner;
         public DispatcherTimer? Timer;
+        public DispatcherTimer? TransitionFallback;
+        public double? LifetimeSeconds;
+        public bool Entering;
         public int Generation;
         public bool Dismissing;
         public bool SlideOutLeft;
@@ -53,7 +56,7 @@ public static class ToastService
                 foreach (var pair in Cards.ToArray())
                 {
                     if (pair.Value.Dismissing) RemoveCard(pair.Key);
-                    else StopAnimations(pair.Key, pair.Value);
+                    else CompleteEntrance(pair.Key, pair.Value);
                 }
             }
             if (_host.Dispatcher.CheckAccess()) FinishTransitions();
@@ -84,6 +87,9 @@ public static class ToastService
     private static void StopAnimations(Border card, CardState state)
     {
         state.Generation++;
+        state.TransitionFallback?.Stop();
+        state.TransitionFallback = null;
+        state.Entering = false;
         card.BeginAnimation(UIElement.OpacityProperty, null);
         card.Opacity = 1;
         if (card.RenderTransform is TranslateTransform slide)
@@ -125,6 +131,7 @@ public static class ToastService
         if (intensity <= 0) return slide;
 
         var generation = state.Generation;
+        state.Entering = true;
         card.Opacity = 1 - 0.6 * intensity;
         slide.X = direction * 8 * intensity;
         _ = ShowCardAfterRenderAsync(card, slide, direction, generation, intensity);
@@ -139,7 +146,7 @@ public static class ToastService
         if (!Cards.TryGetValue(card, out var state) || state.Generation != generation || state.Dismissing) return;
         if (!card.IsVisible || !AnimationSettingsService.IsEnabled(AnimationKind.Toast))
         {
-            StopAnimations(card, state);
+            CompleteEntrance(card, state);
             return;
         }
         card.Opacity = 1;
@@ -149,8 +156,9 @@ public static class ToastService
         fade.Completed += (_, _) =>
         {
             if (Cards.TryGetValue(card, out var current) && current.Generation == generation)
-                StopAnimations(card, current);
+                CompleteEntrance(card, current);
         };
+        StartTransitionFallback(card, state, duration, generation, () => CompleteEntrance(card, state));
         slide.BeginAnimation(TranslateTransform.XProperty,
             new DoubleAnimation(direction * 8 * intensity, 0, duration)
             {
@@ -160,9 +168,34 @@ public static class ToastService
         card.BeginAnimation(UIElement.OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
     }
 
+    private static void CompleteEntrance(Border card, CardState state)
+    {
+        var wasEntering = state.Entering;
+        StopAnimations(card, state);
+        if (state.LifetimeSeconds is { } seconds && !state.Dismissing && (wasEntering || state.Timer == null))
+            StartLifetime(card, seconds);
+    }
+
+    private static void StartTransitionFallback(Border card, CardState state, TimeSpan duration, int generation, Action finish)
+    {
+        state.TransitionFallback?.Stop();
+        var fallback = new DispatcherTimer(DispatcherPriority.Background, card.Dispatcher)
+            { Interval = duration + TimeSpan.FromMilliseconds(100) };
+        state.TransitionFallback = fallback;
+        fallback.Tick += (_, _) =>
+        {
+            fallback.Stop();
+            if (Cards.TryGetValue(card, out var current) && current.Generation == generation) finish();
+        };
+        fallback.Start();
+    }
+
     private static void StartLifetime(Border card, double seconds)
     {
         if (!Cards.TryGetValue(card, out var state)) return;
+        state.LifetimeSeconds = seconds;
+        // 停留时间从入场完成算起，短提示不会在首次布局/0.2秒入场还没结束时就被移除。
+        if (state.Entering) return;
         state.Timer?.Stop();
         var timer = new DispatcherTimer(DispatcherPriority.Background, card.Dispatcher)
         {
@@ -211,6 +244,7 @@ public static class ToastService
                     FillBehavior = FillBehavior.Stop,
                     EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
                 }, HandoffBehavior.SnapshotAndReplace);
+        StartTransitionFallback(card, state, duration, generation, () => RemoveCard(card));
         card.BeginAnimation(UIElement.OpacityProperty, fade, HandoffBehavior.SnapshotAndReplace);
     }
 
@@ -256,6 +290,11 @@ public static class ToastService
     /// <summary>显示 Windows 系统原生通知（右下角系统通知中心）。</summary>
     public static void ShowSystemNotification(string message, string title = "XCL2")
     {
+        if (!WindowsCompatibilityService.Current.SupportsNativeToasts)
+        {
+            Show(message, ToastKind.Info);
+            return;
+        }
         try
         {
             if (_host?.Dispatcher.CheckAccess() == false)
@@ -264,6 +303,19 @@ public static class ToastService
                 return;
             }
 
+            ShowNativeSystemNotification(message, title);
+        }
+        catch
+        {
+            // 降级到普通 Toast
+            Show(message, ToastKind.Info);
+        }
+    }
+
+    // Keep WinRT type resolution outside the legacy path and its JIT compilation.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void ShowNativeSystemNotification(string message, string title)
+    {
             // 使用 Windows 10+ Toast 通知
             var toastXml = $@"
 <toast>
@@ -279,12 +331,6 @@ public static class ToastService
             xmlDoc.LoadXml(toastXml);
             var toast = new Windows.UI.Notifications.ToastNotification(xmlDoc);
             Windows.UI.Notifications.ToastNotificationManager.CreateToastNotifier("XCL2").Show(toast);
-        }
-        catch
-        {
-            // 降级到普通 Toast
-            Show(message, ToastKind.Info);
-        }
     }
 
     /// <summary>
@@ -390,7 +436,7 @@ public static class ToastService
             var fromOpacity = card.Opacity;
             StopAnimations(card, state);
             var intensity = AnimationSettingsService.Intensity(AnimationKind.Toast);
-            if (intensity <= 0) return;
+            if (intensity <= 0) { CompleteEntrance(card, state); return; }
             var generation = state.Generation;
             var duration = AnimationSettingsService.Duration(150, AnimationKind.Toast);
             var restore = new DoubleAnimation(1 - (1 - fromOpacity) * intensity, 1, duration)
@@ -398,7 +444,7 @@ public static class ToastService
             restore.Completed += (_, _) =>
             {
                 if (Cards.TryGetValue(card, out var current) && current.Generation == generation)
-                    StopAnimations(card, current);
+                    CompleteEntrance(card, current);
             };
             slide.BeginAnimation(TranslateTransform.XProperty,
                 new DoubleAnimation(fromX * intensity, 0, duration)
@@ -406,6 +452,7 @@ public static class ToastService
                     FillBehavior = FillBehavior.Stop,
                     EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
                 }, HandoffBehavior.SnapshotAndReplace);
+            StartTransitionFallback(card, state, duration, generation, () => CompleteEntrance(card, state));
             card.BeginAnimation(UIElement.OpacityProperty, restore, HandoffBehavior.SnapshotAndReplace);
         }
 

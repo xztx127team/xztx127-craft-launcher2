@@ -6,6 +6,24 @@ namespace XCL2.App.Services;
 
 public static class PageTransitionBehavior
 {
+    public static readonly DependencyProperty TransitionDepthProperty = DependencyProperty.RegisterAttached(
+        "TransitionDepth", typeof(int), typeof(PageTransitionBehavior), new PropertyMetadata(2));
+    public static int GetTransitionDepth(DependencyObject target) => (int)target.GetValue(TransitionDepthProperty);
+    public static void SetTransitionDepth(DependencyObject target, int value) => target.SetValue(TransitionDepthProperty, Math.Clamp(value, 1, 3));
+
+    public static readonly DependencyProperty TransitionDirectionProperty = DependencyProperty.RegisterAttached(
+        "TransitionDirection", typeof(int), typeof(PageTransitionBehavior), new PropertyMetadata(1));
+    public static int GetTransitionDirection(DependencyObject target) => (int)target.GetValue(TransitionDirectionProperty);
+    public static void SetTransitionDirection(DependencyObject target, int value) => target.SetValue(TransitionDirectionProperty, value < 0 ? -1 : 1);
+
+    /// <summary>可见宿主内返回旧内容时显式播放一次；显隐切换仍由 AnimateOnVisible 自动处理。</summary>
+    public static void Replay(FrameworkElement element, int depth = 2, int direction = 1)
+    {
+        SetTransitionDepth(element, depth);
+        SetTransitionDirection(element, direction);
+        PrepareEntrance(element);
+    }
+
     public static readonly DependencyProperty AnimateOnVisibleProperty = DependencyProperty.RegisterAttached(
         "AnimateOnVisible", typeof(bool), typeof(PageTransitionBehavior), new PropertyMetadata(false, OnVisibleBehaviorChanged));
     public static bool GetAnimateOnVisible(DependencyObject target) => (bool)target.GetValue(AnimateOnVisibleProperty);
@@ -127,7 +145,7 @@ public static class PageTransitionBehavior
             return;
         }
         // 在可见事件内先设置起点；调度等待只负责开播，不再延后把已显示的内容拉回起点。
-        UiAnimationHelper.PrepareEntrance(element);
+        UiAnimationHelper.PrepareEntrance(element, depth: GetTransitionDepth(element), direction: GetTransitionDirection(element));
         UiAnimationHelper.StartPreparedEntrance(element);
     }
     private static void OnSelectionBehaviorChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
@@ -170,7 +188,11 @@ public static class PageTransitionBehavior
         if (!tabs.IsLoaded || !tabs.IsVisible) return;
         tabs.ApplyTemplate();
         if (tabs.Template?.FindName("PART_SelectedContentHost", tabs) is FrameworkElement content)
+        {
+            SetTransitionDepth(content, GetTransitionDepth(tabs));
+            SetTransitionDirection(content, GetTransitionDirection(tabs));
             PrepareEntrance(content);
+        }
     }
     private static void OnExpandedChanged(DependencyObject target, DependencyPropertyChangedEventArgs e)
     {

@@ -36,6 +36,24 @@ try
     Check(GameExitClassifier.Assess(info, 0).Kind == GameExitKind.Normal, "Stale logs were included");
     File.SetLastWriteTime(latest, DateTime.Now);
     Check(GameExitClassifier.Assess(info, 0).SuspectedLogFailure, "Fresh file error burst was missed");
+    // Create a large sparse file: the diagnostic reader must read a bounded tail
+    // instead of allocating the whole log before truncation.
+    using (var large = new FileStream(latest, FileMode.Create, FileAccess.Write))
+    {
+        var header = System.Text.Encoding.UTF8.GetBytes("[INFO] first diagnostic line\n"); large.Write(header);
+        large.SetLength(64L * 1024 * 1024); large.Position = large.Length;
+        large.Write(System.Text.Encoding.UTF8.GetBytes("\n" + errors + "[Render thread/INFO]: Stopping!\n"));
+    }
+    info.Output = "";
+    var bounded = DiagnosticLogReader.Read(latest);
+    Check(bounded.Length <= DiagnosticLogReader.MaximumBytes + 200 && bounded.Contains(DiagnosticLogReader.TruncationNotice), "large logs are bounded before decoding");
+    Check(bounded.EndsWith("Stopping!\n") && GameExitClassifier.Assess(info, 0).Kind == GameExitKind.Normal, "bounded tail retains the actual shutdown evidence");
+    var headAndTail = DiagnosticLogReader.Read(latest, includeHead: true);
+    Check(headAndTail.StartsWith("[INFO] first diagnostic line") && headAndTail.EndsWith("Stopping!\n"), "report view retains both header and shutdown tail");
+    File.WriteAllText(latest, new string('a', DiagnosticLogReader.MaximumBytes) + "\n[INFO] 中文收尾\n", System.Text.Encoding.Unicode);
+    Check(DiagnosticLogReader.Read(latest).EndsWith("[INFO] 中文收尾\n"), "UTF16 BOM and aligned tail remain readable");
+    File.WriteAllText(latest, "[INFO] no final newline");
+    Check(DiagnosticLogReader.Read(latest) == "[INFO] no final newline", "small files and truncated final-line signal are unchanged");
     // 两个通道的同一条错误不能累加成三条。
     File.WriteAllText(latest, "[Render thread/ERROR]: duplicate\n");
     info.Output = "[Render thread/ERROR]: duplicate\n";

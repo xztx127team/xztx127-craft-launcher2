@@ -133,6 +133,11 @@ public class VersionDetail
     /// 与这个机制完全吻合。
     /// </summary>
     [JsonPropertyName("clientVersion")] public string? ClientVersion { get; set; }
+    // Component maintenance keeps the instance name unchanged even when its game/loader changes.
+    // Separate metadata prevents names such as "Fabric 生存" from misidentifying a vanilla profile.
+    [JsonPropertyName("xclMinecraftVersion")] public string? XclMinecraftVersion { get; set; }
+    [JsonPropertyName("xclComponentLoader")] public string? XclComponentLoader { get; set; }
+    [JsonPropertyName("xclComponentLoaderVersion")] public string? XclComponentLoaderVersion { get; set; }
 }
 
 public class JavaVersionSpec

@@ -128,7 +128,7 @@
                  现在统一改成跟 DownloadCenterPage 完全相同的"整页跳转详情"(ModDetailPage)。
                  DetailHost 是跟 DockPanel 同级的覆盖层，点击资源条目后盖住整个内容区显示详情，
                  点返回收起后原样恢复列表/筛选条件，跟 DownloadCenterPage 的 DetailHost 是同一套思路。 -->
-            <DockPanel>
+            <DockPanel x:Name="ListPanelsHost">
 
                 <!-- ===== 首页面板 ===== -->
                 <!-- 四个磁贴对应用户诉求的四件事，点哪个直接做哪件事：
@@ -498,7 +498,7 @@
             <!-- 服务端资源详情覆盖层：跟 DownloadCenterPage 的 DetailHost 同一套思路，
                  点击插件/资源包/数据包/光影包/Mod 条目后盖住整个内容区显示 ModDetailPage，
                  返回时收起即可，不影响下层筛选条件/已加载的搜索结果。 -->
-            <ContentControl x:Name="DetailHost" services:PageTransitionBehavior.AnimateOnVisible="True" Visibility="Collapsed" Background="{DynamicResource PanelBrush}"/>
+            <ContentControl x:Name="DetailHost" services:PageTransitionBehavior.AnimateOnVisible="True" services:PageTransitionBehavior.TransitionDepth="3" Visibility="Collapsed" Background="{DynamicResource PanelBrush}"/>
             </Grid>
         </Border>
     </Grid>

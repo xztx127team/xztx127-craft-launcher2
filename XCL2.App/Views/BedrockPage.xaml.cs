@@ -88,6 +88,7 @@ public partial class BedrockPage : UserControl
         InitializeComponent();
         InitializeMarketplaceNavigation();
         InitializeDownloadNavigation();
+        InitializePreviewBedrock();
         Unloaded += (_, _) =>
         {
             _clientVersionsRevision++;
@@ -669,7 +670,7 @@ public partial class BedrockPage : UserControl
             case XclMessageResult.Yes: // 对应 option3「选择文件夹」
             default:
             {
-                var folderPicker = new OpenFolderDialog { Title = "选择基岩版安装文件夹" };
+                var folderPicker = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择基岩版安装文件夹" };
                 if (folderPicker.ShowDialog() != true) return;
                 installDir = folderPicker.FolderName;
                 break;
@@ -890,7 +891,7 @@ public partial class BedrockPage : UserControl
 
     private void BedrockClientBrowseDefaultDir_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new OpenFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Client_Default_Dir", "选择基岩版客户端的默认下载文件夹") };
+        var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Client_Default_Dir", "选择基岩版客户端的默认下载文件夹") };
         if (picker.ShowDialog() != true) return;
 
         var cfg = _owner.ConfigService.Config;
@@ -977,7 +978,7 @@ public partial class BedrockPage : UserControl
         }
         else
         {
-            var picker = new OpenFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Client_Install_Dir", "选择基岩版客户端的安装位置") };
+            var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Client_Install_Dir", "选择基岩版客户端的安装位置") };
             if (picker.ShowDialog() != true) return;
             baseDir = picker.FolderName;
         }
@@ -1307,7 +1308,7 @@ public partial class BedrockPage : UserControl
 
     private void BedrockServerBrowseDefaultDir_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new OpenFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Server_Default_Dir", "选择基岩版服务端的默认下载文件夹") };
+        var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Server_Default_Dir", "选择基岩版服务端的默认下载文件夹") };
         if (picker.ShowDialog() != true) return;
 
         var cfg = _owner.ConfigService.Config;
@@ -1337,7 +1338,7 @@ public partial class BedrockPage : UserControl
         }
         else
         {
-            var picker = new OpenFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Server_Install_Dir", "选择基岩版服务端的安装位置") };
+            var picker = new XCL2.App.Services.CompatibleFolderDialog { Title = Loc.T("Str_Cs_Choose_Bedrock_Server_Install_Dir", "选择基岩版服务端的安装位置") };
             if (picker.ShowDialog() != true) return;
             baseDir = picker.FolderName;
         }

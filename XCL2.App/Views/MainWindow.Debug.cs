@@ -161,7 +161,8 @@ public partial class MainWindow
         };
         _debugPanel.SetResourceReference(Border.BackgroundProperty, "PanelBrush");
         _debugPanel.SetResourceReference(Border.BorderBrushProperty, "AccentBrush");
-        Grid.SetRow(_debugPanel, 1); Grid.SetColumn(_debugPanel, 1);
+        PageTransitionBehavior.SetPopupFadeOnVisible(_debugPanel, true);
+        Grid.SetRow(_debugPanel, 1); Grid.SetColumn(_debugPanel, Grid.GetColumn(ContentAreaBorder));
         // Keep modal scrims above the diagnostic panel; do not replace or reparent the current page.
         var overlayIndex = AppBodyGrid.Children.IndexOf(OverlayRoot);
         AppBodyGrid.Children.Insert(overlayIndex < 0 ? AppBodyGrid.Children.Count : overlayIndex, _debugPanel);
@@ -324,7 +325,7 @@ public partial class MainWindow
     private void ResizeDebugPanel()
     {
         if (_debugPanel == null) return;
-        _debugPanel.MaxWidth = Math.Max(1, Math.Min(560, AppBodyGrid.ColumnDefinitions[1].ActualWidth - 24));
+        _debugPanel.MaxWidth = Math.Max(1, Math.Min(560, ContentAreaBorder.ActualWidth));
         _debugPanel.MaxHeight = Math.Max(1, Math.Min(460, AppBodyGrid.RowDefinitions[1].ActualHeight - 24));
     }
     private void DebugBody_SizeChanged(object sender, SizeChangedEventArgs e) => ResizeDebugPanel();

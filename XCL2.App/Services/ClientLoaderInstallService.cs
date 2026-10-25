@@ -57,12 +57,13 @@ public class ClientLoaderInstallService : IDisposable
     private const string ForgeMavenBase = "https://maven.minecraftforge.net/net/minecraftforge/forge";
     private const string NeoForgeMavenBase = "https://maven.neoforged.net/releases/net/neoforged/neoforge";
 
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(15) };
+    private readonly HttpClient _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(15));
     private readonly DownloadService _vanillaDownloader;
 
     /// <summary>用户在设置里选的下载源，供 DownloadFileNoHashCheckAsync/post-install 库补全复用
     /// DownloadEndpoints 的镜像回退逻辑（构造函数里保存一份，避免每处都要多传一个参数）。</summary>
     private readonly bool _preferMirror;
+    private readonly AppConfig _maintenanceConfig;
 
     /// <summary>Fabric API 走 Modrinth 下载（Fabric API 本身就是发布在 Modrinth 上的普通 mod，
     /// 复用现成的 ModrinthService 搜索+下载逻辑，不用重新实现一遍 Modrinth API 调用。</summary>
@@ -77,6 +78,7 @@ public class ClientLoaderInstallService : IDisposable
     {
         _vanillaDownloader.Dispose();
         _vanillaDownloader = DownloadService.CreateFromConfig(cfg);
+        _maintenanceConfig = cfg;
     }
 
     /// <summary>
@@ -92,6 +94,7 @@ public class ClientLoaderInstallService : IDisposable
         _vanillaDownloader = accelerate
             ? DownloadService.CreateAccelerated(cfg)
             : DownloadService.CreateFromConfig(cfg);
+        _maintenanceConfig = cfg;
     }
 
     /// <summary>沿用旧签名：只传 DownloadSource，内部退化为单线程不限速的 DownloadService
@@ -100,6 +103,7 @@ public class ClientLoaderInstallService : IDisposable
     {
         _vanillaDownloader = new DownloadService(source);
         _preferMirror = source != DownloadSource.Official;
+        _maintenanceConfig = new AppConfig { Source = source };
         _http.DefaultRequestHeaders.UserAgent.Clear();
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("XCL2Launcher", "1.0"));
     }
@@ -124,7 +128,7 @@ public class ClientLoaderInstallService : IDisposable
     /// ===== 修复安装 Fabric 报 404 (Not Found) =====
     /// 旧实现请求的是 /v2/versions/loader —— 这是**全量** loader 列表，跟具体哪个 MC 版本
     /// 无关，从 0.x 最早的构建一路列到最新。拿这个列表里的任意一项去拼
-    ///     /v2/versions/loader/{mc}/{loader}/{installer}/profile/json
+    ///     /v2/versions/loader/{mc}/{loader}/profile/json
     /// 时，只要这对 (mcVersion, loaderVersion) 在 Fabric 那边**没有交集条目**，服务端就直接
     /// 返回 404，于是 GetStringAsync 抛 HttpRequestException("...404 (Not Found)")，
     /// 整个安装流程报"安装失败"——这正是日志里那条异常的来源。
@@ -333,26 +337,7 @@ public class ClientLoaderInstallService : IDisposable
         loaderVersion = await ResolveLoaderVersionOrAutoMatchAsync(
             LegacyFabricMetaBase, "Legacy Fabric", mcVersion, loaderVersion, progress, ct);
 
-        progress?.Report(new ProgressInfo("查询 Legacy Fabric installer 版本", 0, 1, loaderVersion));
-        var installerJson = await GetStringWithFriendly404Async(
-            $"{LegacyFabricMetaBase}/versions/installer",
-            "无法获取 Legacy Fabric 安装器版本列表，请检查网络或稍后重试。", ct);
-        using var installerDoc = JsonDocument.Parse(installerJson);
-        string? installerVersion = null;
-        foreach (var v in installerDoc.RootElement.EnumerateArray())
-        {
-            if (v.TryGetProperty("stable", out var stable) && stable.GetBoolean())
-            {
-                installerVersion = v.GetProperty("version").GetString();
-                break;
-            }
-        }
-        installerVersion ??= installerDoc.RootElement[0].GetProperty("version").GetString();
-
-        var profileUrl = $"{LegacyFabricMetaBase}/versions/loader/" +
-                         $"{Uri.EscapeDataString(mcVersion)}/" +
-                         $"{Uri.EscapeDataString(loaderVersion)}/" +
-                         $"{Uri.EscapeDataString(installerVersion!)}/profile/json";
+        var profileUrl = ClientLoaderProfileEndpoints.ClientProfile(LegacyFabricMetaBase, mcVersion, loaderVersion);
         progress?.Report(new ProgressInfo("下载 Legacy Fabric 版本信息", 0, 1, "profile/json"));
         var profileJson = await GetStringWithFriendly404Async(profileUrl,
             $"Legacy Fabric 没有 \"Minecraft {mcVersion} + Loader {loaderVersion}\" 这个组合的安装信息。\n" +
@@ -597,30 +582,8 @@ public class ClientLoaderInstallService : IDisposable
         loaderVersion = await ResolveLoaderVersionOrAutoMatchAsync(
             FabricMetaBase, "Fabric", mcVersion, loaderVersion, progress, ct);
 
-        // 2. 拉取 installer 版本（取最新稳定版，用户不需要关心这个号）
-        progress?.Report(new ProgressInfo("查询 Fabric installer 版本", 0, 1, loaderVersion));
-        var installerJson = await GetStringWithFriendly404Async(
-            $"{FabricMetaBase}/versions/installer",
-            "无法获取 Fabric 安装器版本列表，请检查网络或稍后重试。", ct);
-        using var installerDoc = JsonDocument.Parse(installerJson);
-        string? installerVersion = null;
-        foreach (var v in installerDoc.RootElement.EnumerateArray())
-        {
-            if (v.TryGetProperty("stable", out var stable) && stable.GetBoolean())
-            {
-                installerVersion = v.GetProperty("version").GetString();
-                break;
-            }
-        }
-        installerVersion ??= installerDoc.RootElement[0].GetProperty("version").GetString();
-
-        // 3. 下载现成的客户端 profile json（含 inheritsFrom + libraries + mainClass，官方生成好的，不用自己拼）
-        //    版本号统一做 URL 编码：MC 版本号里可能出现空格（用户手改过的目录名）、
-        //    loader 版本号里可能出现 "+build.xxx" 这类字符，不编码就会拼出非法 URL。
-        var profileUrl = $"{FabricMetaBase}/versions/loader/" +
-                         $"{Uri.EscapeDataString(mcVersion)}/" +
-                         $"{Uri.EscapeDataString(loaderVersion)}/" +
-                         $"{Uri.EscapeDataString(installerVersion!)}/profile/json";
+        // Client profile/json takes game + loader only. The installer-version route is server/jar.
+        var profileUrl = ClientLoaderProfileEndpoints.ClientProfile(FabricMetaBase, mcVersion, loaderVersion);
         progress?.Report(new ProgressInfo("下载 Fabric 版本信息", 0, 1, "profile/json"));
         var profileJson = await GetStringWithFriendly404Async(profileUrl,
             $"Fabric 没有 \"Minecraft {mcVersion} + Loader {loaderVersion}\" 这个组合的安装信息。\n" +
@@ -739,10 +702,9 @@ public class ClientLoaderInstallService : IDisposable
 
     /// <summary>
     /// 安装 Quilt 客户端到 .minecraft/versions/{versionId}/。跟 InstallFabricClientAsync 的整体
-    /// 步骤(装原版父版本 -> 下载官方现成 profile json -> 补库文件)基本一致，只有一处跟 Fabric 不同：
-    /// Quilt Meta 的 profile json 端点是 "/versions/loader/{mc}/{loader}/profile/json"，
-    /// 路径里不含"installer 版本"这一段——Quilt 的服务端把 installer 版本收敛成官方固定值，
-    /// 不需要像 Fabric 那样先单独查一次 installer 列表再拼进 url。
+    /// 步骤(装原版父版本 -> 下载官方现成 profile json -> 补库文件)基本一致。
+    /// Quilt 与 Fabric 客户端 profile 路由都只包含游戏版本与 Loader 版本，
+    /// 不需要单独查询或拼接 installer 版本；具体 Meta 服务地址不同。
     ///
     /// 可选步骤：QSL(Quilt Standard Libraries) 对应 Fabric API 在 Quilt 生态里的角色，同样发布在
     /// Modrinth 上(slug "qsl")。跟 Fabric API 一样做成可选自动安装项，交给用户在安装界面勾选，
@@ -944,42 +906,12 @@ public class ClientLoaderInstallService : IDisposable
         };
 
         using var process = new Process { StartInfo = psi };
-        var outputLines = new List<string>();
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) outputLines.Add(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) outputLines.Add(e.Data); };
-
+        ct.ThrowIfCancellationRequested();
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
 
-        // 安装器进程超时保护：Forge/NeoForge 安装器本身会再联网下载一批 library（不是本类
-        // 之前已经下载好的 installer jar 本身，是安装器运行时自己另外拉取的依赖），网络卡住时
-        // 之前的代码会无限等待 WaitForExitAsync，UI 侧表现为进度条停在"正在运行安装器"不再变化，
-        // 用户既不知道是卡住了还是真的在跑、也没有任何机会中止，只能强杀整个启动器进程。
-        // 这里给一个宽松但有限的超时（10 分钟，安装器本身网络下载可能比较慢，尤其国内直连
-        // Forge/NeoForge 官方源较慢是已知情况，不能设得太短），超时后主动杀掉子进程并给出
-        // 明确提示，而不是让调用方永远等不到结果。
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(10));
-        bool timedOut;
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-            timedOut = false;
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            timedOut = true;
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* 尽力而为 */ }
-        }
-
-        if (timedOut)
-        {
-            throw new InvalidOperationException(
-                $"{coreType} 客户端安装器运行超过 10 分钟仍未完成，已中止。这通常是因为安装器自己\n" +
-                "另外联网下载依赖库时网络太慢或被墙——可以尝试更换网络环境（如使用代理）后重试，\n" +
-                "或者检查本地防火墙/杀毒软件是否拦截了 Java 的联网请求。");
-        }
+        var captured = await InstallerOutputCapture.WaitForExitAsync(process, TimeSpan.FromMinutes(10),
+            $"{coreType} 客户端安装器", minecraftDir, null, ct);
+        var outputLines = captured.Snapshot();
 
         if (process.ExitCode != 0)
         {
@@ -1290,25 +1222,12 @@ public class ClientLoaderInstallService : IDisposable
         foreach (var a in args) psi.ArgumentList.Add(a);
 
         using var process = new Process { StartInfo = psi };
-        var outputLines = new List<string>();
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) outputLines.Add(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) outputLines.Add(e.Data); };
-
+        ct.ThrowIfCancellationRequested();
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
 
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromMinutes(5));
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { /* 尽力而为 */ }
-            throw new InvalidOperationException($"{failureMessage}：运行超过 5 分钟仍未完成，已中止。");
-        }
+        var captured = await InstallerOutputCapture.WaitForExitAsync(process, TimeSpan.FromMinutes(5),
+            failureMessage, workingDir, null, ct);
+        var outputLines = captured.Snapshot();
 
         if (process.ExitCode != 0)
         {
@@ -1528,140 +1447,56 @@ public class ClientLoaderInstallService : IDisposable
         try { if (File.Exists(path)) File.Delete(path); } catch { /* 忽略清理失败 */ }
     }
 
-    // ========================================================================
-    // 原地增删/升降级/重装加载器
-    //
-    // 需求：对一个已经存在、里面已经有 mods/saves/resourcepacks/config 等用户数据的实例，
-    // 更换加载器类型、升级/降级加载器版本、或者重装同一个加载器版本，都不应该破坏这些用户
-    // 数据文件夹——用户要保留的是"这个实例"，只是想换/修/重装它的加载器部分。
-    //
-    // 实现思路：复用上面已经验证过的 Install*ClientAsync（它们各自都有一套完整的、已经趟过坑的
-    // 下载/安装逻辑），但不直接装进目标实例文件夹，而是先装进一个全新的临时版本文件夹，
-    // 装完之后只把"加载器定义相关的文件"（顶层 version json + 客户端 jar，以及 libraries 等
-    // 非用户数据子目录）合并覆盖进目标实例文件夹，mods/saves/resourcepacks/config/screenshots/
-    // crash-reports/logs 这些认定为"用户数据"的子目录完全跳过、绝不触碰。
-    // 操作开始前先用 InstanceBackupService 把目标实例整个打包备份一份，即使合并逻辑本身有意外，
-    // 用户也能一键找回操作前的完整状态。
-    // ========================================================================
-
-    private static readonly HashSet<string> UserDataDirNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "mods", "resourcepacks", "shaderpacks", "saves", "config",
-        "screenshots", "schematics", "crash-reports", "logs", "kubejs", "defaultconfigs"
-    };
-
-    /// <summary>
-    /// 把 sourceDir（临时新装好的加载器文件夹）合并进 targetDir（用户的目标实例文件夹）：
-    /// - 顶层的 *.json / *.jar（版本定义文件、客户端 jar）先清空旧的再拷贝新的，避免目录里
-    ///   同时残留新旧两份 json 导致 FolderService"唯一 json 兜底识别"失效。
-    /// - mods/saves/resourcepacks 等用户数据子目录整个跳过，不管新装的临时文件夹里有没有同名目录，
-    ///   一律不覆盖、不合并、不删除目标目录里已有的内容。
-    /// - 其余子目录（如 libraries/、assets 相关文件）按文件递归覆盖合并，只增不减
-    ///   （新装文件夹里没有的文件不会被删除，避免误删目标实例里其它无关文件）。
-    /// </summary>
-    private static void MergeLoaderFilesPreservingUserData(string sourceDir, string targetDir, bool isTopLevel = true)
-    {
-        Directory.CreateDirectory(targetDir);
-
-        if (isTopLevel)
-        {
-            foreach (var old in Directory.GetFiles(targetDir, "*.json").Concat(Directory.GetFiles(targetDir, "*.jar")))
-            {
-                try { File.Delete(old); } catch { /* 尽力而为，单个文件删不掉不阻断整个流程 */ }
-            }
-        }
-
-        foreach (var dir in Directory.GetDirectories(sourceDir))
-        {
-            var name = Path.GetFileName(dir);
-            if (isTopLevel && UserDataDirNames.Contains(name)) continue;
-            MergeLoaderFilesPreservingUserData(dir, Path.Combine(targetDir, name), isTopLevel: false);
-        }
-        foreach (var file in Directory.GetFiles(sourceDir))
-            File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)), overwrite: true);
-    }
-
-    /// <summary>
-    /// 原地增删/升降级/重装加载器的统一入口。
-    /// installNewLoaderAsync 负责"装出一个全新版本文件夹"（直接传现成的 InstallFabricClientAsync
-    /// 等方法即可，不需要调用方自己关心命名），本方法负责：备份 → 调用它 → 合并进目标实例 →
-    /// 清理临时文件夹这一整套流程，并保证任何一步失败都不会残留半成品覆盖掉原实例
-    /// （合并动作是最后一步，且备份已经在最前面完成）。
-    /// </summary>
-    public async Task<string> ChangeLoaderInPlaceAsync(
-        string minecraftDir, string existingVersionId,
-        Func<CancellationToken, Task<string>> installNewLoaderAsync,
-        string backupReason,
+    // All in-place operations now use a separate staging game root and a recoverable
+    // profile transaction. The previous implementation could delete the source instance
+    // when an installer returned the same ID and removed unrelated top-level JSON/JAR files.
+    [Obsolete("Use InstalledVersionMaintenanceService.ApplyAsync with an explicit component choice.")]
+    public Task<string> ChangeLoaderInPlaceAsync(string minecraftDir, string existingVersionId,
+        Func<CancellationToken, Task<string>> installNewLoaderAsync, string backupReason,
         IProgress<ProgressInfo>? progress = null, CancellationToken ct = default)
+        => throw new NotSupportedException("旧的加载器维护回调无法隔离安装目录，已停止使用。请从“版本与组件”入口操作。");
+
+    private async Task<string> ApplyComponentChangeAsync(string root, string id, InstalledVersionChange change,
+        IProgress<ProgressInfo>? progress, CancellationToken ct)
     {
-        var existingDir = Path.Combine(minecraftDir, "versions", existingVersionId);
-        string? backupZipPath = null;
-
-        if (Directory.Exists(existingDir))
-        {
-            progress?.Report(new ProgressInfo(
-                Loc.T("Str_Cs_Backing_Up_Instance", "正在备份当前实例（操作前自动备份）"), 0, 1, existingVersionId));
-            backupZipPath = await InstanceBackupService.CreateBackupAsync(minecraftDir, existingVersionId, backupReason, ct: ct);
-        }
-
-        var newVersionId = await installNewLoaderAsync(ct);
-        var newDir = Path.Combine(minecraftDir, "versions", newVersionId);
-
-        try
-        {
-            progress?.Report(new ProgressInfo(
-                Loc.T("Str_Cs_Merging_Loader_Files", "正在把新加载器合并进当前实例（不影响存档/模组/资源包）"),
-                0, 1, existingVersionId));
-            MergeLoaderFilesPreservingUserData(newDir, existingDir);
-        }
-        finally
-        {
-            // 临时文件夹已经合并完成，不再需要；就算合并中途抛异常，也尝试清理掉，
-            // 避免版本列表里多出一个不明所以、内容残缺的临时文件夹。
-            try { if (Directory.Exists(newDir)) Directory.Delete(newDir, recursive: true); } catch { /* 忽略清理失败 */ }
-        }
-
-        // 走到这里说明合并没有抛异常，视为操作成功：弹出左下角"是否删除本次备份"通知，
-        // 明确建议先启动验证再删——见 InstanceBackupService.NotifyBackupCreated 的注释。
-        if (backupZipPath != null)
-            InstanceBackupService.NotifyBackupCreated(backupZipPath, DescribeBackupReason(backupReason));
-
-        return existingVersionId;
+        var backup = await new InstalledVersionMaintenanceService(_maintenanceConfig).ApplyAsync(root, id, change, progress, ct);
+        InstanceBackupService.NotifyBackupCreated(backup, "版本与组件修改");
+        return id;
     }
 
-    private static string DescribeBackupReason(string backupReason) => backupReason switch
-    {
-        "fabric_change" => "Fabric 加载器版本转换",
-        "quilt_change" => "Quilt 加载器版本转换",
-        "forge_change" => "Forge 加载器版本转换",
-        "neoforge_change" => "NeoForge 加载器版本转换",
-        _ => "加载器操作",
-    };
-
-    /// <summary>原地更换/升级/降级/重装 Fabric（同一个 loaderVersion 传当前版本号即为"重装"）。</summary>
     public Task<string> ChangeFabricLoaderInPlaceAsync(string minecraftDir, string existingVersionId,
         string mcVersion, string loaderVersion, IProgress<ProgressInfo>? progress, CancellationToken ct = default,
         bool installFabricApi = false)
-        => ChangeLoaderInPlaceAsync(minecraftDir, existingVersionId,
-            innerCt => InstallFabricClientAsync(minecraftDir, mcVersion, loaderVersion, progress, innerCt, installFabricApi),
-            "fabric_change", progress, ct);
+    {
+        if (installFabricApi) throw new NotSupportedException("请在 Mod 管理中添加或更新 Fabric API，以保留模组选择和兼容性检查。");
+        return ApplyComponentChangeAsync(minecraftDir, existingVersionId,
+            new InstalledVersionChange(mcVersion, ServerCoreType.Fabric, loaderVersion), progress, ct);
+    }
 
-    /// <summary>原地更换/升级/降级/重装 Quilt。</summary>
     public Task<string> ChangeQuiltLoaderInPlaceAsync(string minecraftDir, string existingVersionId,
         string mcVersion, string loaderVersion, IProgress<ProgressInfo>? progress, CancellationToken ct = default,
         bool installQsl = false)
-        => ChangeLoaderInPlaceAsync(minecraftDir, existingVersionId,
-            innerCt => InstallQuiltClientAsync(minecraftDir, mcVersion, loaderVersion, progress, innerCt, installQsl),
-            "quilt_change", progress, ct);
+    {
+        if (installQsl) throw new NotSupportedException("请在 Mod 管理中添加或更新 QSL，以保留模组选择和兼容性检查。");
+        return ApplyComponentChangeAsync(minecraftDir, existingVersionId,
+            new InstalledVersionChange(mcVersion, ServerCoreType.Quilt, loaderVersion), progress, ct);
+    }
 
-    /// <summary>原地更换/升级/降级/重装 Forge 或 NeoForge。</summary>
     public Task<string> ChangeForgeOrNeoForgeLoaderInPlaceAsync(string minecraftDir, string existingVersionId,
         ServerCoreType coreType, string fullVersion, string javaExePath,
         IProgress<ProgressInfo>? progress, CancellationToken ct = default)
-        => ChangeLoaderInPlaceAsync(minecraftDir, existingVersionId,
-            innerCt => InstallForgeOrNeoForgeClientAsync(minecraftDir, coreType, fullVersion, javaExePath, progress, innerCt),
-            coreType == ServerCoreType.Forge ? "forge_change" : "neoforge_change", progress, ct);
+    {
+        var minecraft = coreType switch
+        {
+            ServerCoreType.Forge when fullVersion.Contains('-') => fullVersion.Split('-')[0],
+            ServerCoreType.NeoForge => ComponentProfileComposer.MinecraftForNeoForge(fullVersion),
+            _ => null
+        };
+        if (minecraft == null) throw new InvalidOperationException("无法从组件版本确定 Minecraft 版本，请使用版本与组件窗口选择兼容构建。");
+        return ApplyComponentChangeAsync(minecraftDir, existingVersionId,
+            new InstalledVersionChange(minecraft, coreType, fullVersion, javaExePath), progress, ct);
+    }
 
     /// <summary>释放内部 _vanillaDownloader（进而释放它可能持有的智能限速后台采样任务）。</summary>
-    public void Dispose() => _vanillaDownloader.Dispose();
+    public void Dispose() { _vanillaDownloader.Dispose(); _http.Dispose(); }
 }

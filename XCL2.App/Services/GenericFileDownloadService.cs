@@ -10,7 +10,7 @@ namespace XCL2.App.Services;
 /// </summary>
 public class GenericFileDownloadService : IDisposable
 {
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(30) };
+    private readonly HttpClient _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(30));
 
     public void Dispose() => _http.Dispose();
 

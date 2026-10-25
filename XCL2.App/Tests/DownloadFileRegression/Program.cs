@@ -274,6 +274,7 @@ try
     }
     await DownloadBatchCases.RunAsync(root);
     await DownloadAccelerationCases.RunAsync(root);
+    await DownloadResumeSafetyCases.RunAsync(root);
     Console.WriteLine("DownloadFileRegression passed: actual transfer fallback, target ownership, cancellation, child process, periodic game state.");
 }
 finally { Directory.Delete(root, recursive: true); }

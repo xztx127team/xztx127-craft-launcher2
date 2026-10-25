@@ -40,7 +40,7 @@ namespace System.Windows
 
 namespace XCL2.App.Models
 {
-    public sealed class AppConfig
+    public sealed partial class AppConfig
     {
         public double TouchOverlayButtonScale { get; set; } = 1;
         public double TouchOverlayOpacityPercent { get; set; } = 85;

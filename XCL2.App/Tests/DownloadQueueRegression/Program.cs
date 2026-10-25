@@ -48,6 +48,7 @@ var canceledItem = queue.Items.Last();
 callerCts.Cancel();
 await cleanupStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 Require(!canceled.IsCompleted && canceledItem.IsRunning, "Cancellation returned before cleanup");
+Require(queue.HasActive, "Update exit could proceed while canceled download still cleans up");
 Require(queue.FindActiveForVersion(folder + Path.DirectorySeparatorChar, "1.20.1") == canceledItem,
     "Canceled-but-writing task lost its reservation");
 try
@@ -88,6 +89,7 @@ await pauseObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
 Require(!resumable.CanResume, "Resume allowed before old writer stopped");
 pauseCleanup.SetResult(true);
 Require(await resumable.Completion == DownloadQueueItemStatus.Paused && resumable.CanResume, "Pause state incorrect");
+Require(queue.HasActive, "Update exit could abandon a paused task");
 queue.Resume(resumable);
 Require(await resumable.Completion == DownloadQueueItemStatus.Completed && attempts == 2, "Resume did not start one fresh attempt");
 
@@ -352,6 +354,29 @@ try
     Require(!queue.Items.Contains(pausedWithFiles) && canceledNotifications == 1, "Second remove recorded a duplicate cancellation");
 }
 finally { Directory.Delete(cleanupRoot, true); }
+// Update exit must be blocked by unrelated work after the updater's own item finishes.
+// Use real queue transitions, not a manually constructed terminal-state predicate.
+queue.Config = new XCL2.App.Models.AppConfig { DownloadTaskConcurrency = 0 };
+Require(!queue.HasActive, "Prior fixtures left active work");
+var otherWorkGate = Signal();
+var otherWork = queue.StartNew("other download during update", async (_, _) => await otherWorkGate.Task);
+var updateWork = queue.RunAndWaitAsync("launcher update download", (_, _) => Task.FromResult(true));
+Require(await updateWork && queue.HasActive, "Completed updater hid another active download");
+otherWorkGate.SetResult(true);
+Require(await otherWork.Completion == DownloadQueueItemStatus.Completed && !queue.HasActive,
+    "Completed update itself permanently blocked update exit");
+queue.Config.DownloadTaskConcurrency = 1;
+var firstWorkGate = Signal();
+var firstWork = queue.StartNew("update gate first", async (_, _) => await firstWorkGate.Task);
+var waitingWork = queue.StartNew("update gate waiting", (_, _) => Task.CompletedTask);
+Require(waitingWork.Status == DownloadQueueItemStatus.Waiting && queue.HasActive,
+    "Waiting download was not protected by update exit gate");
+firstWorkGate.SetResult(true);
+Require(await firstWork.Completion == DownloadQueueItemStatus.Completed &&
+    await waitingWork.Completion == DownloadQueueItemStatus.Completed && !queue.HasActive,
+    "Drained queue did not allow update exit");
+queue.Config.DownloadTaskConcurrency = 0;
+
 await DownloadLifecycleCases.RunAsync();
 await Ux50DownloadCases.RunAsync();
 Console.WriteLine("Download queue scheduling, retry, safe cleanup, limiter, Java metadata, paused checkpoint recovery and Ux50 cases passed.");
