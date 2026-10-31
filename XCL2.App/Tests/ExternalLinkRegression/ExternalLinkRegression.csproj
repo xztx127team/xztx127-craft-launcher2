@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/ExternalLinkService.cs" Link="ExternalLinkService.cs" />
+    <Compile Include="../../Services/EmbeddedWebView.cs" Link="EmbeddedWebView.cs" />
+    <Compile Include="../../Services/HongheAssetPolicy.cs" Link="HongheAssetPolicy.cs" />
+    <Compile Include="../../Views/Tools/Web2BrowserTool.xaml.cs" Link="Web2BrowserTool.xaml.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/SettingsInputValidation.cs" Link="SettingsInputValidation.cs" />
+    <Compile Include="../../Services/InputExperiencePolicy.cs" Link="InputExperiencePolicy.cs" />
+    <Compile Include="../../Services/ErrorCatalog.cs" Link="ErrorCatalog.cs" />
+    <Compile Include="../../Services/ErrorReport.cs" Link="ErrorReport.cs" />
+    <Compile Include="../../Services/DiagnosticRedactionService.cs" Link="DiagnosticRedactionService.cs" />
+      <Compile Include="../../Services/LogTextEncoding.cs" Link="LogTextEncoding.cs"/>
+  </ItemGroup>
+</Project>

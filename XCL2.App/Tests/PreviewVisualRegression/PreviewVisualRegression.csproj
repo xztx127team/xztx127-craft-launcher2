@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF><EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>XCL2</AssemblyName><RootNamespace>XCL2.App</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/PreviewFluentTheme.cs" Link="PreviewFluentTheme.cs"/>
+    <Compile Include="../../Services/RoundedClipBehavior.cs" Link="RoundedClipBehavior.cs"/>
+    <Compile Include="../../Services/PreviewLayoutOverrides.cs" Link="PreviewLayoutOverrides.cs"/>
+    <Compile Include="../../Services/PreviewPagePalette.cs" Link="PreviewPagePalette.cs"/>
+    <Compile Include="../../Views/RightAlignedWrapPanel.cs" Link="RightAlignedWrapPanel.cs"/>
+    <Compile Include="../../Models/ScreenHeightFractionConverter.cs" Link="ScreenHeightFractionConverter.cs"/>
+    <Page Include="../../Resources/Themes/PreviewFluent.xaml" Link="Resources/Themes/PreviewFluent.xaml"/>
+  </ItemGroup>
+</Project>

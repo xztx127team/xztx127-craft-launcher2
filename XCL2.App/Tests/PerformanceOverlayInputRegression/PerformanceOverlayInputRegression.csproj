@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup><Using Remove="System.Windows.Forms"/><Using Remove="System.Drawing"/></ItemGroup>
+  <ItemGroup>
+    <Page Include="../../Views/PerformanceOverlayWindow.xaml" Link="Views/PerformanceOverlayWindow.xaml" />
+    <Compile Include="../../Views/PerformanceOverlayWindow.xaml.cs" Link="Views/PerformanceOverlayWindow.xaml.cs" />
+    <Compile Include="../../Views/PerformanceOverlayHandleWindow.cs" Link="Views/PerformanceOverlayHandleWindow.cs" />
+    <Compile Include="../../Services/ForcedTopmostService.cs" Link="ForcedTopmostService.cs" />
+    <Compile Include="../../Services/NativeWindowDragGesture.cs" Link="NativeWindowDragGesture.cs" />
+    <Compile Include="../../Services/MemoryOptimizationMenu.cs" Link="MemoryOptimizationMenu.cs" />
+    <Compile Include="../../Services/WorkingSetOptimizationService.cs" Link="WorkingSetOptimizationService.cs" />
+    <Compile Include="../../Models/AppConfig.MemoryCleanup.cs" Link="AppConfig.MemoryCleanup.cs" />
+    <Compile Include="../../Services/MenuOutsideClickDismissal.cs" Link="MenuOutsideClickDismissal.cs" />
+    <Compile Include="../../Services/WindowTreatmentPolicy.cs" Link="WindowTreatmentPolicy.cs" />
+    <Compile Include="../../Services/PerformanceOverlaySettings.cs" Link="PerformanceOverlaySettings.cs" />
+    <Compile Include="../../Services/PerformanceOverlayTemplateFormatter.cs" Link="PerformanceOverlayTemplateFormatter.cs" />
+    <Compile Include="../../Services/PerformanceHardwareDetails.cs" Link="PerformanceHardwareDetails.cs" />
+    <Compile Include="../../Services/PerformanceMetricsMath.cs" Link="PerformanceMetricsMath.cs" />
+    <Compile Include="../../Models/PerformanceMetrics.cs" Link="PerformanceMetrics.cs" />
+    <Compile Include="../../Models/AppConfig.PerformanceLayout.cs" Link="AppConfig.PerformanceLayout.cs" />
+    <Compile Include="../../Models/AppConfig.HardwarePerformance.cs" Link="AppConfig.HardwarePerformance.cs" />
+    <Compile Include="../../Models/AppConfig.PerformanceHardwareDetails.cs" Link="AppConfig.PerformanceHardwareDetails.cs" />
+    <Compile Include="../PerformanceMetricsRegression/AppConfigStub.cs" Link="AppConfigStub.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,849 @@
+using System.IO;
+using System.IO.Compression;
+using System.Net.Http;
+using System.Text.Json;
+using Microsoft.Win32;
+
+namespace XCL2.App.Services;
+
+/// <summary>Java 下载安装方式：Portable=解压到 xcl2/runtime 便携使用；System=安装到系统 Program Files 目录（需管理员权限运行安装程序）。</summary>
+public enum JavaInstallMode
+{
+    Portable,
+    System
+}
+
+/// <summary>下载 Java 前的用户选择：主版本号(8~26)、架构(x64/x86)、安装方式。</summary>
+public record JavaDownloadRequest(int MajorVersion, string Arch, JavaInstallMode InstallMode);
+
+/// <summary>全盘扫描找到的一个 Java 候选：javaw.exe 路径 + (尽力探测到的)版本号字符串，探测失败时 Version 为 null。</summary>
+public record JavaCandidate(string JavawPath, string? Version);
+
+/// <summary>
+/// Java 运行时管理：
+/// - 探测系统已安装 / 已下载便携版 Java。
+/// - 支持按用户指定的版本(8~26)、架构(x64/x86)、安装方式(便携zip/系统安装)下载。
+/// 下载优先走 Adoptium(Eclipse Temurin) 官方 API（有完整版本查询能力），
+/// 失败时回退 BMCLAPI 镜像（仅覆盖常见 LTS 版本 8/11/17/21）。
+/// </summary>
+public class JavaService
+{
+    private readonly HttpClient _http = LauncherHttpClientFactory.Create(TimeSpan.FromMinutes(15));
+
+    public string RuntimeDir { get; } = Path.Combine(App.DataDir, "runtime");
+
+    /// <summary>Adoptium 目前发布 GA 正式版的主版本号（LTS + 最新特性版）。其余版本号大多只有 EA/已过期，选择时给出提示。</summary>
+    public static readonly int[] KnownGoodMajorVersions = { 8, 11, 17, 21, 25, 26 };
+
+    internal static bool IsJavaMajorCompatible(int detectedMajor, int requiredMajor)
+    {
+        if (detectedMajor == requiredMajor) return true;
+        if (requiredMajor == 16 && detectedMajor == 17) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// 自动下载 Java 时实际去下的主版本号：Java 16 是短生命周期的特性版，早已 EOL，
+    /// Adoptium 官方和 BMCLAPI 镜像现在都下不到它了（见 KnownGoodMajorVersions，16 根本
+    /// 不在里面）。要求是 16 时（也就是 1.17）改成下载 17，跟 IsJavaMajorCompatible 放行
+    /// 17 是同一个决定的两面——不然会出现"允许用已装的 17，但没装时非要下一个下不到的 16"
+    /// 这种自相矛盾的情况。
+    /// </summary>
+    internal static int GetDownloadTargetMajorVersion(int requiredMajor) => requiredMajor == 16 ? 17 : requiredMajor;
+
+    /// <summary>实际选中的 Java 位数；未知返回 null，不使用启动器/操作系统位数代替。</summary>
+    public static int? TryGetJavaBitness(string? javaPath) => JavaExecutableArchitecture.TryReadBitness(javaPath);
+
+    public string? FindJava(string? configuredPath, int? preferMajorVersion = null, ConfigService? configService = null)
+        => FindJava(configuredPath, preferMajorVersion, configService, CancellationToken.None, null);
+
+    public string? FindJava(string? configuredPath, int? preferMajorVersion, ConfigService? configService,
+        CancellationToken cancellationToken, IReadOnlyList<string>? registeredJavaPaths)
+    {
+        var probedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 第一优先级：用户在"Java 列表"里维护的、按 Priority 排序的登记项。
+        // 只有传入了 configService 时才会走这条路径——保持该方法在没有 ConfigService 上下文的
+        // 调用点(比如单测/独立工具)下行为不变，不强制要求调用方总是传配置。
+        var registeredPaths = registeredJavaPaths ?? configService?.GetJavaListInPriorityOrder().Select(entry => entry.JavawPath).ToArray();
+        if (registeredPaths != null)
+        {
+            foreach (var registeredPath in registeredPaths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrEmpty(registeredPath) || !File.Exists(registeredPath)) continue;
+
+                if (preferMajorVersion is not > 0)
+                    return registeredPath; // 没有版本要求：列表里优先级最高的可用项直接命中
+                if (!probedPaths.Add(registeredPath)) continue;
+
+                // The executable may have been replaced in-place since it was registered.
+                // Stored metadata is for display; actual automatic selection probes the current file.
+                var detected = TryGetJavaMajorVersionSync(registeredPath, cancellationToken);
+                if (detected is int detectedListMajor && IsJavaMajorCompatible(detectedListMajor, preferMajorVersion.Value))
+                    return registeredPath;
+            }
+        }
+
+        // 收集所有"候选"，而不是找到第一个就直接返回——这样在有版本要求时可以继续往下找
+        // 真正匹配的那一个，而不是被一个凑巧存在但版本不对的路径卡住。
+        var orderedCandidates = new List<string>();
+
+        if (!string.IsNullOrEmpty(configuredPath) && File.Exists(configuredPath))
+            orderedCandidates.Add(configuredPath);
+
+        if (Directory.Exists(RuntimeDir))
+        {
+            orderedCandidates.AddRange(
+                Directory.GetDirectories(RuntimeDir)
+                    .Select(dir => Path.Combine(dir, "bin", "javaw.exe"))
+                    .Where(File.Exists));
+        }
+
+        var javaHome = JavaEnvironmentPaths.NormalizeDirectory(Environment.GetEnvironmentVariable("JAVA_HOME"));
+        if (!string.IsNullOrEmpty(javaHome))
+        {
+            var p = Path.Combine(javaHome, "bin", "javaw.exe");
+            if (File.Exists(p)) orderedCandidates.Add(p);
+        }
+
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\JavaSoft\Java Runtime Environment")
+                             ?? Registry.LocalMachine.OpenSubKey(@"SOFTWARE\JavaSoft\JDK");
+            var version = key?.GetValue("CurrentVersion") as string;
+            if (version != null)
+            {
+                using var verKey = key!.OpenSubKey(version);
+                var home = verKey?.GetValue("JavaHome") as string;
+                if (home != null)
+                {
+                    var p = Path.Combine(home, "bin", "javaw.exe");
+                    if (File.Exists(p)) orderedCandidates.Add(p);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogFallback("读取系统 Java 注册表失败，已继续尝试其它 Java 来源。", ex);
+        }
+
+        orderedCandidates.AddRange(JavaEnvironmentPaths.FindExecutables(JavaEnvironmentPaths.ReadSearchPath()));
+
+        orderedCandidates = orderedCandidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (orderedCandidates.Count == 0) return null;
+
+        if (preferMajorVersion is not > 0)
+            return orderedCandidates[0]; // 没有版本要求：保持旧行为，第一个能用的就用
+
+        // 有版本要求：实际探测每个候选的版本号（而不是猜文件夹名），找到第一个真正匹配的。
+        foreach (var candidate in orderedCandidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!probedPaths.Add(candidate)) continue;
+            var detected = TryGetJavaMajorVersionSync(candidate, cancellationToken);
+            if (detected is int detectedCandidateMajor && IsJavaMajorCompatible(detectedCandidateMajor, preferMajorVersion.Value))
+                return candidate;
+        }
+
+        // 没有任何候选匹配要求的版本：返回 null，让上层去下载正确版本，
+        // 而不是硬塞一个版本不对的 Java 导致 UnsupportedClassVersionError。
+        return null;
+    }
+
+    /// <summary>同步版本探测（FindJava 是同步方法，不方便改造成 async）：调用 "java -version"，从形如
+    /// java version "21.0.5" / openjdk version "1.8.0_412" 的输出里解析出主版本号。
+    /// 公开出来是因为启动前"检查用户手动指定的 Java 跟该版本要求是否匹配"(MainWindow.LaunchInternalAsync)
+    /// 需要复用同一份探测逻辑，不想再实现一份重复的调进程代码。</summary>
+    public static int? TryGetJavaMajorVersionSync(string javawPath)
+        => TryGetJavaMajorVersionSync(javawPath, CancellationToken.None);
+
+    public static int? TryGetJavaMajorVersionSync(string javawPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var javaExe = ResolveProbeExecutable(javawPath);
+            if (!File.Exists(javaExe)) return null;
+            var output = JavaProcessProbe.ReadVersionOutputAsync(javaExe, TimeSpan.FromSeconds(5), cancellationToken)
+                .GetAwaiter().GetResult();
+            return output == null ? null : ParseJavaMajorVersion(output);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogFallback($"探测 Java 版本失败：{javawPath}", ex);
+            return null;
+        }
+    }
+
+    private static string ResolveProbeExecutable(string javaPath)
+    {
+        if (string.Equals(Path.GetFileName(javaPath), "javaw.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            var console = Path.Combine(Path.GetDirectoryName(javaPath) ?? "", "java.exe");
+            if (File.Exists(console)) return console;
+        }
+        return javaPath;
+    }
+
+    /// <summary>
+    /// 解析 "java -version" 输出里的主版本号。兼容两种历史格式：
+    /// - 旧式(Java 8 及以前): "1.8.0_412" -> 主版本号是第二段 "8"
+    /// - 新式(Java 9+，JEP 223 起): "21.0.5" / "17" -> 主版本号就是第一段
+    /// </summary>
+    internal static int? ParseJavaMajorVersion(string versionOutput)
+        => JavaVersionOutputPolicy.ParseMajor(versionOutput);
+
+    /// <summary>
+    /// 快速探测本机 Java：只查常见位置——便携版目录(RuntimeDir)、JAVA_HOME、
+    /// 注册表、PATH 环境变量，不遍历整个磁盘，供设置页 Java 列表的"刷新"按钮使用。
+    /// 和 FindJava() 走的是同一批候选来源，区别是这里返回全部候选(带实测版本号)供用户在列表里
+    /// 挑选/一键批量登记，而不是只取第一个能用的。跟 ScanWholeDiskForJavaAsync（全盘扫描，
+    /// 需要用户二次确认、耗时可能几分钟）是两个不同粒度的功能，不要混用。
+    /// </summary>
+    public Task<List<JavaCandidate>> QuickDetectJavaAsync(CancellationToken ct = default)
+        => QuickDetectJavaAsync(ct, null);
+
+    public async Task<List<JavaCandidate>> QuickDetectJavaAsync(CancellationToken ct,
+        IReadOnlyList<string>? registeredJavaPaths)
+    {
+        // Re-probe manually registered paths as well: an in-place update need not
+        // live in any of the known discovery directories.
+        var orderedCandidates = (registeredJavaPaths ?? Array.Empty<string>()).Where(File.Exists).ToList();
+
+        if (Directory.Exists(RuntimeDir))
+        {
+            orderedCandidates.AddRange(
+                Directory.GetDirectories(RuntimeDir)
+                    .Select(dir => Path.Combine(dir, "bin", "javaw.exe"))
+                    .Where(File.Exists));
+        }
+
+        var javaHome = JavaEnvironmentPaths.NormalizeDirectory(Environment.GetEnvironmentVariable("JAVA_HOME"));
+        if (!string.IsNullOrEmpty(javaHome))
+        {
+            var p = Path.Combine(javaHome, "bin", "javaw.exe");
+            if (File.Exists(p)) orderedCandidates.Add(p);
+        }
+
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\JavaSoft\Java Runtime Environment")
+                             ?? Registry.LocalMachine.OpenSubKey(@"SOFTWARE\JavaSoft\JDK");
+            var version = key?.GetValue("CurrentVersion") as string;
+            if (version != null)
+            {
+                using var verKey = key!.OpenSubKey(version);
+                var home = verKey?.GetValue("JavaHome") as string;
+                if (home != null)
+                {
+                    var p = Path.Combine(home, "bin", "javaw.exe");
+                    if (File.Exists(p)) orderedCandidates.Add(p);
+                }
+            }
+
+            // 常见安装场景里注册表下会有多个版本子键(不止 CurrentVersion 指向的那个)，
+            // 例如同时装了 Java 8 和 Java 21——把每个子键都探测一遍，而不是只看 CurrentVersion。
+            using var jreRoot = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\JavaSoft\Java Runtime Environment");
+            using var jdkRoot = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\JavaSoft\JDK");
+            foreach (var root in new[] { jreRoot, jdkRoot })
+            {
+                if (root == null) continue;
+                foreach (var subName in root.GetSubKeyNames())
+                {
+                    using var sub = root.OpenSubKey(subName);
+                    var home = sub?.GetValue("JavaHome") as string;
+                    if (home == null) continue;
+                    var p = Path.Combine(home, "bin", "javaw.exe");
+                    if (File.Exists(p)) orderedCandidates.Add(p);
+                }
+            }
+        }
+        catch { /* 忽略注册表访问异常 */ }
+
+        // Eclipse Adoptium 系统安装模式常见的固定路径，注册表键名跟版本走(不一定叫上面那两个)，
+        // 直接兜底扫一下该目录本身，避免用户用"系统安装"方式装的 Java 探测不到。
+        try
+        {
+            const string adoptiumRoot = @"C:\Program Files\Eclipse Adoptium";
+            if (Directory.Exists(adoptiumRoot))
+            {
+                orderedCandidates.AddRange(
+                    Directory.GetDirectories(adoptiumRoot)
+                        .Select(dir => Path.Combine(dir, "bin", "javaw.exe"))
+                        .Where(File.Exists));
+            }
+        }
+        catch { /* 忽略访问异常 */ }
+
+        // 官方启动器 / HMCL / PCL 等主流第三方启动器下载的便携版 Java 大多放在用户 AppData 目录下
+        // （例如官方启动器的 %AppData%\.minecraft\runtime\，HMCL 的 %AppData%\.hmcl\java\ 等），
+        // 之前完全没有扫描过这些位置，导致"明明用其他启动器下载过 Java，这边却探测不到"。
+        // 这里补上对几个常见启动器 AppData 目录的扫描，只扫固定的几层子目录，不做递归全盘扫描
+        // （那是 ScanWholeDiskForJavaAsync 的职责），保持该方法本身"几秒内完成"的定位。
+        try
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (!string.IsNullOrEmpty(appData))
+            {
+                var appDataJavaRoots = new[]
+                {
+                    Path.Combine(appData, ".minecraft", "runtime"),   // 官方启动器
+                    Path.Combine(appData, ".hmcl", "java"),           // HMCL
+                    Path.Combine(appData, "PCL", "Java"),             // PCL / PCL2
+                    Path.Combine(appData, "PCL2", "Java"),
+                };
+                foreach (var root in appDataJavaRoots)
+                {
+                    if (!Directory.Exists(root)) continue;
+                    // 这些目录下 Java 安装通常再嵌套 1~2 层(如 runtime/java-runtime-gamma/windows-x64/xxx/bin)，
+                    // 用 AllDirectories 递归查找 javaw.exe，但只在该已知的固定根目录下递归，
+                    // 范围很小，不会像全盘扫描那样耗时。
+                    try
+                    {
+                        orderedCandidates.AddRange(
+                            Directory.GetFiles(root, "javaw.exe", SearchOption.AllDirectories));
+                    }
+                    catch { /* 单个根目录访问失败不影响其余根目录 */ }
+                }
+            }
+        }
+        catch { /* 忽略 AppData 路径解析异常 */ }
+
+        // 其他常见第三方 JDK 发行版：Azul Zulu、Amazon Corretto、BellSoft Liberica、
+        // Microsoft Build of OpenJDK、Oracle JDK。这些发行版大多不走上面
+        // SOFTWARE\JavaSoft\... 这条标准注册表路径，而是各自用自己的键名/固定安装目录，
+        // 之前只探测标准路径时会完全漏掉这些——如果用户反馈"明明装了 Java 但探测不到"，
+        // 大概率就是装的这几种发行版之一。这里同时兜底"固定安装目录扫一遍" +
+        // "各自的注册表键（如果有）"两种方式，尽量覆盖默认安装选项。
+        var thirdPartyInstallRoots = new[]
+        {
+            @"C:\Program Files\Zulu",                 // Azul Zulu 默认安装目录
+            @"C:\Program Files\Amazon Corretto",       // Amazon Corretto
+            @"C:\Program Files\BellSoft\LibericaJDK",  // BellSoft Liberica
+            @"C:\Program Files\Microsoft\jdk",         // Microsoft Build of OpenJDK (msi 默认)
+            @"C:\Program Files\Java",                  // Oracle JDK 传统默认目录
+        };
+        foreach (var root in thirdPartyInstallRoots)
+        {
+            try
+            {
+                if (!Directory.Exists(root)) continue;
+                orderedCandidates.AddRange(
+                    Directory.GetDirectories(root)
+                        .Select(dir => Path.Combine(dir, "bin", "javaw.exe"))
+                        .Where(File.Exists));
+            }
+            catch { /* 忽略单个目录的访问异常，不影响其余候选的探测 */ }
+        }
+
+        // 部分发行版自己的注册表根键（不是每个都有，逐个 try 互不影响）：
+        // - Zulu 通常写在 SOFTWARE\Azul Systems\Zulu 下，子键名形如 "zulu-21"
+        // - Corretto 有的版本会额外写一份 SOFTWARE\Amazon Corretto
+        // - Oracle 新版 JDK 装到 SOFTWARE\JavaSoft\JDK 已经在上面覆盖了，这里再补一个
+        //   老版本可能用到的 SOFTWARE\JavaSoft\Java Development Kit
+        var extraRegistryRoots = new[]
+        {
+            @"SOFTWARE\Azul Systems\Zulu",
+            @"SOFTWARE\Amazon Corretto",
+            @"SOFTWARE\JavaSoft\Java Development Kit",
+        };
+        foreach (var regRoot in extraRegistryRoots)
+        {
+            try
+            {
+                using var root = Registry.LocalMachine.OpenSubKey(regRoot);
+                if (root == null) continue;
+                foreach (var subName in root.GetSubKeyNames())
+                {
+                    using var sub = root.OpenSubKey(subName);
+                    // 不同发行版该字段名不完全一致，两个都试一下，取到第一个非空的。
+                    var home = sub?.GetValue("JavaHome") as string ?? sub?.GetValue("InstallDir") as string;
+                    if (home == null) continue;
+                    var p = Path.Combine(home, "bin", "javaw.exe");
+                    if (File.Exists(p)) orderedCandidates.Add(p);
+                }
+            }
+            catch { /* 忽略访问异常，某个发行版没装/没有该注册表键是正常情况 */ }
+        }
+
+        orderedCandidates.AddRange(JavaEnvironmentPaths.FindExecutables(JavaEnvironmentPaths.ReadSearchPath()));
+
+        orderedCandidates = orderedCandidates.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        var results = new List<JavaCandidate>();
+        foreach (var path in orderedCandidates)
+        {
+            ct.ThrowIfCancellationRequested();
+            var version = await TryGetJavaVersionAsync(path, ct);
+            results.Add(new JavaCandidate(path, version));
+        }
+        return results;
+    }
+
+    public async Task<List<JavaCandidate>> ScanCommonJavaLocationsAsync(CancellationToken ct = default)
+    {
+        const int maxDirDepth = 4;   // 找"疑似 JDK 文件夹"最多下钻层数
+        const int maxJavawDepth = 6; // 命中疑似目录后，找 javaw.exe 最多再下钻层数
+
+        var roots = new List<string>();
+
+        try
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (!string.IsNullOrEmpty(appData)) roots.Add(appData);
+        }
+        catch { /* 忽略路径解析异常 */ }
+
+        var programFilesRoots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+        };
+        roots.AddRange(programFilesRoots.Where(p => !string.IsNullOrEmpty(p)));
+
+        try
+        {
+            var javaHome = Environment.GetEnvironmentVariable("JAVA_HOME");
+            if (!string.IsNullOrEmpty(javaHome))
+            {
+                var parent = Path.GetDirectoryName(javaHome.TrimEnd('\\', '/'));
+                if (!string.IsNullOrEmpty(parent)) roots.Add(parent);
+            }
+        }
+        catch { /* 忽略 JAVA_HOME 解析异常 */ }
+
+        roots = roots.Distinct(StringComparer.OrdinalIgnoreCase).Where(Directory.Exists).ToList();
+
+        var javawPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var root in roots)
+        {
+            ct.ThrowIfCancellationRequested();
+            foreach (var candidateDir in FindLikelyJdkFolders(root, maxDirDepth, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                foreach (var javawPath in FindJavawUnder(candidateDir, maxJavawDepth, ct))
+                    javawPaths.Add(javawPath);
+            }
+        }
+
+        var results = new List<JavaCandidate>();
+        foreach (var path in javawPaths)
+        {
+            ct.ThrowIfCancellationRequested();
+            var version = await TryGetJavaVersionAsync(path, ct);
+            results.Add(new JavaCandidate(path, version));
+        }
+        return results;
+    }
+
+    /// <summary>在 root 下最多 maxDepth 级里查找"疑似 JDK/JRE 文件夹"：目录名带 jdk/jre/java
+    /// 关键字，或者自身直接有 bin 子目录。命中即返回（不再往该分支更深处找疑似目录——
+    /// 找到的该目录本身就交给 FindJavawUnder 去查 javaw.exe，避免同一棵子树被重复扫描）。</summary>
+    private static IEnumerable<string> FindLikelyJdkFolders(string root, int maxDepth, CancellationToken ct)
+    {
+        var queue = new Queue<(string Dir, int Depth)>();
+        queue.Enqueue((root, 0));
+
+        while (queue.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (dir, depth) = queue.Dequeue();
+
+            bool looksLikeJdk;
+            try
+            {
+                var name = Path.GetFileName(dir.TrimEnd('\\', '/'));
+                looksLikeJdk = name.Contains("jdk", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("jre", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("java", StringComparison.OrdinalIgnoreCase)
+                    || Directory.Exists(Path.Combine(dir, "bin"));
+            }
+            catch { continue; }
+
+            if (looksLikeJdk && depth > 0) // 根目录自己（如 AppData）不算"疑似 JDK 文件夹"，避免把整个根目录都当成候选去扫
+            {
+                yield return dir;
+                continue; // 命中就不再往该分支更深处找，交给 FindJavawUnder 继续
+            }
+
+            if (depth >= maxDepth) continue;
+
+            string[] subDirs;
+            try { subDirs = Directory.GetDirectories(dir); }
+            catch { continue; }
+
+            foreach (var sub in subDirs)
+            {
+                var subName = Path.GetFileName(sub);
+                if (subName.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+                    subName.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                queue.Enqueue((sub, depth + 1));
+            }
+        }
+    }
+
+    /// <summary>在 root 下最多 maxDepth 级里查找 javaw.exe。</summary>
+    private static IEnumerable<string> FindJavawUnder(string root, int maxDepth, CancellationToken ct)
+    {
+        var queue = new Queue<(string Dir, int Depth)>();
+        queue.Enqueue((root, 0));
+
+        while (queue.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var (dir, depth) = queue.Dequeue();
+
+            string[] files;
+            try { files = Directory.GetFiles(dir, "javaw.exe"); }
+            catch { continue; }
+            foreach (var f in files) yield return f;
+
+            if (depth >= maxDepth) continue;
+
+            string[] subDirs;
+            try { subDirs = Directory.GetDirectories(dir); }
+            catch { continue; }
+            foreach (var sub in subDirs)
+                queue.Enqueue((sub, depth + 1));
+        }
+    }
+
+    /// <summary>
+    /// 全盘扫描找 Java（全新的可选功能）：
+    /// - 默认不会调用该方法。只有用户在设置里手动打开"全盘扫描"开关、并在弹窗里明确点了"同意"，
+    ///   UI 层才会调该方法；FindJava() 本身完全不受影响，永远只看默认路径
+    ///   (配置里手动指定的路径 / JAVA_HOME / 注册表 / PATH / 便携版目录)。
+    /// - 扫描范围：本机所有"固定盘"(排除可移动盘/光驱/网络盘，避免翻一整晚)的常见安装位置和整个盘根，
+    ///   查找 javaw.exe，并尝试用 "javaw -version" 反查每个候选的版本号，方便用户直接选择匹配版本。
+    /// - 这是一个耗时操作(可能几分钟)，调用方应该在后台线程跑，并展示进度/可取消。
+    /// </summary>
+    public async Task<List<JavaCandidate>> ScanWholeDiskForJavaAsync(IProgress<string>? progress, CancellationToken ct = default)
+    {
+        var results = new List<JavaCandidate>();
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var drives = DriveInfo.GetDrives()
+            .Where(d => d.DriveType == DriveType.Fixed && d.IsReady)
+            .Select(d => d.RootDirectory.FullName)
+            .ToList();
+
+        foreach (var root in drives)
+        {
+            ct.ThrowIfCancellationRequested();
+            progress?.Report($"正在扫描 {root} ...");
+
+            IEnumerable<string> found;
+            try
+            {
+                // EnumerateFiles 用 AllDirectories 会遍历整个盘符；用 try/catch 逐个跳过没权限访问的目录
+                // (系统保护目录、其他用户的 AppData 等)，避免因为一个目录报错就中断整个扫描。
+                found = SafeEnumerateFiles(root, "javaw.exe", ct);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var path in found)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!seenPaths.Add(path)) continue;
+
+                var version = await TryGetJavaVersionAsync(path, ct);
+                results.Add(new JavaCandidate(path, version));
+                progress?.Report($"找到: {path}" + (version != null ? $" (Java {version})" : ""));
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>安全地递归枚举文件：逐目录下钻，遇到无权限/被占用等异常的子目录直接跳过而不是整体失败。</summary>
+    private static IEnumerable<string> SafeEnumerateFiles(string root, string pattern, CancellationToken ct)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            ct.ThrowIfCancellationRequested();
+            var dir = pending.Pop();
+
+            string[] files;
+            try { files = Directory.GetFiles(dir, pattern); }
+            catch { continue; }
+            foreach (var f in files) yield return f;
+
+            string[] subDirs;
+            try { subDirs = Directory.GetDirectories(dir); }
+            catch { continue; }
+            foreach (var sub in subDirs)
+            {
+                // 跳过明显不会有 Java 的系统噪音目录，减少扫描时间。
+                var name = Path.GetFileName(sub);
+                if (name.Equals("$Recycle.Bin", StringComparison.OrdinalIgnoreCase) ||
+                    name.Equals("System Volume Information", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                pending.Push(sub);
+            }
+        }
+    }
+
+    /// <summary>调用 "javaw -version" 反查候选路径的 Java 版本号，用于展示给用户参考，失败时返回 null（不影响它仍被列为候选）。</summary>
+    private static async Task<string?> TryGetJavaVersionAsync(string javawPath, CancellationToken ct)
+    {
+        try
+        {
+            var javaExe = ResolveProbeExecutable(javawPath);
+            if (!File.Exists(javaExe)) return null;
+            var output = await JavaProcessProbe.ReadVersionOutputAsync(javaExe, TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+            return JavaVersionOutputPolicy.ParseVersion(output);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// 傻瓜模式：不需要用户做任何选择，自动选一个当前系统架构下的推荐 LTS 版本（21），便携安装。
+    /// </summary>
+    public Task<string> DownloadRecommendedJavaAsync(IProgress<ProgressInfo>? progress, CancellationToken ct = default)
+    {
+        var arch = Environment.Is64BitOperatingSystem ? "x64" : "x86";
+        return DownloadJavaAsync(new JavaDownloadRequest(21, arch, JavaInstallMode.Portable), progress, ct);
+    }
+
+    /// <summary>
+    /// 高级模式：按用户指定的版本号、架构、安装方式下载安装 Java，返回可执行的 javaw.exe 路径。
+    /// </summary>
+    public async Task<string> DownloadJavaAsync(JavaDownloadRequest request, IProgress<ProgressInfo>? progress,
+        CancellationToken ct = default)
+    {
+        if (request.MajorVersion is < 8 or > 26)
+            throw new ArgumentOutOfRangeException(nameof(request), "Java 版本号需在 8~26 之间。");
+
+        var arch = request.Arch == "x86" ? "x86" : "x64";
+        Directory.CreateDirectory(RuntimeDir);
+        progress?.Report(new ProgressInfo("获取 Java 列表", 0, 1, $"查询 Java {request.MajorVersion} ({arch})"));
+
+        JavaDownloadSource source;
+        try
+        {
+            source = await ResolveAdoptiumDownloadAsync(request.MajorVersion, arch, request.InstallMode, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception primaryEx)
+        {
+            if (request.InstallMode == JavaInstallMode.System)
+                throw new InvalidOperationException("无法获取可验证的 Java 系统安装包。请稍后重试或改用便携版。", primaryEx);
+            try
+            {
+                source = await ResolveBmclapiDownloadAsync(request.MajorVersion, arch, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception fallbackEx)
+            {
+                var hint = KnownGoodMajorVersions.Contains(request.MajorVersion)
+                    ? ""
+                    : $"\n提示：Java {request.MajorVersion} 可能没有正式发布的稳定构建，建议改选 {string.Join("/", KnownGoodMajorVersions)} 中的版本。";
+                throw new InvalidOperationException(
+                    $"未能获取到 Java {request.MajorVersion} ({arch}) 的下载地址。\n" +
+                    $"官方源(Adoptium)错误: {primaryEx.Message}\nBMCLAPI 镜像错误: {fallbackEx.Message}{hint}\n" +
+                    "你也可以手动下载安装 Java 后，在设置里指定 javaw.exe 路径。");
+            }
+        }
+
+        if (request.InstallMode == JavaInstallMode.System)
+            return await DownloadAndRunSystemInstallerAsync(source, request.MajorVersion, arch, progress, ct);
+
+        return await DownloadAndExtractPortableAsync(source, progress, ct);
+    }
+
+    private async Task<string> DownloadAndExtractPortableAsync(JavaDownloadSource source,
+        IProgress<ProgressInfo>? progress, CancellationToken ct)
+    {
+        var zipPath = Path.Combine(RuntimeDir, source.FileName);
+        await DownloadToFileAsync(source, zipPath, progress, ct);
+        ct.ThrowIfCancellationRequested();
+        progress?.Report(new ProgressInfo("解压 Java 运行时", 0, 1, "解压中..."));
+        // Build outside the detected runtime directory. A canceled extraction must never
+        // expose a half-written javaw.exe or remove a previously usable runtime.
+        return await Task.Run(async () =>
+        {
+            var staging = Path.Combine(App.DataDir, "runtime-staging", Guid.NewGuid().ToString("N"));
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                Directory.CreateDirectory(staging);
+                using (DownloadTransferPolicy.BeginPhase("解压"))
+                using (var archive = ZipFile.OpenRead(zipPath))
+                {
+                    ArchiveImportSafety.ValidateArchive(archive, staging);
+                    var done = 0;
+                    foreach (var entry in archive.Entries)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var relative = entry.FullName.Replace('\\', '/').TrimEnd('/');
+                        if (relative.Length == 0) continue;
+                        var destination = ArchiveImportSafety.Resolve(staging, relative);
+                        if (string.IsNullOrEmpty(entry.Name)) Directory.CreateDirectory(destination);
+                        else
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                            await using (var input = entry.Open())
+                            await using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                                await input.CopyToAsync(output, ct);
+                        }
+                        progress?.Report(new ProgressInfo("解压 Java 运行时", ++done, archive.Entries.Count, entry.Name));
+                    }
+                }
+                ct.ThrowIfCancellationRequested();
+                var found = Directory.EnumerateFiles(staging, "javaw.exe", SearchOption.AllDirectories)
+                    .FirstOrDefault(path =>
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        return string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "bin", StringComparison.OrdinalIgnoreCase)
+                            && File.Exists(Path.Combine(Path.GetDirectoryName(path)!, "java.exe"));
+                    });
+                if (found == null)
+                    throw new InvalidOperationException("Java 解压后未找到完整的 bin/javaw.exe 和 java.exe，请手动配置 Java 路径。");
+                var runtimeRoot = Path.GetDirectoryName(Path.GetDirectoryName(found)!)!;
+                var extractDir = Path.Combine(RuntimeDir, Path.GetFileNameWithoutExtension(source.FileName));
+                // Never replace or recursively delete an existing runtime. Directory.Move
+                // publishes the complete tree atomically; a name collision gets its own slot.
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (Directory.Exists(extractDir) || File.Exists(extractDir))
+                        extractDir = Path.Combine(RuntimeDir, Path.GetFileNameWithoutExtension(source.FileName) + "-" + Guid.NewGuid().ToString("N"));
+                    try { Directory.Move(runtimeRoot, extractDir); break; }
+                    catch (IOException) when (Directory.Exists(extractDir) || File.Exists(extractDir)) { }
+                }
+                ct.ThrowIfCancellationRequested();
+                var committedJava = Path.Combine(extractDir, "bin", "javaw.exe");
+                try { File.Delete(zipPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+                ct.ThrowIfCancellationRequested();
+                progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Java_Installation_Complete", "Java 安装完成"), 1, 1, committedJava));
+                return committedJava;
+            }
+            finally
+            {
+                // This runs on the worker and only removes this attempt's private staging tree.
+                try { if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+        }, ct);
+    }
+
+    /// <summary>
+    /// 系统安装模式：下载 Adoptium 提供的 .msi 安装包并静默安装到系统目录（Program Files）。
+    /// 注意：需要用户在弹出的 UAC 提示中确认管理员权限；MSI 安装完成后从注册表探测安装路径。
+    /// </summary>
+    private async Task<string> DownloadAndRunSystemInstallerAsync(JavaDownloadSource source, int requestedMajor, string requestedArch,
+        IProgress<ProgressInfo>? progress, CancellationToken ct)
+    {
+        // 使用官方 installer 清单的 MSI 链接及独立校验值，不从 ZIP 地址推测安装程序。
+        var msiPath = Path.Combine(Path.GetTempPath(), source.FileName);
+        await DownloadToFileAsync(source, msiPath, progress, ct);
+        ct.ThrowIfCancellationRequested();
+
+        progress?.Report(new ProgressInfo("安装 Java 到系统目录", 0, 1, "正在运行安装程序（可能需要管理员确认）..."));
+
+        var psi = new System.Diagnostics.ProcessStartInfo("msiexec.exe")
+        {
+            Arguments = $"/i \"{msiPath}\" /qb ADDLOCAL=FeatureMain,FeatureEnvironment,FeatureJarFileRunWith,FeatureJavaHome",
+            UseShellExecute = true,
+            Verb = "runas" // 触发 UAC 提权
+        };
+
+        try
+        {
+            async Task<int> InstallAsync()
+            {
+                ct.ThrowIfCancellationRequested();
+                using var proc = System.Diagnostics.Process.Start(psi)
+                    ?? throw new InvalidOperationException("无法启动 Java 系统安装程序。");
+                // MSI 一旦启动，等待进程真实退出后再恢复取消按钮、清理安装包。
+                await proc.WaitForExitAsync();
+                return proc.ExitCode;
+            }
+            var item = DownloadQueueService.Instance.CurrentItem;
+            var exitCode = item != null ? await item.RunInstallerPhaseAsync(InstallAsync) : await InstallAsync();
+            if (exitCode == 1602) throw new DownloadUserCanceledException("用户取消了 Java 系统安装。");
+            if (exitCode is not (0 or 1641 or 3010))
+                throw new InvalidOperationException($"Java 系统安装失败，退出码：{exitCode}。");
+            if ((exitCode is 1641 or 3010) && item != null) item.CompletionText = "Java 已安装，需要重启计算机";
+            ct.ThrowIfCancellationRequested();
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            throw new DownloadUserCanceledException("安装已取消（未授予管理员权限），可改用便携版(zip)安装方式，无需管理员权限。", ex);
+        }
+        finally
+        {
+            try { File.Delete(msiPath); } catch { /* 忽略清理失败 */ }
+        }
+
+        // An existing portable Java must not hide the newly installed runtime.
+        // Probe all known locations and require the version AND PE architecture requested.
+        var detected = await QuickDetectJavaAsync(ct);
+        var found = JavaEnvironmentPaths.SelectRuntime(detected.Select(candidate =>
+            (candidate.JavawPath, JavaVersionOutputPolicy.ParseMajorValue(candidate.Version), JavaExecutableArchitecture.TryReadArchitecture(candidate.JavawPath))),
+            requestedMajor, requestedArch == "x86" ? "x86" : "amd64");
+        if (found == null)
+            throw new InvalidOperationException("系统安装似乎已完成，但未能自动探测到 javaw.exe，请在设置中手动指定路径（通常在 C:\\Program Files\\Eclipse Adoptium\\ 下）。");
+
+        progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Java_Installation_Complete", "Java 安装完成"), 1, 1, found));
+        return found;
+    }
+
+    private async Task DownloadToFileAsync(JavaDownloadSource source, string destPath,
+        IProgress<ProgressInfo>? progress, CancellationToken ct)
+    {
+        progress?.Report(new ProgressInfo(Loc.T("Str_Cs_Downloading_The_Java_Runtime", "下载 Java 运行时"), 0, 0, source.FileName));
+        await DownloadEndpoints.DownloadFileWithFallbackAsync(_http, source.DownloadUrl, DownloadEndpoints.PreferMirror,
+            destPath, "下载 Java 运行时失败", progress, ct, expectedSize: source.Size, expectedSha256: source.Sha256);
+    }
+
+    /// <summary>
+    /// Adoptium(Eclipse Temurin) 官方 API：
+    /// GET https://api.adoptium.net/v3/assets/latest/{majorVersion}/hotspot?os=windows&image_type=jre&architecture={x64|x86}&vendor=eclipse
+    /// 返回数组，取第一个的 binary.package.link 作为下载地址（zip 格式）。
+    /// </summary>
+    private async Task<JavaDownloadSource> ResolveAdoptiumDownloadAsync(int majorVersion, string arch, JavaInstallMode installMode, CancellationToken ct)
+    {
+        var url = $"https://api.adoptium.net/v3/assets/latest/{majorVersion}/hotspot" +
+                   $"?os=windows&image_type=jre&architecture={arch}&vendor=eclipse";
+        var json = await _http.GetStringAsync(url, ct);
+        using var doc = JsonDocument.Parse(json);
+        var first = doc.RootElement.EnumerateArray().FirstOrDefault();
+        if (first.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException($"Adoptium 未返回可用的 JDK {majorVersion} ({arch}) 版本信息");
+
+        return JavaDownloadSource.FromAdoptiumBinary(first.GetProperty("binary"), installMode == JavaInstallMode.System);
+    }
+
+    /// <summary>BMCLAPI 镜像回退方案（仅覆盖常见 LTS 版本，且仅支持 x64）。</summary>
+    private async Task<JavaDownloadSource> ResolveBmclapiDownloadAsync(int majorVersion, string arch, CancellationToken ct)
+    {
+        if (arch != "x64")
+            throw new InvalidOperationException("BMCLAPI 镜像仅支持 x64 架构");
+
+        var listUrl = "https://bmclapi2.bangbang93.com/java/list?os=windows&arch=x64";
+        var listJson = await _http.GetStringAsync(listUrl, ct);
+        using var doc = JsonDocument.Parse(listJson);
+
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            var v = item.TryGetProperty("version", out var vv) ? vv.GetString() ?? "" : "";
+            if (v.StartsWith(majorVersion.ToString()))
+            {
+                var component = item.TryGetProperty("component", out var c) ? c.GetString() : "jre";
+                var downloadUrl = $"https://bmclapi2.bangbang93.com/java/download/windows/x64/{component}/{v}";
+                return new JavaDownloadSource(downloadUrl, $"jdk-{v}-bmclapi.zip");
+            }
+        }
+        throw new InvalidOperationException($"BMCLAPI 未返回 Java {majorVersion} 的可用版本");
+    }
+}

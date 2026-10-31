@@ -1,0 +1,436 @@
+using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Controls;
+using XCL2.App.Models;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+public partial class LoginPage : UserControl
+{
+    private readonly MainWindow _owner;
+    private readonly ObservableCollection<Account> _accounts = new();
+
+    public LoginPage(MainWindow owner)
+    {
+        _owner = owner; // 统一先于 InitializeComponent 赋值，避免控件初始化时触发的事件访问到未赋值字段
+        InitializeComponent();
+        InitializePluginLogins();
+        AccountListBox.ItemsSource = _accounts;
+        Reload();
+
+        // 皮肤站地址默认填最常用的 littleskin.cn；如果用户之前登录时自己填过别的地址，
+        // 会记住那个地址并优先用它，而不是每次都被强制改回 littleskin。
+        AuthServerRootBox.Text = string.IsNullOrWhiteSpace(_owner.ConfigService.Config.DefaultAuthServerApiRoot)
+            ? DefaultLittleSkinApiRoot
+            : _owner.ConfigService.Config.DefaultAuthServerApiRoot;
+    }
+
+    private const string DefaultLittleSkinApiRoot = "https://littleskin.cn/api/yggdrasil";
+
+    private void Reload()
+    {
+        _accounts.Clear();
+        foreach (var a in _owner.ConfigService.Accounts) _accounts.Add(a);
+        RefreshOnlineAvatarsInBackground();
+    }
+
+    /// <summary>
+    /// 皮肤站/正版/设置过皮肤的离线账户，头像不该只看本地一次性绑定的文件——服务器端皮肤
+    /// 随时可能被玩家自己换掉。每次刷新账户列表时，为符合条件的账户各发起一次后台查询/
+    /// 下载（见 AccountAvatarCacheService），查到新皮肤后把该账户在 _accounts 里"移除再
+    /// 原地插回"来触发 ListBox 重新生成容器、重新走一遍 AccountAvatarConverter——Account
+    /// 本身没有实现 INotifyPropertyChanged，仅仅改字段不会让已经生成的 ListBoxItem 刷新，
+    /// 这是在不改动 Account 模型的前提下让绑定重新求值最简单的办法。全程静默，查询失败
+    /// 不提示、不影响账户列表本身的正常显示。
+    /// </summary>
+    private void RefreshOnlineAvatarsInBackground()
+    {
+        foreach (var account in _accounts.ToArray())
+        {
+            if (!AccountAvatarCacheService.ShouldFetch(account)) continue;
+            _ = AccountAvatarCacheService.RefreshAsync(account, () =>
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    int idx = _accounts.IndexOf(account);
+                    if (idx < 0) return; // 期间账户被删除/列表已经变化，不用再刷新
+                    _accounts.RemoveAt(idx);
+                    _accounts.Insert(idx, account);
+                });
+            });
+        }
+    }
+
+    private void AddOffline_Click(object sender, RoutedEventArgs e)
+    {
+        var name = string.IsNullOrWhiteSpace(OfflineNameBox.Text) ? "Player" : OfflineNameBox.Text.Trim();
+        var account = OfflineAuthService.CreateOfflineAccount(name);
+        _owner.ConfigService.AddOrUpdateAccount(account);
+        
+        Reload();
+        _owner.RefreshSidebar();
+        StatusText.Text = $"离线账户 {name} 已添加。UUID: {account.Uuid}，请在下方列表中点「选用」。";
+    }
+
+    private async void AddMicrosoft_Click(object sender, RoutedEventArgs e)
+    {
+        StatusText.Text = Loc.T("Str_Cs_Preparing_To_Sign_In_Please_Wait", "正在准备登录，请稍候...");
+
+        MicrosoftAuthService auth;
+        try
+        {
+            auth = new MicrosoftAuthService();
+        }
+        catch (AuthStepException ex)
+        {
+            StatusText.Text = $"登录在「{ex.Step}」这一步失败，详情见弹窗。";
+            ShowLoginFailure(ex);
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        DeviceCodeWindow? popup = null;
+
+        auth.UserCodeReady += (uri, code) =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                popup = new DeviceCodeWindow(uri, code, cts);
+                popup.Show();
+            });
+        };
+        auth.StatusChanged += status =>
+        {
+            Dispatcher.Invoke(() => popup?.SetStatus(status));
+        };
+
+        try
+        {
+            var account = await auth.LoginInteractiveAsync(cts.Token);
+            popup?.Dispatcher.Invoke(() => popup.Close());
+
+            if (account == null)
+            {
+                StatusText.Text = Loc.T("Str_Cs_Microsoft_Sign_In_Failed_Or_Was_Cancelle", "微软账户登录失败或已取消，请重试。");
+                return;
+            }
+            _owner.ConfigService.AddOrUpdateAccount(account);
+            
+            Reload();
+            _owner.RefreshSidebar();
+            StatusText.Text = $"微软账户 {account.Username} 登录成功，请在下方列表中点「选用」。";
+        }
+        catch (OperationCanceledException)
+        {
+            popup?.Dispatcher.Invoke(() => popup.Close());
+            StatusText.Text = Loc.T("Str_Cs_Sign_In_Cancelled", "登录已取消。");
+        }
+        catch (AuthStepException ex)
+        {
+            popup?.Dispatcher.Invoke(() => popup.Close());
+            StatusText.Text = $"登录在「{ex.Step}」这一步失败，详情见弹窗。";
+            ShowLoginFailure(ex);
+        }
+        catch (Exception ex)
+        {
+            popup?.Dispatcher.Invoke(() => popup.Close());
+            ErrorPresenter.LogTechnicalDetail($"微软账户登录(浏览器)出错: {ex}");
+            StatusText.Text = Loc.T("Str_Cs_Sign_In_Failed_Check_Your_Connection_And_2", "登录出错，请检查网络连接后重试。详细日志已记录，如果反复出现，请把日志发给可信的专业人士。");
+        }
+    }
+
+    private void AddMicrosoftEmbedded_Click(object sender, RoutedEventArgs e)
+    {
+        if (WebView2RuntimeDetector.PreferExternalBrowser)
+        {
+            ToastService.ShowInfo(WebView2RuntimeDetector.CompatibilityBrowserMessage);
+            AddMicrosoft_Click(sender, e);
+            return;
+        }
+        AddMicrosoftEmbeddedCore(sender, e);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private async void AddMicrosoftEmbeddedCore(object sender, RoutedEventArgs e)
+    {
+        // WebView2 相关类型只在真正点击"内嵌登录"这里才会被用到/加载，不会跟主界面一起加载
+        // (MainWindow/App.xaml 都不引用 WebView2 控件)。这里先做一次轻量探测：本机是否已经
+        // 装了 WebView2 Runtime——如果没装，与其打开一个注定会失败、只能等 EnsureCoreWebView2Async
+        // 抛异常才知道原因的空窗口，不如现在就提示清楚，让用户直接去下载运行时或者改用浏览器登录。
+        if (!WebView2RuntimeDetector.IsAvailable())
+        {
+            var choice = MessageBoxDialog.ShowConfirm(
+                "本机未检测到 WebView2 运行时，无法使用内嵌登录。\n\n" +
+                "点「是」前往下载 WebView2 运行时（安装后重启本程序即可使用内嵌登录）；\n" +
+                "点「否」改用「浏览器登录」（不需要 WebView2，效果相同，只是登录过程会在系统默认浏览器里完成，需要手动复制验证码/等待自动跳转）。",
+                "未检测到 WebView2 运行时");
+
+            if (choice)
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo(WebView2RuntimeDetector.DownloadUrl) { UseShellExecute = true });
+                }
+                catch (Exception ex)
+                {
+                    ErrorPresenter.LogTechnicalDetail($"打开 WebView2 下载页失败: {ex}");
+                    StatusText.Text = $"打开下载页失败，请手动访问：{WebView2RuntimeDetector.DownloadUrl}";
+                }
+            }
+            else
+            {
+                StatusText.Text = Loc.T("Str_Cs_Embedded_Sign_In_Cancelled_You_Can_Use_B", "已取消内嵌登录，可以点击「浏览器登录」改用系统浏览器完成登录。");
+            }
+            return;
+        }
+
+        StatusText.Text = Loc.T("Str_Cs_Opening_The_Embedded_Sign_In_Window", "正在打开内嵌登录窗口...");
+
+        MicrosoftAuthService auth;
+        string url, verifier;
+        MicrosoftLoginWindow popup;
+        try
+        {
+            auth = new MicrosoftAuthService();
+            (url, verifier) = auth.BuildInteractiveAuthorizeUrl();
+            popup = new MicrosoftLoginWindow(url);
+        }
+        catch (AuthStepException ex)
+        {
+            StatusText.Text = $"登录在「{ex.Step}」这一步失败，详情见弹窗。";
+            ShowLoginFailure(ex);
+            return;
+        }
+
+        string code;
+        try
+        {
+            popup.Show();
+            code = await popup.WaitForCodeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = Loc.T("Str_Cs_Sign_In_Cancelled", "登录已取消。");
+            return;
+        }
+        catch (AuthStepException ex)
+        {
+            StatusText.Text = $"登录在「{ex.Step}」这一步失败，详情见弹窗。";
+            ShowLoginFailure(ex);
+            return;
+        }
+
+        try
+        {
+            var account = await auth.LoginWithAuthorizationCodeAsync(code, verifier);
+            if (account == null)
+            {
+                StatusText.Text = Loc.T("Str_Cs_Microsoft_Sign_In_Failed_Please_Try_Agai", "微软账户登录失败，请重试。");
+                return;
+            }
+            _owner.ConfigService.AddOrUpdateAccount(account);
+            
+            Reload();
+            _owner.RefreshSidebar();
+            StatusText.Text = $"微软账户 {account.Username} 登录成功，请在下方列表中点「选用」。";
+        }
+        catch (AuthStepException ex)
+        {
+            StatusText.Text = $"登录在「{ex.Step}」这一步失败，详情见弹窗。";
+            ShowLoginFailure(ex);
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogTechnicalDetail($"微软账户登录(内嵌)出错: {ex}");
+            StatusText.Text = Loc.T("Str_Cs_Sign_In_Failed_Check_Your_Connection_And_2", "登录出错，请检查网络连接后重试。详细日志已记录，如果反复出现，请把日志发给可信的专业人士。");
+        }
+    }
+
+    private async void AddAuthServer_Click(object sender, RoutedEventArgs e)
+    {
+        var apiRoot = AuthServerRootBox.Text?.Trim() ?? "";
+        var username = AuthServerUsernameBox.Text?.Trim() ?? "";
+        var password = AuthServerPasswordBox.Password ?? "";
+
+        StatusText.Text = Loc.T("Str_Cs_Signing_In_To_The_Auth_Server_Please_Wai", "正在登录认证服务器，请稍候...");
+
+        try
+        {
+            var auth = new AuthServerAuthService();
+            var account = await auth.LoginAsync(apiRoot, username, password);
+
+            _owner.ConfigService.AddOrUpdateAccount(account);
+            
+            Reload();
+            _owner.RefreshSidebar();
+
+            // 记住用户自己填的皮肤站地址：跟默认的 littleskin 不一样才存，方便下次自动带出用户自己的皮肤站，
+            // 而不是每次都要重新覆盖成 littleskin；如果用户就是在用 littleskin，则不写自定义值，
+            // 保持“未设置=自动用最常用的 littleskin”的默认行为。
+            var normalizedForCompare = apiRoot.TrimEnd('/');
+            if (!string.IsNullOrWhiteSpace(apiRoot)
+                && !normalizedForCompare.Equals(DefaultLittleSkinApiRoot.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+                && !normalizedForCompare.Equals("https://littleskin.cn", StringComparison.OrdinalIgnoreCase))
+            {
+                _owner.ConfigService.Config.DefaultAuthServerApiRoot = apiRoot;
+                _owner.ConfigService.Save();
+            }
+
+            // 登录成功后清空密码框：密码框本身就不该长期停留敏感内容，且账户已经保存好了，
+            // 不需要用户手动清空再进行下一步操作。用户名/服务器地址保留，方便下次直接改密码重登，
+            // 或者用同一个服务器再登另一个账号。
+            AuthServerPasswordBox.Password = "";
+
+            StatusText.Text = $"认证服务器账户 {account.Username} 登录成功，请在下方列表中点「选用」。";
+        }
+        catch (AuthStepException ex)
+        {
+            StatusText.Text = $"登录在「{ex.Step}」这一步失败，详情见弹窗。";
+            ErrorPresenter.ShowFriendlyError(ex.Message, $"[认证服务器登录失败 - {ex.Step}] {ex.Message}", "认证服务器登录失败");
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogTechnicalDetail($"认证服务器登录出错: {ex}");
+            StatusText.Text = Loc.T("Str_Cs_Sign_In_Failed_Check_Your_Connection_And_2", "登录出错，请检查网络连接后重试。详细日志已记录，如果反复出现，请把日志发给可信的专业人士。");
+        }
+    }
+
+    private void AccountActions_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { ContextMenu: { } menu } button) return;
+        menu.PlacementTarget = button;
+        menu.IsOpen = true;
+    }
+
+    private void SelectAccount_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: Account acc })
+        {
+            _owner.ConfigService.SelectAccount(acc.Id);
+            _owner.RefreshSidebar();
+            StatusText.Text = $"已切换到账户：{acc.DisplayLabel}";
+        }
+    }
+
+    private void CopyUuid_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
+        Clipboard.SetText(acc.Uuid ?? "");
+        if (_owner.ConfigService.Config.Ux50InputLocalCopyFeedback)
+            InputExperienceService.ShowCopied((FrameworkElement)sender);
+        else ToastService.ShowSuccess("UUID 已复制");
+    }
+
+    private void OpenAccountPortal_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
+        var url = acc.Type switch
+        {
+            AccountType.Microsoft => "https://www.minecraft.net/msaprofile",
+            AccountType.AuthServer when !string.IsNullOrWhiteSpace(acc.AuthServerApiRoot) => acc.AuthServerApiRoot,
+            _ => null
+        };
+        if (url == null)
+        {
+            StatusText.Text = "离线账户的皮肤可使用「皮肤」按钮导入或设置预设皮肤。";
+            return;
+        }
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+        catch { StatusText.Text = "打开账户页面失败。"; }
+    }
+
+    private void SkinModel_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Account account }) return;
+        new SkinModelViewerDialog(account).ShowDialog();
+    }
+
+    private void Skin_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
+        if (acc.Type != AccountType.Offline) return; // 保险起见：微软账户不应该走到这里
+
+        var skinService = new SkinService();
+        var win = new SkinSelectWindow(acc, skinService);
+        if (win.ShowDialog() == true)
+        {
+            _owner.ConfigService.AddOrUpdateAccount(acc);
+            Reload();
+            StatusText.Text = $"已更新账户 {acc.Username} 的皮肤设置。";
+        }
+    }
+
+    /// <summary>
+    /// 导入头像照片：跟"皮肤"完全独立的一套 —— 这里选的是任意一张图片文件，只用来替换
+    /// 账户列表最左边显示的那一小张头像，不会写进 Minecraft 皮肤、不影响游戏内实际外观。
+    /// 任何账户类型（离线/微软/认证服务器）都可以设置，因为它跟游戏内皮肤托管方式无关。
+    /// </summary>
+    private void ImportAvatarPhoto_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
+
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择一张头像照片",
+            Filter = "图片文件|*.png;*.jpg;*.jpeg;*.bmp;*.webp;*.gif",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            var skinService = new SkinService();
+            acc.AvatarPhotoPath = skinService.SaveAvatarPhoto(acc.Id, dialog.FileName);
+            _owner.ConfigService.AddOrUpdateAccount(acc);
+            Reload();
+            StatusText.Text = $"已为账户 {acc.Username} 设置头像照片。";
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogFallback("导入头像照片失败", ex);
+            StatusText.Text = "导入头像照片失败，请确认文件没有被其它程序占用后重试。";
+        }
+    }
+
+    /// <summary>清除头像照片：删掉本地存档，账户头像退回"皮肤正脸 / 史蒂夫默认头像"。</summary>
+    private void ClearAvatarPhoto_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Account acc }) return;
+        if (string.IsNullOrWhiteSpace(acc.AvatarPhotoPath))
+        {
+            StatusText.Text = $"账户 {acc.Username} 目前没有设置头像照片。";
+            return;
+        }
+
+        new SkinService().RemoveAvatarPhoto(acc.Id);
+        acc.AvatarPhotoPath = null;
+        _owner.ConfigService.AddOrUpdateAccount(acc);
+        Reload();
+        StatusText.Text = $"已清除账户 {acc.Username} 的头像照片。";
+    }
+
+    private static void ShowLoginFailure(AuthStepException ex)
+    {
+        var friendly = ex.Step switch
+        {
+            "获取登录令牌" or "请求登录代码" => "登录请求失败，可能是网络连接问题，或微软登录服务暂时不可用，请检查网络后重试。",
+            "Minecraft 服务登录" => "登录到 Minecraft 服务失败，可能是网络问题，也可能是该微软账户还没有购买 Minecraft，请确认账户状态后重试。",
+            "获取游戏档案" => "获取游戏档案失败，可能是该微软账户还没有创建过 Minecraft 游戏角色，请先在官网完成角色创建。",
+            _ => $"登录在「{ex.Step}」这一步失败，可能是网络连接问题，请检查网络后重试。"
+        };
+
+        ErrorPresenter.ShowFriendlyError(friendly, $"[登录失败 - {ex.Step}] {ex.Message}", "微软账户登录失败");
+    }
+
+    private void RemoveAccount_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: Account acc })
+        {
+            _owner.ConfigService.RemoveAccount(acc.Id);
+            Reload();
+            _owner.RefreshSidebar();
+        }
+    }
+}

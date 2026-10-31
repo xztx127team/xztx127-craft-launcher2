@@ -1,0 +1,33 @@
+UNOFFICIAL / THIRD-PARTY DISTRIBUTION
+非官方 / 第三方修改、构建或重新打包
+
+Template: replace every <...> field before publishing.
+模板：发布前将所有 <...> 字段替换为真实信息。
+
+Distributor / 发行者: <public name of the distributor>
+Package version / 本包版本: <version>
+Upstream project / 原项目: XCL2
+Upstream repository / 原项目仓库: <actual upstream URL>
+Upstream revision / 原始提交或标签: <commit or tag>
+Modification date / 修改日期: <YYYY-MM-DD>
+Changes / 修改摘要: <what was changed, rebuilt, or repackaged>
+Matching source / 完整对应源码: <source archive or exact source revision URL>
+Build instructions / 构建说明: <location within the source distribution>
+Package SHA-256 / 本包校验值: <actual hash; useful but not proof of endorsement>
+
+本包由上述发行者独立构建、修改或重新打包，与 XCL2 原项目维护者无
+隶属、代理或背书关系；本第三方发行包并非原项目维护者制作或发布。
+原始项目及代码来源为 XCL2，版权、贡献记录及适用许可予以保留。
+本声明不否认代码来源，也不代表原项目承诺支持、担保或售后。
+
+This unofficial package is independently built, modified, or repackaged by
+the distributor identified above. That distributor is not affiliated with,
+acting as an agent for, or endorsed by the original XCL2 maintainers. This
+third-party package was not produced or published by those maintainers.
+Its upstream code originates from XCL2; original authorship, contribution
+notices, and applicable licenses are retained. No upstream support or
+warranty is promised by this notice.
+
+License / 许可: see LICENSE, NOTICE, OPEN_SOURCE.md, and third-party notices.
+If a field does not apply, explain why; do not fabricate a hash or URL.
+不适用的字段应说明原因，不得虚构校验值、授权或源码地址。

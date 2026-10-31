@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><LangVersion>latest</LangVersion></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/AiFileAccessService.cs" Link="AiFileAccessService.cs" />
+    <Compile Include="../../Services/AiWorkspacePathPolicy.cs" Link="AiWorkspacePathPolicy.cs" />
+    <Compile Include="../../Services/AiCommandPermissionService.cs" Link="AiCommandPermissionService.cs" />
+    <Compile Include="../../Services/AiWorkModePolicy.cs" Link="AiWorkModePolicy.cs" />
+    <Compile Include="../../Services/AiControlProtocol.cs" Link="AiControlProtocol.cs" />
+    <Compile Include="../../Services/AiPlanProtocol.cs" Link="AiPlanProtocol.cs" />
+    <Compile Include="../../Services/LauncherLogService.cs" Link="LauncherLogService.cs" />
+    <Compile Include="../../Services/BoundedLogBuffer.cs" Link="BoundedLogBuffer.cs" />
+    <Compile Include="../../Services/DiagnosticRedactionService.cs" Link="DiagnosticRedactionService.cs" />
+    <Compile Include="../../Models/AiAssistantModels.cs" Link="AiAssistantModels.cs" />
+    <Compile Include="../../Models/AiAgentSettings.cs" Link="AiAgentSettings.cs" />
+    <Compile Include="../../Models/AiCommandPermissions.cs" Link="AiCommandPermissions.cs" />
+    <Compile Include="../../Models/AiAttachmentModels.cs" Link="AiAttachmentModels.cs" />
+    <Compile Include="../../Models/AiAssistantActivity.cs" Link="AiAssistantActivity.cs" />
+    <Compile Include="../../Models/AiFileDiff.cs" Link="AiFileDiff.cs" />
+      <Compile Include="../../Services/LogTextEncoding.cs" Link="LogTextEncoding.cs"/>
+  </ItemGroup>
+</Project>

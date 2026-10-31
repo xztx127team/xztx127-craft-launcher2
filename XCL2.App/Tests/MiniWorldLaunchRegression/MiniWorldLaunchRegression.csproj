@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AppConfig.MiniWorld.cs" Link="AppConfig.MiniWorld.cs" />
+    <Compile Include="../../Models/ExperiencePreferenceAttribute.cs" Link="ExperiencePreferenceAttribute.cs" />
+    <Compile Include="../../Services/MiniWorldCatalog.cs" Link="MiniWorldCatalog.cs" />
+    <Compile Include="../../Services/MiniWorldLaunchService.cs" Link="MiniWorldLaunchService.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/LauncherReleaseInstructions.cs" Link="LauncherReleaseInstructions.cs" />
+    <Compile Include="../../Services/LauncherUpdatePolicy.cs" Link="LauncherUpdatePolicy.cs" />
+    <Compile Include="../../Services/LauncherUpdatePackage.cs" Link="LauncherUpdatePackage.cs" />
+    <Compile Include="../../Services/LauncherUpdateHandoff.cs" Link="LauncherUpdateHandoff.cs" />
+  </ItemGroup>
+</Project>

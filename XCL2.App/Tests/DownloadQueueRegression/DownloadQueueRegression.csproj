@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/ResourceDownloadPath.cs" Link="ResourceDownloadPath.cs" />
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs" />
+    <Compile Include="../../Services/DownloadNotificationPolicy.cs" Link="DownloadNotificationPolicy.cs" />
+    <Compile Include="../../Services/DownloadQueueService.cs" Link="DownloadQueueService.cs" />
+    <Compile Include="../../Services/DownloadQueueService.Recovery.cs" Link="DownloadQueueService.Recovery.cs" />
+    <Compile Include="../../Services/DownloadRecoveryStore.cs" Link="DownloadRecoveryStore.cs" />
+    <Compile Include="../../Services/JavaDownloadSource.cs" Link="JavaDownloadSource.cs" />
+    <Compile Include="../../Services/JavaDownloadQueueService.cs" Link="JavaDownloadQueueService.cs" />
+    <Compile Include="../../Services/DownloadTransferPolicy.cs" Link="DownloadTransferPolicy.cs" />
+    <Compile Include="../../Services/DownloadDisplayFormatting.cs" Link="DownloadDisplayFormatting.cs" />
+    <Compile Include="../../Models/DownloadDisplayUnit.cs" Link="DownloadDisplayUnit.cs" />
+    <Compile Include="../../Services/DownloadRateLimiter.cs" Link="DownloadRateLimiter.cs" />
+      <Compile Include="../../Services/DownloadTargetLock.cs" Link="DownloadTargetLock.cs" />
+  </ItemGroup>
+</Project>

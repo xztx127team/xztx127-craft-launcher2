@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/ResourceDownloadPath.cs" Link="ResourceDownloadPath.cs" />
+    <Compile Include="../../Models/AppConfig.WindowsCompatibility.cs" Link="AppConfig.WindowsCompatibility.cs" />
+    <Compile Include="../../Services/WindowsCompatibilityService.cs" Link="WindowsCompatibilityService.cs" />
+    <Compile Include="../../Services/LauncherHttpClientFactory.cs" Link="LauncherHttpClientFactory.cs" />
+    <Compile Include="../../Services/CurseForgeApiTransport.cs" Link="CurseForgeApiTransport.cs" />
+
+    <Compile Include="../../Models/VersionManifest.cs" Link="VersionManifest.cs"/>
+    <Compile Include="../../Services/VersionInheritanceResolver.cs" Link="VersionInheritanceResolver.cs"/>
+    <Compile Include="../../Services/InstanceIntegrityService.cs" Link="InstanceIntegrityService.cs"/>
+    <Compile Include="../../Services/FolderService.cs" Link="FolderService.cs"/>
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs"/>
+    <Compile Include="../../Services/ImportPreviewService.cs" Link="ImportPreviewService.cs"/>
+    <Compile Include="../../Services/ModpackService.cs" Link="ModpackService.cs"/>
+    <Compile Include="../../Services/ModpackService.CurseForge.cs" Link="ModpackService.CurseForge.cs"/>
+    <Compile Include="../../Services/ModpackInstallService.cs" Link="ModpackInstallService.cs"/>
+  </ItemGroup>
+</Project>

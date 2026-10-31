@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/WindowsCompatibilityService.cs" Link="WindowsCompatibilityService.cs" />
+    <Compile Include="../../Models/AppConfig.WindowsCompatibility.cs" Link="AppConfig.WindowsCompatibility.cs" />
+    <Compile Include="../../Services/WindowTouchOverlayService.cs" Link="WindowTouchOverlayService.cs" />
+    <Compile Include="../../Services/TouchRoutePolicy.cs" Link="TouchRoutePolicy.cs" />
+    <Compile Include="../../Services/TouchGameBackend.cs" Link="TouchGameBackend.cs" />
+    <Compile Include="../../Views/ITouchOverlayWindow.cs" Link="ITouchOverlayWindow.cs" />
+  </ItemGroup>
+</Project>

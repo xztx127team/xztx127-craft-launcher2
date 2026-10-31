@@ -1,0 +1,153 @@
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Controls;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+public partial class AboutHelpPage : UserControl
+{
+    // 官网跳转地址：整理成常量，方便以后统一维护/替换镜像地址。
+    private const string MicrosoftLoginUrl = "https://login.live.com/";
+    private const string MinecraftBuyUrl = "https://www.minecraft.net/zh-hans/store/minecraft-java-bedrock-edition-pc";
+    private const string GitHubRepoUrl = "https://github.com/adorable0127/xztx127-craft-launcher2";
+    private const string DonateUrl = "https://ifdian.net/a/xztx127";
+    private const string ContactAuthorUrl = "https://xztx127.dpdns.org/arcade#contact";
+    private const string MinecraftWikiHelpUrl = "https://zh.minecraft.wiki/w/%E6%95%99%E7%A8%8B";
+    private const string AllProjectsUrl = "https://github.com/adorable0127";
+
+    /// <summary>XCL 官方下载站（安装包直链）。刻意跟 GitHub 仓库/发布页分开列，
+    /// 不复用 GitHubRepoUrl——这两个是面向不同用户群的两个入口。</summary>
+    private const string DownloadSiteUrl = "https://xcl.xztx127.dpdns.org";
+
+    // 滚动同步 Tab 选中态时，用该标记避免"代码触发的 RadioButton.Checked"
+    // 反过来又调用一次滚动定位，造成两边来回打架、抖动。
+    private bool _suppressScrollSync;
+
+    private readonly MainWindow _owner;
+
+    public AboutHelpPage(MainWindow owner)
+    {
+        _owner = owner;
+        InitializeComponent();
+        BiliFansList.ItemsSource = BiliFanNames;
+
+        // BuildInfo 是编译期生成的常量（见 csproj 的 XCL2GenerateBuildInfo）：版本号自动取自 <Version>，
+        // 编译时间精确到秒、固定为上海时间（UTC+8）。
+        BuildInfoText.Text = $"当前构建版本 v{BuildInfo.Version}　编译时间：{BuildInfo.BuildTimestamp}";
+    }
+
+    private static readonly string[] BiliFanNames =
+    {
+        "小凯丽x_x", "舞麟人捕鱼为业", "星光闪闪_2024",
+        "c001001001", "Mc不灭11258", "鬼畜即景",
+        "MEiucV", "0090867755", "SONG2013",
+        "盖比特斯", "蜂条", "杨玺么么么",
+        "Grosgrain_mx", "Bellachenfang", "bili_31970594677",
+        "陈玩乐高", "喵喵碧姬公主", "bili_3706994055711652",
+        "bili_97571116538", "bili_32985147256", "动情交欢",
+        "bili_35853316190", "星玄已出院", "bili_23723056057",
+        "节奏盒子Dave-开学收心", "bili_21598593536",
+        "bili_47719074595", "许宸铖", "Sheep洋杨",
+        "我若不懂开玩笑", "白面汤圆王子", "水木6666",
+        "阡陌忍", "猪头人概念", "bili_13546398981",
+        "GG主", "请输入名称-他__", "277_bili",
+        "鹤_1337", "田中山王", "一名帅气的矿工",
+        "岁月有归期", "bili_52782751469", "从来困难",
+        "苏葛航", "寻梦首兰", "芍芍bb",
+        "小奶音ptG", "桑库特斯圣娅", "塔卫二第一蚊子养殖户",
+    };
+
+    // ===================== 顶部 Tab ⇄ 滚动位置 双向联动 =====================
+
+    private void SubNavHelp_Checked(object sender, RoutedEventArgs e)
+    {
+        // XAML 里 SubNavHelp 的 IsChecked="True" 是默认值，InitializeComponent()
+        // 解析到这一行时就会立刻触发本 Checked 事件——但此时 MainScroll 该
+        // 具名字段还没被赋值（它在 XAML 里排在后面），直接访问会 NullReferenceException。
+        // 所以这里要判空，等真正加载完成后再响应。
+        if (_suppressScrollSync || MainScroll is null) return;
+        MainScroll.ScrollToTop();
+    }
+
+    private void SubNavThanks_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_suppressScrollSync) return;
+        // 同样：InitializeComponent 阶段 MainScroll / SectionDivider 可能还没就绪。
+        if (MainScroll?.Content is not UIElement content || SectionDivider is null) return;
+        // 用分割线相对于滚动内容顶端的位置定位，而不是简单 ScrollToBottom——
+        // 这样"鸣谢"板块本身如果比一屏还长，点进来第一眼看到的是鸣谢板块的开头
+        // （作者信息卡片），不会因为内容变长而一下子跳到最底部。
+        var offset = SectionDivider.TranslatePoint(new Point(0, 0), content).Y;
+        MainScroll.ScrollToVerticalOffset(offset);
+    }
+
+    private void MainScroll_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (SectionDivider is null || MainScroll.Content is not UIElement content) return;
+
+        var dividerOffset = SectionDivider.TranslatePoint(new Point(0, 0), content).Y;
+
+        // 阈值：滚动位置越过"分割线上边缘再往上一点点"就判定为进入鸣谢板块，
+        // 避免恰好停在分割线正中间时来回反复横跳。
+        var isInThanks = MainScroll.VerticalOffset >= dividerOffset - 40;
+
+        _suppressScrollSync = true;
+        try
+        {
+            if (isInThanks && SubNavThanks.IsChecked != true) SubNavThanks.IsChecked = true;
+            else if (!isInThanks && SubNavHelp.IsChecked != true) SubNavHelp.IsChecked = true;
+        }
+        finally
+        {
+            _suppressScrollSync = false;
+        }
+    }
+
+    // ===================== 帮助板块：跳转按钮 =====================
+
+    private void OpenMicrosoftLogin_Click(object sender, RoutedEventArgs e) => OpenUrl(MicrosoftLoginUrl);
+
+    private void OpenMinecraftWikiHelp_Click(object sender, RoutedEventArgs e) => OpenUrl(MinecraftWikiHelpUrl);
+
+    private void OpenMinecraftBuy_Click(object sender, RoutedEventArgs e) => OpenUrl(MinecraftBuyUrl);
+
+    private void OpenLogsPage_Click(object sender, RoutedEventArgs e)
+    {
+        _owner.NavigateToLogs();
+    }
+
+    private void OpenIssue_Click(object sender, RoutedEventArgs e) => OpenUrl($"{GitHubRepoUrl}/issues/new");
+
+    // ===================== 鸣谢板块：作者 / 赞助 / 仓库 =====================
+
+    private void OpenDonate_Click(object sender, RoutedEventArgs e) => OpenUrl(DonateUrl);
+
+    private void OpenRepo_Click(object sender, RoutedEventArgs e) => OpenUrl(GitHubRepoUrl);
+
+    private void OpenRelease_Click(object sender, RoutedEventArgs e) => OpenUrl(GitHubRepoUrl);
+
+    private void OpenContact_Click(object sender, RoutedEventArgs e) => OpenUrl(ContactAuthorUrl);
+
+    private void OpenAllProjects_Click(object sender, RoutedEventArgs e) => OpenUrl(AllProjectsUrl);
+
+    /// <summary>XCL 官方下载站。跟 GitHub 发布页并列而不是二选一：GitHub 面向能访问它、
+    /// 习惯看 Release 列表的用户，该站点是给普通用户直接拿安装包的。</summary>
+    private void OpenDownloadSite_Click(object sender, RoutedEventArgs e) => OpenUrl(DownloadSiteUrl);
+
+    /// <summary>
+    /// 统一的"用系统默认浏览器打开链接"入口，跟项目里其它地方（VersionSelectPage 等）
+    /// 的 Process.Start(UseShellExecute=true) 写法保持一致，失败时弹出提示而不是静默吞掉。
+    /// </summary>
+    private static void OpenUrl(string url)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowWarning("打开浏览器失败：\n" + ex.Message, "错误");
+        }
+    }
+}

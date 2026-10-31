@@ -1,0 +1,116 @@
+using System.IO.Compression;
+using System.Text;
+using System.Text.Json;
+using XCL2.App.Services;
+using XCL2.App.Services.Workbench;
+
+int checks = 0;
+void Check(bool ok, string name) { if (!ok) throw new Exception(name); checks++; }
+void Throws(Action action, string name) { bool threw = false; try { action(); } catch { threw = true; } Check(threw, name); }
+void Rejects<T>(Action action, string name) where T : Exception
+{ bool rejected = false; try { action(); } catch (T) { rejected = true; } Check(rejected, name); }
+var root = Path.Combine(Path.GetTempPath(), "xcl-workbench-test-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
+try
+{
+    foreach (var (id, expected) in new (string, bool)[] { ("1.8.9", false), ("1.21.5", false), ("24w14a", false), ("26.2", false), ("26.3-snapshot-1", false), ("26.3-snapshot-3", false), ("26.3-snapshot-4", true), ("26.3-snapshot-5", true), ("26.3 T3", false), ("26.3 T4", true), ("26.3.4", true), ("26.3", true), ("26.3-rc-1", true), ("26.4-snapshot-1", true), ("27.1", true) }) Check(TouchVersionPolicy.FromVersion(id) == expected, "version: " + id);
+    Check(TouchVersionPolicy.FromVersion("my unknown instance") == null, "unknown version");
+    var versionDir = Path.Combine(root, "versions", "26.3"); Directory.CreateDirectory(versionDir);
+    File.WriteAllText(Path.Combine(versionDir, "26.3.json"), "{\"id\":\"26.3\"}");
+    using (var jar = ZipFile.Open(Path.Combine(versionDir, "26.3.jar"), ZipArchiveMode.Create))
+    using (var writer = new StreamWriter(jar.CreateEntry("version.json").Open())) writer.Write("{\"id\":\"26.3-snapshot-3\",\"release_target\":\"26.3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "26.3") == false, "real jar identity overrides folder name");
+    foreach (var id in new[] { "1.19", "1.19.4", "fabric-loader-0.16.14-1.19.2" })
+        Check(TouchVersionPolicy.FromVersion(id) == false, "reported 1.19 family uses legacy touch: " + id);
+    var renamed19 = Path.Combine(root, "versions", "19"); Directory.CreateDirectory(renamed19);
+    File.WriteAllText(Path.Combine(renamed19, "19.json"), "{\"id\":\"19\"}");
+    using (var jar = ZipFile.Open(Path.Combine(renamed19, "19.jar"), ZipArchiveMode.Create))
+    using (var writer = new StreamWriter(jar.CreateEntry("version.json").Open()))
+        writer.Write("{\"id\":\"1.19\",\"release_target\":\"1.19\"}");
+    Check(TouchVersionPolicy.FromVersion("19") == null, "renamed instance is not itself a version");
+    Check(TouchVersionPolicy.Resolve(root, "19") == false, "1.19 client jar selects legacy touch in instance named 19");
+    foreach (var (id, expected) in new (string, bool)[]
+    {
+        ("26.3 Snapshot 3", false), ("26.3 Snapshot 4", true),
+        ("26.3 第三个快照", false), ("26.3 第四快照", true),
+        ("26.3第三个快照", false), ("26.3第四个快照", true),
+        ("fabric-loader-0.16.14-26.3-snapshot-3", false),
+        ("fabric-loader-0.16.14-26.3-snapshot-4", true),
+        ("26.3-pre-1", true), ("26.3.0", true), ("26.3.1", true), ("26.3.3", true)
+    }) Check(TouchVersionPolicy.FromVersion(id) == expected, "snapshot boundary / patch: " + id);
+    foreach (var id in new[] { "26.3-snapshot-", "26.3-snapshot-invalid", "26.3 T", "26.3-snapshot-99999999999999999999" })
+        Check(TouchVersionPolicy.FromVersion(id) == null, "malformed snapshot cannot become a release: " + id);
+    var child = Path.Combine(root, "versions", "renamed-child"); Directory.CreateDirectory(child);
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"),
+        "{\"id\":\"26.3\",\"inheritsFrom\":\"26.3-snapshot-3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == false, "missing T3 parent still overrides renamed child id");
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"),
+        "{\"id\":\"1.20.3\",\"inheritsFrom\":\"26.3-snapshot-4\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == true, "missing T4 parent still overrides renamed child id");
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"),
+        "{\"id\":\"26.3\",\"clientVersion\":\"26.3-snapshot-3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == false, "clientVersion retains snapshot number");
+    using (var jar = ZipFile.Open(Path.Combine(child, "renamed-child.jar"), ZipArchiveMode.Create))
+    using (var writer = new StreamWriter(jar.CreateEntry("version.json").Open()))
+        writer.Write("{\"id\":\"26.3-snapshot-4\",\"release_target\":\"26.3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == true, "actual T4 jar overrides stale T3 metadata");
+    File.WriteAllText(Path.Combine(child, "renamed-child.json"), "{\"id\":\"26.3\",\"inheritsFrom\":\"26.3\"}");
+    Check(TouchVersionPolicy.Resolve(root, "renamed-child") == false, "actual inherited base T3 jar has priority over child jar");
+    Check(TouchInputModePolicy.Classify(true, false, true, true, false, true) == false, "capture wins over overlay cursor");
+    Check(TouchInputModePolicy.Classify(false, true, true, false, true, true) == null, "suppressed is ambiguous");
+    Check(TouchInputModePolicy.Classify(false, true, true, true, false, true) == true, "menu cursor");
+    var project = Path.Combine(root, "project"); Directory.CreateDirectory(project);
+    var file = Path.Combine(project, "source.cs"); var original = new byte[] { 0xEF, 0xBB, 0xBF }.Concat(Encoding.UTF8.GetBytes("alpha\r\nbeta\r\ngamma\r\n")).ToArray(); File.WriteAllBytes(file, original);
+    var page = ProjectFiles.ReadPage(project, "source.cs", 2, 1); Check(page.Text.Contains("2: beta") && page.NextLine == 3, "paged lines");
+    Check(page.Sha256 == ProjectFiles.Hash(original), "whole-file revision in page");
+    Throws(() => ProjectFiles.Resolve(project, "../outside"), "traversal");
+    var journal = new ChangeJournal(Path.Combine(root, "journal"));
+    var patched = ProjectFiles.Patch(ProjectFiles.Decode(original).Text, "beta", "BETA");
+    var change = journal.Prepare(file, ProjectFiles.EncodeLike(patched, original), page.Sha256);
+    Check(File.ReadAllBytes(file).SequenceEqual(original), "prepare is read-only");
+    journal.Apply(change.Id); Check(File.ReadAllText(file).Contains("BETA"), "apply");
+    File.AppendAllText(file, "external edit"); Throws(() => journal.Rollback(change.Id), "rollback does not overwrite later changes");
+    File.WriteAllBytes(file, journal.After(change.Id)!);
+    new ChangeJournal(Path.Combine(root, "journal")).Rollback(change.Id); Check(File.ReadAllBytes(file).SequenceEqual(original), "rollback survives restart and preserves BOM/CRLF");
+    Throws(() => journal.Apply(change.Id), "no replay");
+    var stale = journal.Prepare(file, Encoding.UTF8.GetBytes("new")); File.AppendAllText(file, "changed"); Throws(() => journal.Apply(stale.Id), "preview conflict"); File.WriteAllBytes(file, original);
+    var deleted = journal.Prepare(file, null); journal.Apply(deleted.Id); Check(!File.Exists(file), "delete"); journal.Rollback(deleted.Id); Check(File.ReadAllBytes(file).SequenceEqual(original), "undo delete");
+    var newFile = Path.Combine(project, "created.txt"); var created = journal.Prepare(newFile, Encoding.UTF8.GetBytes("created")); journal.Apply(created.Id); journal.Rollback(created.Id); Check(!File.Exists(newFile), "undo create");
+    Throws(() => ProjectFiles.Patch("dup dup", "dup", "new"), "ambiguous patch");
+    Throws(() => journal.Prepare(file, Encoding.UTF8.GetBytes("bad"), "outdated"), "stale patch");
+    Directory.CreateDirectory(Path.Combine(project, "node_modules")); File.WriteAllText(Path.Combine(project, "node_modules", "ignore.cs"), "alpha");
+    File.WriteAllBytes(Path.Combine(project, "binary.bin"), new byte[] { 0, 1, 2 });
+    var matches = ProjectFiles.Search(project, "alpha"); Check(matches.Matches.Count == 1 && matches.Matches[0].Line == 1, "search ignores binary and dependencies");
+    using var stop = new CancellationTokenSource(); stop.Cancel(); Throws(() => ProjectFiles.Search(project, "alpha", ct: stop.Token), "search cancellation");
+    var store = new TaskStore(Path.Combine(root, "tasks")); var task = store.Create("plan", "finish project", project);
+    task.Steps.Add(new WorkStep { Title = "read", Status = "completed", Evidence = "read source" }); task.Steps.Add(new WorkStep { Title = "patch", Status = "in_progress" }); task.NextAction = "validate"; store.Save(task);
+    var restored = new TaskStore(Path.Combine(root, "tasks")).Get(task.Id); Check(restored.Steps[0].Status == "completed" && restored.NextAction == "validate", "persistent steps");
+    store.Checkpoint(task.Id, "applied " + change.Id); Throws(() => store.Save(task), "concurrent task revision");
+    store.Update(task.Id, t => t.Mode = "Build"); Check(store.Get(task.Id).Steps[0].Status == "completed", "Plan/Build transition retains progress");
+    Throws(() => store.Update(task.Id, t => t.Steps.Add(new WorkStep { Title = "bad", Status = "in_progress" })), "one active step");
+    Check(store.Get(task.Id).Steps.Count == 2, "failed update leaves disk unchanged");
+
+    // Only completed tasks can be removed. A deleted record cannot be recreated by
+    // a stale snapshot retained by another conversation or an old UI selection.
+    Check(store.TryGet(Guid.NewGuid().ToString("N")) == null, "missing task lookup is optional");
+    foreach (var status in new[] { "paused", "running", "interrupted", "archived" })
+    {
+        var protectedTask = store.Create("keep " + status, "retain unfinished work");
+        store.Update(protectedTask.Id, t => t.Status = status);
+        Rejects<InvalidOperationException>(() => store.DeleteCompleted(protectedTask.Id), "cannot delete task in state " + status);
+        Check(store.Get(protectedTask.Id).Status == status, "rejected deletion preserves task in state " + status);
+    }
+    var finished = store.Create("finished", "remove only the completed record");
+    store.Update(finished.Id, t =>
+    {
+        t.Status = "completed";
+        t.Steps.Add(new WorkStep { Title = "verified", Status = "completed", Evidence = "passed" });
+    });
+    var staleFinished = store.Get(finished.Id);
+    var countBeforeDelete = store.List().Count;
+    store.DeleteCompleted(finished.Id);
+    Check(store.TryGet(finished.Id) == null && store.List().Count == countBeforeDelete - 1, "completed task removed from persisted list");
+    Rejects<IOException>(() => store.Save(staleFinished), "deleted task cannot be resurrected by old revision");
+    Check(new TaskStore(Path.Combine(root, "tasks")).TryGet(finished.Id) == null, "stale save leaves completed task deleted after reload");
+    Console.WriteLine($"PASS {checks} workbench checks");
+}
+finally { Directory.Delete(root, true); }

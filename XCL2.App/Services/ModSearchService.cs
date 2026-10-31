@@ -1,0 +1,369 @@
+using XCL2.App.Models;
+
+namespace XCL2.App.Services;
+
+/// <summary>
+/// 下载中心「Mod」分类的聚合搜索：按用户选择的来源（综合/仅 Modrinth/仅 CurseForge）搜索，
+/// 并把结果统一成 UnifiedModItem 供 UI 绑定。MC百科单独查询（见 SearchMcModAsync），因为它
+/// 只能提供"中文名 + 百科页面链接"，不具备直接下载能力，混进统一下载结果会让用户误以为能一键装。
+///
+/// "综合"模式下 Modrinth 和 CurseForge 并发查询，任意一个来源失败不影响另一个来源的结果——
+/// 例如用户没配置 CurseForge Key 时，综合模式应该照常展示 Modrinth 的结果，而不是整体报错。
+/// </summary>
+public class ModSearchService
+{
+    private const double StaticSourceTrustThreshold = 0.70;
+
+    private readonly ModrinthService _modrinth;
+    private readonly CurseForgeService _curseForge;
+    private readonly McModService _mcMod = new();
+
+    public ModSearchService(ModrinthService modrinth, CurseForgeService curseForge)
+    {
+        _modrinth = modrinth;
+        _curseForge = curseForge;
+    }
+
+    public async Task<ModSearchOutcome> SearchAsync(ModSource source, string query, string? gameVersion,
+        string? modLoader, int pageIndex = 0, int pageSize = 20, CancellationToken ct = default, int? startOffset = null)
+    {
+        var outcome = new ModSearchOutcome();
+
+        // 中文搜索支持：Modrinth/CurseForge 的搜索接口本身基本不认中文关键词(如直接搜"钠"
+        // 大概率没有结果)，这里用移植自 PCL2 的 WikiEntry 全量中文名数据库 + 模糊搜索算法
+        // (见 ChineseModSearchTranslator)，命中就把实际发给 Modrinth/CurseForge 的关键词
+        // 换成对应的英文名，这样用户搜"钠"能直接搜到 Sodium，而不需要先去 MC百科查到英文名
+        // 再回来手动重新输入一遍。查不到就照旧用原始关键词搜（不影响任何已有行为）。
+        //
+        // 两个平台分开翻译而不是共用一个关键词：Modrinth 和 CurseForge 上同一个 Mod 的 Slug
+        // 经常不一样（例如某些 Mod 在两边的项目名拼写不同），各自查各自数据库里的 Slug 才准确，
+        // 这也是 PCL2 原版的做法（CurseForgeAltSearchText 和 ModrinthAltSearchText 分开算）。
+        var searchModrinth = source is ModSource.Combined or ModSource.Modrinth;
+        var searchCurseForge = source is ModSource.Combined or ModSource.CurseForge;
+        var offset = startOffset ?? checked(pageIndex * pageSize);
+
+        var isChinese = ChineseModSearchTranslator.IsChineseQuery(query);
+        string? modrinthQuery = query, curseForgeQuery = query;
+        string? translatedForDisplay = null;
+
+        if (isChinese)
+        {
+            var mrLocal = searchModrinth ? ChineseModSearchTranslator.Translate(query, ModSource.Modrinth) : default;
+            var cfLocal = searchCurseForge ? ChineseModSearchTranslator.Translate(query, ModSource.CurseForge) : default;
+
+            var needsLiteralTranslation =
+                (searchModrinth && (mrLocal.Keyword == null || mrLocal.BestSimilarity < StaticSourceTrustThreshold)) ||
+                (searchCurseForge && (cfLocal.Keyword == null || cfLocal.BestSimilarity < StaticSourceTrustThreshold));
+
+            var literalEnglish = needsLiteralTranslation
+                ? await SearchQueryTranslationService.TranslateToEnglishAsync(query, ct)
+                : null;
+
+            if (searchModrinth)
+            {
+                modrinthQuery = mrLocal.Keyword != null && mrLocal.BestSimilarity >= StaticSourceTrustThreshold
+                    ? mrLocal.Keyword
+                    : literalEnglish ?? mrLocal.Keyword ?? query;
+                if (!string.Equals(modrinthQuery, query, StringComparison.OrdinalIgnoreCase))
+                    translatedForDisplay ??= modrinthQuery;
+            }
+            if (searchCurseForge)
+            {
+                curseForgeQuery = cfLocal.Keyword != null && cfLocal.BestSimilarity >= StaticSourceTrustThreshold
+                    ? cfLocal.Keyword
+                    : literalEnglish ?? cfLocal.Keyword ?? query;
+                if (!string.Equals(curseForgeQuery, query, StringComparison.OrdinalIgnoreCase))
+                    translatedForDisplay ??= curseForgeQuery;
+            }
+        }
+        if (translatedForDisplay != null)
+        {
+            outcome.TranslatedFrom = query;
+            outcome.TranslatedKeyword = translatedForDisplay;
+        }
+
+        var modrinthTask = searchModrinth ? SearchModrinthSafe(modrinthQuery ?? query, gameVersion, modLoader, offset, pageSize, ct) : null;
+        var curseForgeTask = searchCurseForge ? SearchCurseForgeSafe(curseForgeQuery ?? query, gameVersion, modLoader, offset, pageSize, ct) : null;
+
+        // 用 Task.WhenAll 而不是逐个 await：虽然两个 Task 在上面赋值时已经开始并发执行，
+        // 顺序 await 不会真的让第二个任务"等"第一个跑完，但写成 WhenAll 让并发意图在代码上
+        // 一目了然，不需要读者靠"C# async 方法调用即执行"该隐含知识才能确认这里是并发的。
+        // 用 Task（非泛型）的 WhenAll 重载而不是把两个不同调用点的具名元组类型硬塞进同一个
+        // 数组，避免匿名元组类型推断在某些编译器版本上出现意外的隐式转换问题。
+        if (modrinthTask != null && curseForgeTask != null) await Task.WhenAll(modrinthTask, curseForgeTask);
+        else if (modrinthTask != null) await modrinthTask;
+        else if (curseForgeTask != null) await curseForgeTask;
+
+        if (modrinthTask?.Result is { } mr)
+        {
+            if (mr.Error != null) outcome.Warnings.Add($"Modrinth 搜索失败：{mr.Error}");
+            else outcome.Items.AddRange(mr.Items);
+            if (mr.Notice != null) outcome.Warnings.Add(mr.Notice);
+            outcome.ModrinthTotal = mr.Total;
+            outcome.ModrinthFailed = mr.Error != null;
+        }
+
+        if (curseForgeTask?.Result is { } cr)
+        {
+            if (cr.Error != null) outcome.Warnings.Add($"CurseForge 搜索失败：{cr.Error}");
+            else outcome.Items.AddRange(cr.Items);
+            if (cr.Notice != null) outcome.Warnings.Add(cr.Notice);
+            outcome.CurseForgeTotal = cr.Total;
+            outcome.CurseForgeFailed = cr.Error != null;
+        }
+
+        return outcome;
+    }
+
+    
+    public Task<List<McModSearchHit>> SearchMcModAsync(string query, CancellationToken ct = default)
+        => _mcMod.SearchAsync(query, ct);
+
+    public async Task<ModSearchOutcome<UnifiedResourceItem>> SearchResourcesAsync(ModSource source,
+        ModrinthResourceType type, string query, string? gameVersion, int pageIndex = 0, int pageSize = 20,
+        CancellationToken ct = default, string? modLoader = null, int? startOffset = null)
+    {
+        var outcome = new ModSearchOutcome<UnifiedResourceItem>();
+
+        var searchModrinth = source is ModSource.Combined or ModSource.Modrinth;
+        var searchCurseForge = source is ModSource.Combined or ModSource.CurseForge;
+        var offset = startOffset ?? checked(pageIndex * pageSize);
+
+        // 资源包/数据包/光影/插件同样支持中文兜底：先看内置 WikiEntries 静态源的最佳匹配。
+        // >=70% 时可以复用它给出的英文专名；<70% 时优先翻译“用户真正输入的文本”，再去
+        // Modrinth / CurseForge 搜索。尤其是资源包名称并不都收录在 Mod 静态库里，该分支能
+        // 避免低相关 Mod 条目把资源包搜索带偏。
+        var effectiveModrinthQuery = query;
+        var effectiveCurseForgeQuery = query;
+        string? translatedForDisplay = null;
+        if (ChineseModSearchTranslator.IsChineseQuery(query))
+        {
+            var mrLocal = searchModrinth ? ChineseModSearchTranslator.Translate(query, ModSource.Modrinth) : default;
+            var cfLocal = searchCurseForge ? ChineseModSearchTranslator.Translate(query, ModSource.CurseForge) : default;
+            var needsLiteralTranslation =
+                (searchModrinth && (mrLocal.Keyword == null || mrLocal.BestSimilarity < StaticSourceTrustThreshold)) ||
+                (searchCurseForge && (cfLocal.Keyword == null || cfLocal.BestSimilarity < StaticSourceTrustThreshold));
+            var literalEnglish = needsLiteralTranslation
+                ? await SearchQueryTranslationService.TranslateToEnglishAsync(query, ct)
+                : null;
+
+            if (searchModrinth)
+            {
+                effectiveModrinthQuery = mrLocal.Keyword != null && mrLocal.BestSimilarity >= StaticSourceTrustThreshold
+                    ? mrLocal.Keyword
+                    : literalEnglish ?? mrLocal.Keyword ?? query;
+                if (!string.Equals(effectiveModrinthQuery, query, StringComparison.OrdinalIgnoreCase))
+                    translatedForDisplay ??= effectiveModrinthQuery;
+            }
+            if (searchCurseForge)
+            {
+                effectiveCurseForgeQuery = cfLocal.Keyword != null && cfLocal.BestSimilarity >= StaticSourceTrustThreshold
+                    ? cfLocal.Keyword
+                    : literalEnglish ?? cfLocal.Keyword ?? query;
+                if (!string.Equals(effectiveCurseForgeQuery, query, StringComparison.OrdinalIgnoreCase))
+                    translatedForDisplay ??= effectiveCurseForgeQuery;
+            }
+        }
+        if (translatedForDisplay != null)
+        {
+            outcome.TranslatedFrom = query;
+            outcome.TranslatedKeyword = translatedForDisplay;
+        }
+
+        var modrinthTask = searchModrinth ? SearchModrinthResourceSafe(type, effectiveModrinthQuery, gameVersion, offset, pageSize, ct, modLoader) : null;
+        var curseForgeTask = searchCurseForge ? SearchCurseForgeResourceSafe(type, effectiveCurseForgeQuery, gameVersion, offset, pageSize, ct, modLoader) : null;
+
+        if (modrinthTask != null && curseForgeTask != null) await Task.WhenAll(modrinthTask, curseForgeTask);
+        else if (modrinthTask != null) await modrinthTask;
+        else if (curseForgeTask != null) await curseForgeTask;
+
+        if (modrinthTask?.Result is { } mr)
+        {
+            if (mr.Error != null) outcome.Warnings.Add($"Modrinth 搜索失败：{mr.Error}");
+            else outcome.Items.AddRange(mr.Items);
+            if (mr.Notice != null) outcome.Warnings.Add(mr.Notice);
+            outcome.ModrinthTotal = mr.Total;
+            outcome.ModrinthFailed = mr.Error != null;
+        }
+
+        if (curseForgeTask?.Result is { } cr)
+        {
+            if (cr.Error != null) outcome.Warnings.Add($"CurseForge 搜索失败：{cr.Error}");
+            else outcome.Items.AddRange(cr.Items);
+            if (cr.Notice != null) outcome.Warnings.Add(cr.Notice);
+            outcome.CurseForgeTotal = cr.Total;
+            outcome.CurseForgeFailed = cr.Error != null;
+        }
+
+        return outcome;
+    }
+
+    private async Task<(List<UnifiedResourceItem> Items, string? Error, string? Notice, int Total)> SearchModrinthResourceSafe(
+        ModrinthResourceType type, string query, string? gameVersion, int offset, int pageSize, CancellationToken ct, string? modLoader = null)
+    {
+        try
+        {
+            var result = await _modrinth.SearchAsync(type, query, gameVersion, offset, pageSize, ct, modLoader);
+            var items = result.Hits.Select(h => new UnifiedResourceItem
+            {
+                Source = ModSource.Modrinth,
+                
+
+                Title = ModDisplayNameResolver.Resolve(ModSource.Modrinth, h.Slug, h.Title),
+                Description = h.Description,
+                Author = h.Author,
+                IconUrl = h.IconUrl,
+                Downloads = h.Downloads,
+                SourceId = h.ProjectId,
+                RawItem = h
+            }).ToList();
+            return (items, null, null, result.TotalHits);
+        }
+        catch (Exception ex)
+        {
+            return (new List<UnifiedResourceItem>(), ex.Message, null, 0);
+        }
+    }
+
+    /// <summary>数据包在 CurseForge 上用独立 classId(6945) 搜索，跟 Modrinth "mod + datapack 分类"的
+    /// 变通方式不同，不需要额外过滤参数。</summary>
+    private async Task<(List<UnifiedResourceItem> Items, string? Error, string? Notice, int Total)> SearchCurseForgeResourceSafe(
+        ModrinthResourceType type, string query, string? gameVersion, int offset, int pageSize, CancellationToken ct, string? modLoader = null)
+    {
+
+        if (type == ModrinthResourceType.Mod || type == ModrinthResourceType.Modpack)
+            return (new List<UnifiedResourceItem>(), null, null, 0);
+
+        try
+        {
+            var kind = type switch
+            {
+                ModrinthResourceType.ResourcePack => CurseForgeResourceKind.ResourcePack,
+                ModrinthResourceType.Shader => CurseForgeResourceKind.Shader,
+                ModrinthResourceType.DataPack => CurseForgeResourceKind.DataPack,
+                ModrinthResourceType.Plugin => CurseForgeResourceKind.Plugin,
+                _ => throw new ArgumentOutOfRangeException(nameof(type))
+            };
+            var result = await _curseForge.SearchResourcesAsync(kind, query, gameVersion, offset, pageSize, ct);
+            var items = result.Data.Select(m => new UnifiedResourceItem
+            {
+                Source = ModSource.CurseForge,
+
+                Title = m.Name,
+                Description = m.Summary,
+                Author = m.AuthorsDisplay,
+                IconUrl = m.Logo?.ThumbnailUrl,
+                Downloads = m.DownloadCount,
+                SourceId = m.Id.ToString(),
+                RawItem = m
+            }).ToList();
+            return (items, null, null, result.Pagination?.TotalCount ?? items.Count);
+        }
+        catch (CurseForgeKeyMissingException)
+        {
+            
+
+            return (new List<UnifiedResourceItem>(), null, "未配置 CurseForge API Key，综合搜索本次只显示 Modrinth 结果（去「设置」页粘贴 key 即可同时显示 CurseForge）。", 0);
+        }
+        catch (Exception ex)
+        {
+            return (new List<UnifiedResourceItem>(), ex.Message, null, 0);
+        }
+    }
+
+    private async Task<(List<UnifiedModItem> Items, string? Error, string? Notice, int Total)> SearchModrinthSafe(
+        string query, string? gameVersion, string? modLoader, int offset, int pageSize, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _modrinth.SearchAsync(ModrinthResourceType.Mod, query, gameVersion,
+                offset, pageSize, ct, modLoader);
+            var items = result.Hits.Select(h => new UnifiedModItem
+            {
+                Source = ModSource.Modrinth,
+                
+                Title = ModDisplayNameResolver.Resolve(ModSource.Modrinth, h.Slug, h.Title),
+                Description = h.Description,
+                Author = h.Author,
+                IconUrl = h.IconUrl,
+                Downloads = h.Downloads,
+                SourceId = h.ProjectId,
+                RawItem = h
+            }).ToList();
+            return (items, null, null, result.TotalHits);
+        }
+        catch (Exception ex)
+        {
+            return (new List<UnifiedModItem>(), ex.Message, null, 0);
+        }
+    }
+
+    private async Task<(List<UnifiedModItem> Items, string? Error, string? Notice, int Total)> SearchCurseForgeSafe(
+        string query, string? gameVersion, string? modLoader, int offset, int pageSize, CancellationToken ct)
+    {
+        try
+        {
+            var result = await _curseForge.SearchModsAsync(query, gameVersion, modLoader, offset, pageSize, ct);
+            var items = result.Data.Select(m => new UnifiedModItem
+            {
+                Source = ModSource.CurseForge,
+                
+
+                Title = m.Name,
+                Description = m.Summary,
+                Author = m.AuthorsDisplay,
+                IconUrl = m.Logo?.ThumbnailUrl,
+                Downloads = m.DownloadCount,
+                SourceId = m.Id.ToString(),
+                RawItem = m
+            }).ToList();
+            return (items, null, null, result.Pagination?.TotalCount ?? items.Count);
+        }
+        catch (CurseForgeKeyMissingException)
+        {
+            // 之前这里完全静默返回空列表，导致"综合"模式在没配置 CurseForge Key 时
+            // 会不动声色地退化成"只有 Modrinth 结果"，用户很容易误以为综合搜索本身
+            // 有 bug（默认只显示 Modrinth），实际是缺 key 导致的静默降级。
+            // 现在改成带一句轻量提示（不算 Error 级别，不会被当成"搜索失败"报错弹窗），
+            // 只在用户主动点"手动刷新"时才会通过 Warnings 展示出来，自动搜索时不打扰。
+            return (new List<UnifiedModItem>(), null, "未配置 CurseForge API Key，综合搜索本次只显示 Modrinth 结果（去「设置」页粘贴 key 即可同时显示 CurseForge）。", 0);
+        }
+        catch (Exception ex)
+        {
+            return (new List<UnifiedModItem>(), ex.Message, null, 0);
+        }
+    }
+}
+
+/// <summary>
+/// 泛型化：原来只服务于 Mod 搜索(固定装 UnifiedModItem)，现在材质包/光影包/数据包的聚合搜索
+/// (SearchResourcesAsync)也要用同一套"多来源结果 + 警告列表"的容器，所以加一个类型参数。
+/// ModSearchOutcome（不带类型参数）保留作为 UnifiedModItem 场景的别名，SearchAsync(Mod) 的调用方
+/// 不需要跟着改。
+/// </summary>
+public class ModSearchOutcome<T>
+{
+    public List<T> Items { get; } = new();
+    public List<string> Warnings { get; } = new();
+
+    /// <summary>非空表示这次搜索命中了中文名词典，实际搜索关键词已从该原始中文词换成了英文名
+    /// (具体英文词在 Items 结果里能看到)。UI 可以用该字段提示用户"已按 XX 搜索"，避免用户
+    /// 看到结果里全是英文标题却不知道为什么中文关键词能搜到东西。</summary>
+    public string? TranslatedFrom { get; set; }
+
+    /// <summary>真正发往外部搜索源的英文关键词（Modrinth/CurseForge 两边不同名时取首个）。
+    /// 仅用于界面解释“为什么中文输入能搜到英文结果”，不参与分页或下载。</summary>
+    public string? TranslatedKeyword { get; set; }
+
+    public int ModrinthTotal { get; set; }
+
+    /// <summary>CurseForge 这一侧这次查询命中的总条数，含义同 ModrinthTotal。</summary>
+    public int CurseForgeTotal { get; set; }
+
+    public bool ModrinthFailed { get; set; }
+    public bool CurseForgeFailed { get; set; }
+}
+
+public class ModSearchOutcome : ModSearchOutcome<UnifiedModItem>
+{
+}

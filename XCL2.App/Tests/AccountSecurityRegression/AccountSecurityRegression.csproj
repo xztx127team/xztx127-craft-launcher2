@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/Account.cs" Link="Account.cs" />
+    <Compile Include="../../Services/MicrosoftAuthService.cs" Link="MicrosoftAuthService.cs" />
+    <Compile Include="../../Services/AuthServerAuthService.cs" Link="AuthServerAuthService.cs" />
+    <Compile Include="../../Services/AccountUpdatePolicy.cs" Link="AccountUpdatePolicy.cs" />
+    <Compile Include="../../Services/AccountSecretStore.cs" Link="AccountSecretStore.cs" />
+    <Compile Include="../../Services/AuthEndpointPolicy.cs" Link="AuthEndpointPolicy.cs" />
+    <Compile Include="../../Services/DiagnosticRedactionService.cs" Link="DiagnosticRedactionService.cs" />
+    <Compile Include="../../Services/SkinAvatarPixels.cs" Link="SkinAvatarPixels.cs" />
+    <Compile Include="../../Services/AccountAvatarCacheService.cs" Link="AccountAvatarCacheService.cs" />
+    <Compile Include="../../Services/OfficialSkinFetchService.cs" Link="OfficialSkinFetchService.cs" />
+      <Compile Include="../../Services/LogTextEncoding.cs" Link="LogTextEncoding.cs"/>
+  </ItemGroup>
+</Project>

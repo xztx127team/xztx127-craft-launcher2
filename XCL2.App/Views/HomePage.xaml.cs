@@ -1,0 +1,528 @@
+using System;
+using System.Linq;
+using System.Windows.Controls;
+using System.Windows;
+using System.Windows.Input;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+/// <summary>
+/// 首页：磁贴总控台。原本"普通/高手模式"该状态的唯一读写入口在 SettingsPage
+/// （cfg.AdvancedMode，见 AdvancedModeCheck_Changed），现在首页右上角也加了一个同款开关
+/// 方便快速切换，两处操作的是同一个配置项、同一份保存逻辑，不是各自独立的状态。
+///
+/// 「模式设置」（深/浅色）和「自动循环」两个按钮同理：都是直接读写 AppConfig 里对应的
+/// 字段，点击立即保存并生效，不需要用户去「设置」页点"保存设置"。
+/// </summary>
+public partial class HomePage : UserControl
+{
+    private readonly MainWindow _owner;
+
+    private bool _guestToggleInitializing;
+    private bool _modeToggleInitializing;
+    private bool _darkModeToggleInitializing;
+    private bool _autoThemeToggleInitializing;
+    private bool _followSystemThemeToggleInitializing;
+    private bool _simplifiedToggleInitializing;
+    private Action? _onLanguageChanged;
+    private bool _previewToggleSyncing;
+    private ExperimentalPreviewWindow? _previewWindow;
+
+    public HomePage(MainWindow owner)
+    {
+        _owner = owner;
+        InitializeComponent();
+        InitializePreviewHome();
+
+        // 从配置里同步访客模式的当前状态；用 _guestToggleInitializing 避免这一步触发
+        // GuestModeToggle_Changed（那里会去改配置+清理会话文件，只有用户手动点击才应该触发）。
+        _guestToggleInitializing = true;
+        GuestModeToggle.IsChecked = _owner.ConfigService.Config.GuestModeEnabled;
+        UpdateGuestModeToggleText();
+        _guestToggleInitializing = false;
+
+        _simplifiedToggleInitializing = true;
+        SimplifiedModeToggle.IsChecked = _owner.ConfigService.Config.SimplifiedModeEnabled;
+        _simplifiedToggleInitializing = false;
+
+        RefreshModeToggle();
+        RefreshThemeToggles();
+        ApplyRestrictedModeGating(_owner.ConfigService.Config.RestrictedMode);
+
+        UpdateLanguageEntryButtonText();
+        ApplyCapsuleBarMargin();
+        SizeChanged += (_, _) => RefreshForSizeChange();
+        // 页面确认进入可视化树后才订阅静态事件，避免导航被取消时，未显示的实例仍被引用。
+        // 重新加载同一实例时先解绑再订阅，并刷新离开期间可能变化的语言。
+        _onLanguageChanged = () => UpdateLanguageEntryButtonText();
+        Loaded += (_, _) =>
+        {
+            RefreshForSizeChange();
+            RefreshContextHint();
+            LocalizationService.LanguageChanged -= _onLanguageChanged;
+            LocalizationService.LanguageChanged += _onLanguageChanged;
+            _owner.NativePreviewStateChanged -= SyncNativePreview;
+            _owner.NativePreviewStateChanged += SyncNativePreview;
+            SyncNativePreview();
+            UpdateLanguageEntryButtonText();
+        };
+        Unloaded += (_, _) =>
+        {
+            LocalizationService.LanguageChanged -= _onLanguageChanged;
+            _owner.NativePreviewStateChanged -= SyncNativePreview;
+            _previewCardsTimer.Stop();
+        };
+
+        AprilFoolsUi.AttachHomeTileEffects(TileGrid, LaunchTile, QuickStartTile);
+
+    }
+
+    private void RefreshContextHint()
+    {
+        var cfg = _owner.ConfigService.Config;
+        var needsSelection = string.IsNullOrWhiteSpace(cfg.SelectedVersionId);
+        HomeContextHint.Visibility = needsSelection ? Visibility.Visible : Visibility.Collapsed;
+        if (needsSelection)
+            HomeContextHintText.Text = cfg.Folders.Count == 0
+                ? "还没有配置游戏目录。可以先选择现有目录，或到下载中心安装游戏。"
+                : "还没有选择要玩的实例。选择后，首页的启动入口会使用该实例。";
+    }
+
+    private void HomeContextHint_Click(object sender, RoutedEventArgs e) => _owner.NavigateToVersions();
+
+    /// <summary>窗口最大化/还原/缩放后刷新首页布局：磁贴区高度按当前可用高度匹配（全屏时不再是
+    /// 一小块漂在大片空白中间），胶囊条重新排列，并按当前搜索框样式重新让位。</summary>
+    private bool _compactHomeLayout;
+
+    public void RefreshForSizeChange()
+    {
+        ApplyCapsuleBarMargin();
+        var compact = ActualWidth > 0 && (ActualWidth < 640 || ActualHeight < 420);
+        if (compact != _compactHomeLayout)
+        {
+            _compactHomeLayout = compact;
+            // 小窗口让整页一起滚动，避免胶囊条占满固定 Auto 行而把首页正文挤成零高度。
+            if (compact)
+            {
+                HomeLayoutGrid.Children.Remove(CapsuleBar);
+                HomeBodyPanel.Children.Insert(0, CapsuleBar);
+                Grid.SetRow(HomeScroll, 0);
+                Grid.SetRowSpan(HomeScroll, 2);
+            }
+            else
+            {
+                HomeBodyPanel.Children.Remove(CapsuleBar);
+                HomeLayoutGrid.Children.Add(CapsuleBar);
+                Grid.SetRow(HomeScroll, 1);
+                Grid.SetRowSpan(HomeScroll, 1);
+            }
+        }
+        HomeSurface.Padding = new Thickness(compact ? 12 : _owner.IsNativePreviewOpen ? 24 : 30);
+        HomeBodyPanel.VerticalAlignment = compact ? VerticalAlignment.Top : VerticalAlignment.Center;
+        var innerWidth = Math.Max(120, ActualWidth - HomeSurface.Padding.Left - HomeSurface.Padding.Right);
+        TileGrid.Columns = compact ? (innerWidth < 380 ? 1 : 2) : 3;
+        TileGrid.Rows = compact ? 0 : 2;
+        TileGrid.MinHeight = compact ? 0 : Math.Clamp(HomeScroll.ActualHeight * .5, 0, 560);
+        LanguageEntryButtonText.MaxWidth = compact ? Math.Max(80, Math.Min(220, innerWidth - 60)) : double.PositiveInfinity;
+        LanguageEntryButtonText.TextTrimming = TextTrimming.CharacterEllipsis;
+        // 让 WPF 合并下一帧的布局；SizeChanged 内不再强制 UpdateLayout。
+    }
+
+    /// <summary>顶部全局搜索框的悬浮窗紧贴标题栏下沿、盖在内容区最上方一小条。胶囊条不再在左侧留空
+    /// （那样会把可用宽度挤小、提前换行），而是整体往下让出这一小条，宽度完全留给胶囊，
+    /// 能一行放下的就一行从右往左排。</summary>
+    private void ApplyCapsuleBarMargin()
+    {
+        var cfg = _owner.ConfigService.Config;
+        var floating = cfg.ShowFeatureSearch && cfg.FeatureSearchStyle != "Top";
+        CapsuleBar.Margin = new Thickness(0, floating ? 17 : 0, 0, 10);
+    }
+
+    /// <summary>语言胶囊文字：Str_Lang_EntryButton 里的「*」通配符替换为当前语言的本地名，
+    /// 例如「（简体中文（Microsoft）/简体中文（Microsoft）/选择语言）」。三个语言文件里这条
+    /// 都是模板「（*/*/选择语言）」，不随语言翻译，运行时这里统一填当前语言名。</summary>
+    private void UpdateLanguageEntryButtonText()
+    {
+        var template = Application.Current.FindResource("Str_Lang_EntryButton") as string
+                       ?? "（*/*/选择语言）";
+        var current = System.Linq.Enumerable.FirstOrDefault(
+            LocalizationService.SupportedLanguages,
+            l => l.Code == LocalizationService.CurrentLanguageCode);
+        var name = current?.NativeName ?? LocalizationService.CurrentLanguageCode;
+        LanguageEntryButtonText.Text = template.Replace("*", name);
+        LanguageEntryButtonText.ToolTip = LanguageEntryButtonText.Text;
+    }
+
+    /// <summary>基本模式（RestrictedMode=true）下的功能门控。
+    /// 右上角这一排按钮里，「语言」和「访客模式」两个允许在基本模式下继续使用（语言是
+    /// 界面可用性的前提，访客模式是新手最常用的临时游玩方式），其余「模式设置」（深/浅色）、
+    /// 「自动循环」、「普通模式/高级模式切换」保持置灰——这几个不在侧边栏导航按钮之列，
+    /// MainWindow.ApplyRestrictedModeGating 单独没法碰到，靠该方法从外面调用。
+    /// 磁贴总控台里，「账户管理」磁贴允许使用；「下载中心」「服务器管理」「设置」三个磁贴
+    /// 在基本模式下置灰（这些是进阶功能，跟侧边栏对应导航按钮的受限状态保持一致）；
+    /// 「启动游戏」「一键开始游戏」两个磁贴不受影响，本来就不在受限范围内。
+    /// 构造函数里也会用当前配置调一次，保证"从受限状态启动、首页第一次显示"就已经是对的，
+    /// 不用等用户先切一次页。只置灰不隐藏，跟侧边栏导航按钮的处理方式保持一致
+    /// （用户随时能看见还有哪些功能存在）。</summary>
+    public void ApplyRestrictedModeGating(bool restricted)
+    {
+        DarkModeToggle.IsEnabled = !restricted;
+        AutoThemeCycleToggle.IsEnabled = !restricted;
+        ModeToggle.IsEnabled = !restricted;
+
+        DownloadTile.IsEnabled = !restricted;
+        ServerManagerTile.IsEnabled = !restricted;
+        SettingsTile.IsEnabled = !restricted;
+        RefreshPreviewCards();
+    }
+
+    /// <summary>
+    /// 从配置里重新读取 cfg.AdvancedMode 并同步到 ModeToggle 的勾选状态/文案，不触发保存。
+    /// 除了构造函数第一次调用，还需要在"从设置页切回首页"时调用一次——用户可能刚在设置页
+    /// 切换过模式，首页这份按钮的显示不应该是切页面之前的旧状态。见 MainWindow.ShowHome。
+    /// </summary>
+    public void RefreshModeToggle()
+    {
+        _modeToggleInitializing = true;
+        ModeToggle.IsChecked = _owner.ConfigService.Config.AdvancedMode;
+        UpdateModeToggleText();
+        _modeToggleInitializing = false;
+        RefreshTileOrder();
+    }
+
+    private void RefreshTileOrder()
+    {
+        var advanced = _owner.ConfigService.Config.AdvancedMode;
+
+        var launchIndex = TileGrid.Children.IndexOf(LaunchTile);
+        var quickStartIndex = TileGrid.Children.IndexOf(QuickStartTile);
+        if (launchIndex < 0 || quickStartIndex < 0) return;
+
+        // 普通模式：一键开始游戏在前（索引更小）；高级模式：启动游戏在前。
+        // 如果当前顺序已经符合目标模式的要求，不用再交换（避免同一模式下重复调用时
+        // 把已经交换好的顺序又换回去）。
+        var alreadyCorrectOrder = advanced ? launchIndex < quickStartIndex : quickStartIndex < launchIndex;
+        if (alreadyCorrectOrder) return;
+
+        var launchMargin = LaunchTile.Margin;
+        var quickStartMargin = QuickStartTile.Margin;
+
+        TileGrid.Children.RemoveAt(Math.Max(launchIndex, quickStartIndex));
+        TileGrid.Children.RemoveAt(Math.Min(launchIndex, quickStartIndex));
+
+        var firstSlotIndex = Math.Min(launchIndex, quickStartIndex);
+        var (first, second) = advanced ? (LaunchTile, QuickStartTile) : (QuickStartTile, LaunchTile);
+        TileGrid.Children.Insert(firstSlotIndex, first);
+        TileGrid.Children.Insert(firstSlotIndex + 1, second);
+
+        // Margin 跟着各自新占的格子走：原来在前一格的 Margin 现在给挪到前面的那个磁贴用，
+        // 原来在后一格的 Margin 给挪到后面的那个磁贴用。
+        var frontMargin = launchIndex < quickStartIndex ? launchMargin : quickStartMargin;
+        var backMargin = launchIndex < quickStartIndex ? quickStartMargin : launchMargin;
+        first.Margin = frontMargin;
+        second.Margin = backMargin;
+    }
+
+    /// <summary>
+    /// 从配置里重新读取 IsDarkMode / AutoThemeCycleEnabled 并同步到「模式设置」/「自动循环」
+    /// 两个按钮的勾选状态/文案，不触发保存、不重新应用配色（配色本身由调用方在改配置的同一
+    /// 时刻已经调用过 ThemeService.ApplyForCurrentState，这里只是让按钮显示跟上最新状态）。
+    /// 除了构造函数，MainWindow 的自动循环定时检查在真正切换了 IsDarkMode 之后也会调用一次，
+    /// 保证首页按钮文案跟自动切换的结果保持同步，不会出现"实际已经变成深色模式，按钮却还
+    /// 显示浅色"的不一致。
+    /// </summary>
+    public void RefreshThemeToggles()
+    {
+        var cfg = _owner.ConfigService.Config;
+
+        _darkModeToggleInitializing = true;
+        DarkModeToggle.IsChecked = cfg.IsDarkMode;
+        UpdateDarkModeToggleText();
+        _darkModeToggleInitializing = false;
+
+        _autoThemeToggleInitializing = true;
+        AutoThemeCycleToggle.IsChecked = cfg.AutoThemeCycleEnabled;
+        UpdateAutoThemeCycleToggleText();
+        _autoThemeToggleInitializing = false;
+
+        _followSystemThemeToggleInitializing = true;
+        FollowSystemThemeToggle.IsChecked = cfg.FollowSystemTheme;
+        UpdateFollowSystemThemeToggleText();
+        _followSystemThemeToggleInitializing = false;
+    }
+
+    private void UpdateModeToggleText()
+    {
+        ModeToggleText.Text = ModeToggle.IsChecked == true ? "高级模式" : "普通模式";
+    }
+
+    /// <summary>
+    /// 首页右上角"普通模式/高级模式"开关：点击立即写回 cfg.AdvancedMode 并保存，
+    /// 跟「设置」页 AdvancedModeCheck_Changed 是同一个配置项、同一份保存动作——不管从
+    /// 哪一边切换，两边下次显示都会是最新状态（这一边不需要额外触发设置页控件显隐刷新，
+    /// 那部分逻辑只在设置页自己打开时才需要跑）。
+    /// </summary>
+    private void ModeToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_modeToggleInitializing) return;
+        _owner.ConfigService.Config.AdvancedMode = ModeToggle.IsChecked == true;
+        _owner.ConfigService.Save();
+        UpdateModeToggleText();
+    }
+
+    private void UpdateDarkModeToggleText()
+    {
+        var isDark = DarkModeToggle.IsChecked == true;
+        DarkModeToggleText.Text = isDark ? "深色模式" : "浅色模式";
+        DarkModeToggleIcon.Text = isDark ? "\uD83C\uDF19" : "\u2600"; // 🌙 / ☀
+    }
+
+    /// <summary>
+    /// 「模式设置」按钮：切换深色/浅色，只影响 cfg.IsDarkMode，不影响 cfg.UiSkin 选的色系
+    /// （比如色系选了蓝色，这里点击只是在"蓝色系-浅"和"蓝色系-深"之间切）。点击立即写回
+    /// 配置、保存，并调用 ThemeService 重新应用——保存后一秒内必须看到界面刷新，这里直接
+    /// 同步调用 Apply，不存在异步延迟。
+    ///
+    /// 这是用户"手动"点的操作，即使当前「自动循环」是开启状态，也允许临时覆盖显示——
+    /// 只是不会关闭自动循环本身，到下一个自动切换时间点，MainWindow 的定时检查还是会
+    /// 按计划把 IsDarkMode 重新覆盖回去（见 MainWindow.ReevaluateAutoThemeCycle）。
+    /// </summary>
+    private void DarkModeToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_darkModeToggleInitializing) return;
+        var cfg = _owner.ConfigService.Config;
+        cfg.IsDarkMode = DarkModeToggle.IsChecked == true;
+        _owner.ConfigService.Save();
+        UpdateDarkModeToggleText();
+
+        ThemeService.ApplyForCurrentState(cfg.GuestModeEnabled, cfg.UiSkin, cfg.IsDarkMode, cfg.CustomAccentColor);
+    }
+
+    private void UpdateAutoThemeCycleToggleText()
+    {
+        AutoThemeCycleToggleText.Text = AutoThemeCycleToggle.IsChecked == true ? "自动循环：已开启" : "自动循环";
+    }
+
+    /// <summary>
+    /// 「自动循环」开关：开启后由 MainWindow 的每分钟定时检查根据当前系统时间自动决定
+    /// cfg.IsDarkMode；关闭后完全交还给用户手动控制，不再有任何自动覆盖。
+    /// 点击立即写回配置、保存；刚打开的瞬间立即校验一次当前时间点应该是哪个模式并应用，
+    /// 不需要等到下一次定时检查才生效（保存后一秒内必须看到界面刷新）。
+    /// </summary>
+    private void AutoThemeCycleToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_autoThemeToggleInitializing) return;
+        var cfg = _owner.ConfigService.Config;
+        cfg.AutoThemeCycleEnabled = AutoThemeCycleToggle.IsChecked == true;
+        // 开关状态一变化，"上次自动切换的时间段"记录就作废了：不管是刚打开（需要立即按当前
+        // 时间校正一次）还是刚关闭（下次重新打开时不该沿用很久以前的旧记录），都清空。
+        cfg.AutoThemeLastAppliedSlotStartHour = null;
+
+        if (cfg.AutoThemeCycleEnabled && cfg.FollowSystemTheme)
+        {
+            cfg.FollowSystemTheme = false;
+            _followSystemThemeToggleInitializing = true;
+            FollowSystemThemeToggle.IsChecked = false;
+            UpdateFollowSystemThemeToggleText();
+            _followSystemThemeToggleInitializing = false;
+        }
+
+        _owner.ConfigService.Save();
+        UpdateAutoThemeCycleToggleText();
+
+        _owner.ReevaluateAutoThemeCycle();
+    }
+
+    private void UpdateFollowSystemThemeToggleText()
+    {
+        FollowSystemThemeToggleText.Text = FollowSystemThemeToggle.IsChecked == true ? "跟随系统：已开启" : "跟随系统";
+    }
+
+    /// <summary>
+    /// 「跟随系统」开关：开启后深浅色由 Windows 系统当前的应用主题设置决定，见
+    /// MainWindow.ReevaluateFollowSystemTheme。点击立即写回配置、保存；刚打开的瞬间立即
+    /// 按当前系统主题校正一次，不用等下一次系统主题变化事件才生效。
+    /// 跟「自动循环」互斥：开启该时顺带关掉「自动循环」，避免两边同时接管。
+    /// </summary>
+    private void FollowSystemThemeToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_followSystemThemeToggleInitializing) return;
+        var cfg = _owner.ConfigService.Config;
+        if (FollowSystemThemeToggle.IsChecked == true && !WindowsCompatibilityService.Current.SupportsSystemTheme)
+        {
+            // 保留当前手动配色和按时间循环；不能把读取失败伪装成系统浅色。
+            _followSystemThemeToggleInitializing = true;
+            try { FollowSystemThemeToggle.IsChecked = false; }
+            finally { _followSystemThemeToggleInitializing = false; }
+            cfg.FollowSystemTheme = false;
+            _owner.ConfigService.Save();
+            UpdateFollowSystemThemeToggleText();
+            ToastService.Show(SystemThemeDetectionPolicy.UnsupportedMessage, ToastService.ToastKind.Warning, 10);
+            return;
+        }
+        cfg.FollowSystemTheme = FollowSystemThemeToggle.IsChecked == true;
+
+        if (cfg.FollowSystemTheme && cfg.AutoThemeCycleEnabled)
+        {
+            cfg.AutoThemeCycleEnabled = false;
+            cfg.AutoThemeLastAppliedSlotStartHour = null;
+            _autoThemeToggleInitializing = true;
+            AutoThemeCycleToggle.IsChecked = false;
+            UpdateAutoThemeCycleToggleText();
+            _autoThemeToggleInitializing = false;
+        }
+
+        _owner.ConfigService.Save();
+        UpdateFollowSystemThemeToggleText();
+
+        _owner.ReevaluateFollowSystemTheme();
+    }
+
+    private void UpdateGuestModeToggleText()
+    {
+        GuestModeToggleText.Text = GuestModeToggle.IsChecked == true ? "访客模式：已开启" : "访客模式";
+    }
+
+    private void GuestModeToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_guestToggleInitializing) return;
+
+        if (GuestModeToggle.IsChecked == true && !_owner.ConfigService.Config.GuestModeEnabled)
+        {
+            // 开启访客模式一定通过一次重启进入，当前进程不做半途切换。
+            if (!_owner.RequestGuestModeRestart())
+            {
+                _guestToggleInitializing = true;
+                GuestModeToggle.IsChecked = false;
+                _guestToggleInitializing = false;
+                UpdateGuestModeToggleText();
+            }
+            return;
+        }
+
+        // 访客会话中手动关闭可立即恢复正常账户；磁盘本来也始终保存 false。
+        _owner.ConfigService.Config.GuestModeEnabled = false;
+        _owner.ConfigService.Save();
+        _owner.RefreshGuestModeState();
+        UpdateGuestModeToggleText();
+    }
+
+    // 磁贴点击：全部转发到 MainWindow 已有的公开导航方法/事件处理方法，不重复实现导航逻辑。
+    // "启动游戏"磁贴直接调用 MainWindow.Launch_Click（已改成 public，见 MainWindow.xaml.cs），
+    // 复用同一套防手滑冷却状态，跟左下角"启动游戏"按钮完全一致的行为。
+
+    /// <summary>
+    /// 新界面预览开关反映主窗口实际模式；导航回来后继续显示正确状态。
+    /// </summary>
+    private void SyncNativePreview()
+    {
+        _previewToggleSyncing = true;
+        try
+        {
+            PreviewToggle.IsChecked = _previewWindow != null || _owner.IsNativePreviewOpen;
+            PreviewToggle.IsEnabled = true;
+            PreviewToggle.ToolTip = PreviewToggle.IsChecked == true
+                ? "关闭新界面预览，恢复原界面；现有页面与功能继续可用"
+                : "切换完整启动器为 WinUI 3 风格，使用自绘标题栏；所有页面继续使用现有功能";
+        }
+        finally { _previewToggleSyncing = false; }
+        ApplyPreviewHomeStyles();
+        RefreshPreviewCards();
+        if (IsLoaded && _owner.IsNativePreviewOpen) _previewCardsTimer.Start();
+        else _previewCardsTimer.Stop();
+    }
+
+    private void OpenExperimentalPreview_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_previewToggleSyncing) return;
+
+        // 进入新界面预览前必须依次同意两个提示；任意一个选「返回并取消」都不能进入。
+        if (!MessageBoxDialog.ShowAgreeOrBack("这可能是实验性功能，可能导致不稳定。", "新界面预览（1/2）")
+            || !MessageBoxDialog.ShowAgreeOrBack("当前实验性的新界面预览打开后会增高内存占用，建议不要使用。", "新界面预览（2/2）"))
+        {
+            SyncNativePreview(); // 把开关恢复为未开启
+            return;
+        }
+
+        _owner.OpenWinUiPreview();
+        // 以窗口实际完成的切换状态为准；失败时不会留下亮着的按钮。
+        SyncNativePreview();
+    }
+
+    private void OpenExperimentalPreview_Unchecked(object sender, RoutedEventArgs e)
+    {
+        if (_previewToggleSyncing) return;
+
+        if (_previewWindow != null)
+        {
+            var host = _previewWindow;
+            _previewWindow = null;
+            host.Close();
+            SyncNativePreview();
+            return;
+        }
+        _owner.CloseNativePreview();
+        SyncNativePreview();
+    }
+
+    /// <summary>
+    /// 保留旧启动参数调用入口；预览状态统一由主窗口维护。
+    /// </summary>
+    public void MarkAsMainWindowPreviewSession()
+    {
+        SyncNativePreview();
+    }
+
+    /// <summary>
+    /// 兼容旧嵌入窗口；按钮仍可取消，正常主窗口路径不创建嵌入窗口。
+    /// </summary>
+    public void ConfigureAsEmbeddedPreview(ExperimentalPreviewWindow host)
+    {
+        _previewWindow = host;
+        host.Closed += (_, _) => { if (ReferenceEquals(_previewWindow, host)) _previewWindow = null; SyncNativePreview(); };
+        SyncNativePreview();
+    }
+
+    private void SimplifiedModeToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_simplifiedToggleInitializing) return;
+
+        _owner.ConfigService.Config.SimplifiedModeEnabled = SimplifiedModeToggle.IsChecked == true;
+        _owner.ConfigService.Save();
+        _owner.ApplySimplifiedModeChanged();
+    }
+
+    private void TileLaunch_Click(object sender, RoutedEventArgs e) => _owner.Launch_Click(sender, e);
+
+    private void TileAccounts_Click(object sender, RoutedEventArgs e) => _owner.NavigateToAccounts();
+
+    private void TileDownload_Click(object sender, RoutedEventArgs e)
+    {
+
+        if (AprilFoolsUi.TryInterceptLaunchOrDownload(_owner)) return;
+        _owner.NavigateToDownloadCenter();
+    }
+
+    private void TileQuickStart_Click(object sender, RoutedEventArgs e)
+    {
+        var wizard = new QuickStartWizardWindow(_owner);
+        wizard.ShowDialog();
+    }
+
+    private void TileServerManager_Click(object sender, RoutedEventArgs e) => _owner.NavigateToServerManager();
+
+    private void TileSettings_Click(object sender, RoutedEventArgs e) => _owner.NavigateToSettings();
+
+    /// <summary>
+    /// 顶部「🌐 语言」按钮：打开独立的语言选择弹窗（LanguageSelectDialog）。选择后弹窗内部
+    /// 自己完成保存+应用+关闭，这里不需要处理返回值或做任何后续刷新——语言切换后的界面
+    /// 刷新由 LocalizationService.Apply 里复用的 ThemeService 窗口刷新逻辑统一处理，
+    /// 首页这里不用额外调用什么方法。
+    /// </summary>
+    private void LanguageEntryButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new LanguageSelectDialog(_owner.ConfigService);
+        OverlayDialogService.ShowModal(dlg);
+    }
+}

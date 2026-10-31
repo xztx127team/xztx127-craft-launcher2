@@ -1,0 +1,140 @@
+using System.IO;
+using System.Text.Json;
+using XCL2.App.Models;
+
+namespace XCL2.App.Services;
+
+public static class InstanceConfigService
+{
+    public const string GraphicsApiGame = "game";
+    public const string GraphicsApiOpenGl = "opengl";
+    public const string GraphicsApiVulkan = "vulkan";
+
+    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+
+    /// <summary>实例的 xcl/ 子目录路径。</summary>
+    public static string GetXclDir(string versionDir) => Path.Combine(versionDir, "xcl");
+
+    /// <summary>实例单独设置文件路径：&lt;versionDir&gt;/xcl/settings.json。</summary>
+    public static string GetSettingsPath(string versionDir) => Path.Combine(GetXclDir(versionDir), "settings.json");
+
+    /// <summary>该实例导出的启动脚本路径：&lt;versionDir&gt;/xcl/launch.bat。</summary>
+    public static string GetLaunchScriptPath(string versionDir) => Path.Combine(GetXclDir(versionDir), "launch.bat");
+
+    /// <summary>
+    /// 读取一个实例的单独设置。文件不存在（首次打开该实例）时，创建 xcl/ 目录并写入一份
+    /// 默认配置后返回；文件存在但读取/反序列化失败（内容损坏）时，记录日志并同样返回一份
+    /// 默认配置，但**不会**覆盖磁盘上损坏的文件——保留原始内容以便用户或以后的工具排查，
+    /// 只在内存里用默认值兜底，避免因为一个实例的设置文件损坏导致整个启动器崩溃。
+    /// </summary>
+    public static InstanceSettings LoadOrCreateDefault(string versionDir)
+    {
+        var path = GetSettingsPath(versionDir);
+        if (!File.Exists(path))
+        {
+            var fresh = new InstanceSettings();
+            try
+            {
+                Directory.CreateDirectory(GetXclDir(versionDir));
+                File.WriteAllText(path, JsonSerializer.Serialize(fresh, JsonOpts));
+            }
+            catch (Exception ex)
+            {
+                ErrorPresenter.LogFallback($"创建实例默认设置失败：{path}", ex);
+            }
+            return fresh;
+        }
+
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<InstanceSettings>(json) ?? new InstanceSettings();
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogFallback($"读取实例设置失败，本次运行使用默认值（不覆盖磁盘原文件）：{path}", ex);
+            return new InstanceSettings();
+        }
+    }
+
+    public static InstanceSettings? TryLoad(string versionDir)
+    {
+        var path = GetSettingsPath(versionDir);
+        if (!File.Exists(path)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<InstanceSettings>(File.ReadAllText(path));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>用户手动修改了某个实例设置时调用：写回 xcl/settings.json。
+    /// 这是"每次读取为主，除非用户手动修改设置"里"手动修改"这条分支唯一的写入入口。</summary>
+    public static void Save(string versionDir, InstanceSettings settings)
+    {
+        Directory.CreateDirectory(GetXclDir(versionDir));
+        File.WriteAllText(GetSettingsPath(versionDir), JsonSerializer.Serialize(settings, JsonOpts));
+    }
+}
+
+public class InstanceSettings
+{
+    public bool OptimizeMemoryBeforeLaunch { get; set; }
+
+    /// <summary>是否启用版本隔离；null=跟随全局默认。</summary>
+    public bool? IsolateVersion { get; set; }
+
+    /// <summary>该实例使用的 Java 列表条目 Id；null=跟随全局/自动探测。</summary>
+    public string? JavaId { get; set; }
+
+    /// <summary>
+    /// 该实例是否使用高性能独立显卡启动；null=“跟随所有”，即跟随全局
+    /// <see cref="AppConfig.UseHighPerformanceGpuForGame"/>。true/false 分别表示该实例显式使用/不使用。
+    /// </summary>
+    public bool? UseHighPerformanceGpuForGame { get; set; }
+
+    /// <summary>该实例的最小内存(MB)；null=跟随全局设置。</summary>
+    public int? MinMemoryMb { get; set; }
+
+    /// <summary>该实例的最大内存(MB)；null=跟随全局设置。</summary>
+    public int? MaxMemoryMb { get; set; }
+
+    /// <summary>该实例单独的 JVM 自定义参数；null=跟随全局 CustomJvmArgs（不覆盖，
+    /// 而是在全局参数基础上追加——具体拼接顺序见 LauncherService）。</summary>
+    public string? CustomJvmArgs { get; set; }
+
+    /// <summary>
+    /// Minecraft 26.1+ 的实例级“游戏内图形 API”偏好："game"=游戏自主设置，
+    /// "opengl"=强制 OpenGL，"vulkan"=强制 Vulkan；null=旧配置/未设置，按 game 处理。
+    /// 这是 Minecraft 自身的视频/图形选项，不是启动器窗口的渲染模式。
+    /// </summary>
+    public string? GraphicsApiPreference { get; set; }
+
+    /// <summary>开启后自动加入的服务器地址；null/空=不自动进服务器。</summary>
+    public string? AutoJoinServerAddress { get; set; }
+
+    /// <summary>该实例最后一次成功启动的时间（UTC），仅用于展示，不参与任何启动逻辑判断。</summary>
+    public DateTime? LastLaunchedAtUtc { get; set; }
+
+    /// <summary>该实例是否开启"内存优化"；null=未配置，跟随全局 <see cref="AppConfig.EnableMemoryOptimization"/>。
+    /// 优先级：实例单独设置 &gt; 全局设置——全局已配置但实例没配置时，实例视为"未配置"，
+    /// 跟随全局；只有实例这里显式选了"开启"或"关闭"才会覆盖全局。</summary>
+    public bool? EnableMemoryOptimization { get; set; }
+
+    /// <summary>该实例是否在启动器打开时额外预览动态内存；null=跟随全局
+    /// <see cref="AppConfig.MemoryOptimizationTiming"/>。启用动态内存后，每次启动游戏仍会重新计算，
+    /// 预览不会把计算结果写回用户的手动内存值。</summary>
+    public Models.MemoryOptimizationTiming? MemoryOptimizationTiming { get; set; }
+
+    /// <summary>解析“是否使用高性能独立显卡”的最终生效值：实例未配置(null)时跟随总体设置。</summary>
+    public bool ResolveUseHighPerformanceGpuForGame(AppConfig cfg) => UseHighPerformanceGpuForGame ?? cfg.UseHighPerformanceGpuForGame;
+
+    /// <summary>解析"是否开启内存优化"的最终生效值：实例未配置(null)时跟随全局。</summary>
+    public bool ResolveEnableMemoryOptimization(AppConfig cfg) => EnableMemoryOptimization ?? cfg.EnableMemoryOptimization;
+
+    /// <summary>解析"内存优化触发时机"的最终生效值：实例未配置(null)时跟随全局。</summary>
+    public Models.MemoryOptimizationTiming ResolveMemoryOptimizationTiming(AppConfig cfg) => MemoryOptimizationTiming ?? cfg.MemoryOptimizationTiming;
+}

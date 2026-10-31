@@ -1,0 +1,232 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>XCL2</AssemblyName>
+    <RootNamespace>XCL2.App</RootNamespace>
+    <Version>2.2.26</Version>
+    <AssemblyVersion>2.2.26.0</AssemblyVersion>
+    <FileVersion>2.2.26.0</FileVersion>
+    <Platforms>AnyCPU;x86;x64;ARM64</Platforms>
+    <PlatformTarget Condition="'$(RuntimeIdentifier)' == 'win-x86' or '$(Platform)' == 'x86'">x86</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NuGetAudit>false</NuGetAudit>
+    <ApplicationIcon>Resources\app.ico</ApplicationIcon>
+    <GenerateErrorReport>true</GenerateErrorReport>
+    <RollForward>LatestMinor</RollForward>
+    <!-- 将 NuGet 运行依赖复制到构建目录，避免只产生可编译但不能运行的 WPF 程序。 -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- WinUI 与回归测试使用各自的项目；工具及发布产物也不能被 WPF 递归收集。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);WinUI.Preview\**;Tests\**;tools\**;artifacts\**;dist\**</DefaultItemExcludes>
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  
+  <ItemGroup>
+    <Compile Remove="Views\InstalledVersionComponentsDialog.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="SharpCompress" Version="0.38.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.5" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>XclBedrockPre</_Parameter1>
+      <_Parameter2>$(XCL2_PRE_KEY)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>XclBedrockRel</_Parameter1>
+      <_Parameter2>$(XCL2_REL_KEY)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <Target Name="XclValidateBedrockKeys" BeforeTargets="CoreCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(XCL2_PRE_KEY)', '^[0-9A-Fa-f]{96}$')) Or !$([System.Text.RegularExpressions.Regex]::IsMatch('$(XCL2_REL_KEY)', '^[0-9A-Fa-f]{96}$'))"
+           Text="缺少或格式错误的环境变量 XCL2_PRE_KEY / XCL2_REL_KEY（各需 96 位十六进制字符）。请先运行 set-xcl2-keys.bat，并重启 Visual Studio 或终端后再编译。" />
+  </Target>
+
+  <!-- WebView2 的托管组件和架构对应的 Loader 必须随程序分发。
+       即使主程序单文件发布，也保留 WebView2 为独立文件，供 SDK / 本机 Loader 稳定加载。 -->
+  <Target Name="XclKeepWebView2PublishFiles"
+          AfterTargets="ComputeResolvedFilesToPublishList"
+          BeforeTargets="_ComputeFilesToBundle;_ComputeResolvedFilesToPublishTypes">
+    <ItemGroup>
+      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Filename)' == 'Microsoft.Web.WebView2.Core' or '%(ResolvedFileToPublish.Filename)' == 'Microsoft.Web.WebView2.Wpf' or '%(ResolvedFileToPublish.Filename)' == 'Microsoft.Web.WebView2.WinForms' or '%(ResolvedFileToPublish.Filename)' == 'WebView2Loader'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="XclResolveWebView2Architectures">
+    <PropertyGroup>
+      <_XclWebView2Architecture Condition="'$(RuntimeIdentifier)' == 'win-x64' or '$(PlatformTarget)' == 'x64'">x64</_XclWebView2Architecture>
+      <_XclWebView2Architecture Condition="'$(RuntimeIdentifier)' == 'win-x86' or '$(PlatformTarget)' == 'x86'">x86</_XclWebView2Architecture>
+      <_XclWebView2Architecture Condition="'$(RuntimeIdentifier)' == 'win-arm64' or '$(PlatformTarget)' == 'ARM64'">arm64</_XclWebView2Architecture>
+    </PropertyGroup>
+    <ItemGroup>
+      <_XclWebView2RequiredArchitecture Include="$(_XclWebView2Architecture)" Condition="'$(_XclWebView2Architecture)' != ''" />
+      <_XclWebView2RequiredArchitecture Include="x86;x64;arm64" Condition="'$(_XclWebView2Architecture)' == ''" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="XclValidateWebView2Build" AfterTargets="Build"
+          DependsOnTargets="XclResolveWebView2Architectures"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!Exists('$(TargetDir)Microsoft.Web.WebView2.Wpf.dll') or !Exists('$(TargetDir)Microsoft.Web.WebView2.Core.dll')"
+           Text="WebView2 构建不完整：缺少 Microsoft.Web.WebView2.Wpf.dll 或 Microsoft.Web.WebView2.Core.dll。请还原 NuGet 包后重新构建；不要只复制 XCL2.exe。" />
+    <Error Condition="!Exists('$(TargetDir)runtimes\win-%(_XclWebView2RequiredArchitecture.Identity)\native\WebView2Loader.dll') and !('$(_XclWebView2Architecture)' != '' and Exists('$(TargetDir)WebView2Loader.dll'))"
+           Text="WebView2 构建不完整：缺少 %(_XclWebView2RequiredArchitecture.Identity) 架构的 WebView2Loader.dll。请保留 runtimes 目录并还原 Microsoft.Web.WebView2 NuGet 包。" />
+  </Target>
+
+  <Target Name="XclValidateWebView2Publish" AfterTargets="Publish"
+          DependsOnTargets="XclResolveWebView2Architectures"
+          Condition="'$(DesignTimeBuild)' != 'true'">
+    <Error Condition="!Exists('$(PublishDir)Microsoft.Web.WebView2.Wpf.dll') or !Exists('$(PublishDir)Microsoft.Web.WebView2.Core.dll')"
+           Text="WebView2 发布不完整：缺少 Wpf/Core DLL。单文件发布也应保留 WebView2 的独立组件；请分发完整发布目录。" />
+    <Error Condition="!Exists('$(PublishDir)runtimes\win-%(_XclWebView2RequiredArchitecture.Identity)\native\WebView2Loader.dll') and !('$(_XclWebView2Architecture)' != '' and Exists('$(PublishDir)WebView2Loader.dll'))"
+           Text="WebView2 发布不完整：缺少 %(_XclWebView2RequiredArchitecture.Identity) 架构的 WebView2Loader.dll。发布已停止，请勿分发不完整目录。" />
+  </Target>
+
+  <ItemGroup>
+    <Resource Include="Resources\app.ico" />
+    <Resource Include="Resources\Loading\orbit-loading.gif" />
+    <Resource Include="Resources\app-dark.ico" Condition="Exists('Resources\app-dark.ico')" />
+  </ItemGroup>
+
+  
+  <Target Name="XCL2GenerateBuildInfo" BeforeTargets="BeforeCompile;CoreCompile">
+    <PropertyGroup>
+      <!-- 精确到秒，时区放在时间左边（"时区+时间"，例如 "UTC+8 2026-09-27 12:34:56"），
+           跟界面上其它时间展示的日期时间格式（yyyy-MM-dd HH:mm:ss）保持一致，只是
+           前面多一个固定的 "UTC+8" 前缀，一次性解决"编译时间没有统一时区、各自本机
+           时间对不上"的问题。 -->
+      <XCL2BuildTimestamp>UTC+8 $([System.DateTime]::UtcNow.AddHours(8).ToString(&quot;yyyy-MM-dd HH:mm:ss&quot;))</XCL2BuildTimestamp>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)" Condition="!Exists('$(IntermediateOutputPath)')" />
+    <ItemGroup>
+      <XCL2BuildInfoLines Include="// 本文件由 XCL2.App.csproj 里的 XCL2GenerateBuildInfo 编译期目标自动生成，不要手动编辑。" />
+      <XCL2BuildInfoLines Include="namespace XCL2.App" />
+      <XCL2BuildInfoLines Include="{" />
+      <XCL2BuildInfoLines Include="    /// &lt;summary&gt;编译期生成的构建信息：版本号取自 csproj 的 Version，仅用于展示；" />
+      <XCL2BuildInfoLines Include="    /// 时间戳精确到秒，已固定换算为上海时间（UTC+8），文本里时区写在时间左边。&lt;/summary&gt;" />
+      <XCL2BuildInfoLines Include="    internal static class BuildInfo" />
+      <XCL2BuildInfoLines Include="    {" />
+      <XCL2BuildInfoLines Include="        public const string Version = &quot;$(Version)&quot;%3B" />
+      <XCL2BuildInfoLines Include="        public const string BuildTimestamp = &quot;$(XCL2BuildTimestamp)&quot;%3B" />
+      <XCL2BuildInfoLines Include="    }" />
+      <XCL2BuildInfoLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(IntermediateOutputPath)BuildInfo.g.cs" Lines="@(XCL2BuildInfoLines)" Overwrite="true" WriteOnlyWhenDifferent="false" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)BuildInfo.g.cs" />
+      <FileWrites Include="$(IntermediateOutputPath)BuildInfo.g.cs" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <Content Include="Resources\Terracotta\LICENSE.txt;Resources\Terracotta\NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Resources\Terracotta\terracotta-*-windows-*.exe">
+      <LogicalName>XCL2.App.Resources.Terracotta.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Data\FeatureSearchCatalog.json">
+      <LogicalName>XCL2.App.Resources.Data.FeatureSearchCatalog.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Data\BedrockClientVersionsFallback.json">
+      <LogicalName>XCL2.App.Resources.Data.BedrockClientVersionsFallback.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Data\WikiEntries.txt">
+      <LogicalName>XCL2.App.Resources.Data.WikiEntries.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Skins\steve.png">
+      <LogicalName>XCL2.App.Resources.Skins.steve.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Avatars\steve-default.png">
+      <LogicalName>XCL2.App.Resources.Avatars.steve-default.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Avatars\alex-default.png">
+      <LogicalName>XCL2.App.Resources.Avatars.alex-default.png</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\PLUGIN_GUIDE.md">
+      <LogicalName>XCL2.App.PLUGIN_GUIDE.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_REFERENCE.md">
+      <LogicalName>XCL2.App.Docs.API_REFERENCE.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_LAUNCHER_CONTROL.md">
+      <LogicalName>XCL2.App.Docs.API_LAUNCHER_CONTROL.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_LAUNCHER_COMPOSITION.md">
+      <LogicalName>XCL2.App.Docs.API_LAUNCHER_COMPOSITION.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_WORLDS.md">
+      <LogicalName>XCL2.App.Docs.API_WORLDS.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\API_EXAMPLES.md">
+      <LogicalName>XCL2.App.Docs.API_EXAMPLES.md</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Resources\Docs\PLUGIN_EXE_PROTOCOL.md">
+      <LogicalName>XCL2.App.Docs.PLUGIN_EXE_PROTOCOL.md</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- 一次准备完整 WinUI 发布目录；普通 Build 和 Publish 均复制全部运行依赖。
+       不使用 ProjectReference，避免把 WinUI XAML / WindowsAppSDK 依赖带入 WPF。 -->
+  <Target Name="PrepareNativePreview"
+          Condition="'$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true' and '$(SkipNativePreview)' != 'true'">
+    <PropertyGroup>
+      <NativePreviewArchitecture Condition="'$(RuntimeIdentifier)' == 'win-x86' or '$(PlatformTarget)' == 'x86' or '$(Platform)' == 'x86'">x86</NativePreviewArchitecture>
+      <NativePreviewArchitecture Condition="'$(RuntimeIdentifier)' == 'win-arm64' or '$(PlatformTarget)' == 'ARM64'">arm64</NativePreviewArchitecture>
+      <NativePreviewArchitecture Condition="'$(NativePreviewArchitecture)' == ''">x64</NativePreviewArchitecture>
+      <NativePreviewProject>$(MSBuildProjectDirectory)\WinUI.Preview\XCL2.WinUI.Preview.csproj</NativePreviewProject>
+      <NativePreviewStagingDir>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'native-preview-publish'))))</NativePreviewStagingDir>
+      <NativePreviewDotNetExe Condition="'$(DotNetHostPath)' != ''">$(DotNetHostPath)</NativePreviewDotNetExe>
+      <NativePreviewDotNetExe Condition="'$(NativePreviewDotNetExe)' == ''">dotnet</NativePreviewDotNetExe>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(NativePreviewProject)')" Text="缺少项目目录中的 WinUI.Preview 子项目，请使用完整源码目录。" />
+    <Exec Command="&quot;$(NativePreviewDotNetExe)&quot; publish &quot;$(NativePreviewProject)&quot; -c &quot;$(Configuration)&quot; -p:Platform=$(NativePreviewArchitecture) -r win-$(NativePreviewArchitecture) --self-contained true -p:PublishSingleFile=false --output &quot;$(NativePreviewStagingDir)&quot;" />
+    <Error Condition="!Exists('$(NativePreviewStagingDir)\XCL2.WinUI.Preview.exe')" Text="WinUI 3 预览发布不完整，未生成预览程序。" />
+    <ItemGroup>
+      <NativePreviewFiles Include="$(NativePreviewStagingDir)\**\*" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="BuildNativePreview" AfterTargets="Build" DependsOnTargets="PrepareNativePreview"
+          Condition="'$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true' and '$(SkipNativePreview)' != 'true'">
+    <Copy SourceFiles="@(NativePreviewFiles)"
+          DestinationFiles="@(NativePreviewFiles->'$(TargetDir)WinUI.Preview\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <FileWrites Include="@(NativePreviewFiles->'$(TargetDir)WinUI.Preview\%(RecursiveDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="PublishNativePreview" AfterTargets="Publish" DependsOnTargets="PrepareNativePreview"
+          Condition="'$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true' and '$(SkipNativePreview)' != 'true'">
+    <PropertyGroup>
+      <NativePreviewPublishDir>$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(PublishDir)', 'WinUI.Preview'))))</NativePreviewPublishDir>
+    </PropertyGroup>
+    <Copy SourceFiles="@(NativePreviewFiles)"
+          DestinationFiles="@(NativePreviewFiles->'$(NativePreviewPublishDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

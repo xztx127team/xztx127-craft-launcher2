@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup><Using Remove="System.Windows.Forms"/><Using Remove="System.Drawing"/></ItemGroup>
+  <ItemGroup>
+    <Page Include="../../Views/StickyNoteWindow.xaml" Link="Views/StickyNoteWindow.xaml" />
+    <Compile Include="../../Views/StickyNoteWindow.xaml.cs" Link="Views/StickyNoteWindow.xaml.cs" />
+    <Compile Include="../../Services/StickyNoteOptions.cs" Link="StickyNoteOptions.cs" />
+    <Compile Include="../../Services/WindowTreatmentPolicy.cs" Link="WindowTreatmentPolicy.cs" />
+    <Page Include="../../Views/Tools/StickyNotesTool.xaml" Link="Views/Tools/StickyNotesTool.xaml" />
+    <Compile Include="../../Views/Tools/StickyNotesTool.xaml.cs" Link="Views/Tools/StickyNotesTool.xaml.cs" />
+  </ItemGroup>
+</Project>

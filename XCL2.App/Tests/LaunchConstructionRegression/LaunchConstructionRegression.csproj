@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/ResourceDownloadPath.cs" Link="ResourceDownloadPath.cs" />
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs" />
+    <Compile Include="../../Services/LauncherLoggingPolicy.cs" Link="LauncherLoggingPolicy.cs" />
+    <Compile Include="../../Models/VersionManifest.cs" Link="VersionManifest.cs" />
+    <Compile Include="../../Services/LaunchScriptExportPolicy.cs" Link="LaunchScriptExportPolicy.cs" />
+    <Compile Include="../../Services/LauncherService.cs" Link="LauncherService.cs" />
+    <Compile Include="../../Services/ComponentsOperationLock.cs" Link="ComponentsOperationLock.cs" />
+    <Compile Include="../../Services/VersionInheritanceResolver.cs" Link="VersionInheritanceResolver.cs" />
+    <Compile Include="../../Services/LaunchArgumentRulePolicy.cs" Link="LaunchArgumentRulePolicy.cs" />
+    <Compile Include="../../Services/JavaExecutableArchitecture.cs" Link="JavaExecutableArchitecture.cs" />
+    <Compile Include="../../Services/NativeDirectoryPolicy.cs" Link="NativeDirectoryPolicy.cs" />
+    <Compile Include="../../Services/VersionRepairPlan.cs" Link="VersionRepairPlan.cs" />
+    <Compile Include="../../Services/LegacyMinecraftCompatibility.cs" Link="LegacyMinecraftCompatibility.cs" />
+    <Compile Include="../../Services/LegacyAssetLayout.cs" Link="LegacyAssetLayout.cs" />
+    <Compile Include="../../Services/JavaRuntimeCompatibility.cs" Link="JavaRuntimeCompatibility.cs" />
+    <Compile Include="../../Services/JavaVersionOutputPolicy.cs" Link="JavaVersionOutputPolicy.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="../Fixtures/Logging/*.xml" Link="LoggingFixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,52 @@
+using System.Windows;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+public partial class InstanceConflictDialog : Window
+{
+    /// <summary>
+    /// 默认值是"关闭此实例"：如果用户没有点任何按钮就把窗口关掉了（比如 Alt+F4），
+    /// 选一个最保守、最不会有副作用的默认行为——只退出该新打开的实例，不去动原实例。
+    /// </summary>
+    public SingleInstanceService.ConflictChoice Result { get; private set; } =
+        SingleInstanceService.ConflictChoice.CloseNewInstance;
+
+    public InstanceConflictDialog()
+    {
+        InitializeComponent();
+        AnimationSettingsService.LoadStartupPreferences();
+        // 首次打开以及 Hide/Show 后都重新准备入场；与主窗口无关，避免多开时提示瞬间跳出。
+        IsVisibleChanged += (_, args) =>
+        {
+            if (Content is not FrameworkElement card) return;
+            if ((bool)args.NewValue) UiAnimationHelper.PopupFadeIn(card);
+            else UiAnimationHelper.Reset(card);
+        };
+        Closed += (_, _) => { if (Content is FrameworkElement card) UiAnimationHelper.Reset(card); };
+    }
+
+    private void KeepBothRunning_Click(object sender, RoutedEventArgs e)
+    {
+        Result = SingleInstanceService.ConflictChoice.KeepBothRunning;
+        Close();
+    }
+
+    private void CloseNewInstance_Click(object sender, RoutedEventArgs e)
+    {
+        Result = SingleInstanceService.ConflictChoice.CloseNewInstance;
+        Close();
+    }
+
+    private void CloseNewAndActivateOld_Click(object sender, RoutedEventArgs e)
+    {
+        Result = SingleInstanceService.ConflictChoice.CloseNewAndActivateOld;
+        Close();
+    }
+
+    private void CloseOldKeepNewInstance_Click(object sender, RoutedEventArgs e)
+    {
+        Result = SingleInstanceService.ConflictChoice.CloseOldKeepNewInstance;
+        Close();
+    }
+}

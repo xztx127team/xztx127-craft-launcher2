@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF><DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AppConfig.WindowBehavior.cs" Link="AppConfig.WindowBehavior.cs"/>
+    <Compile Include="../../Models/ExperiencePreferenceAttribute.cs" Link="ExperiencePreferenceAttribute.cs"/>
+    <Compile Include="../../Services/LauncherCloseShortcut.cs" Link="LauncherCloseShortcut.cs"/>
+    <Compile Include="../../Services/ForcedTopmostService.cs" Link="ForcedTopmostService.cs"/>
+  </ItemGroup>
+</Project>

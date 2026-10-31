@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/InstanceIsolationPolicy.cs" Link="InstanceIsolationPolicy.cs"/>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.5"/>
+    <Compile Include="../../Services/ExternalInstanceDiscovery.cs" Link="ExternalInstanceDiscovery.cs"/>
+    <Compile Include="../../Services/ModrinthProfileDatabase.cs" Link="ModrinthProfileDatabase.cs"/>
+    <Compile Include="../../Services/ExternalInstanceContent.cs" Link="ExternalInstanceContent.cs"/>
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs"/>
+  </ItemGroup>
+</Project>

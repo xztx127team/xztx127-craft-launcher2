@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/AiMarkdownCodeText.cs" Link="AiMarkdownCodeText.cs" />
+    <Compile Include="../../Services/AiTextClipboard.cs" Link="AiTextClipboard.cs" />
+    <Compile Include="../../Services/AiTextSelectionMenu.cs" Link="AiTextSelectionMenu.cs" />
+    <Compile Include="../../Views/MarkdownViewer.cs" Link="MarkdownViewer.cs" />
+  </ItemGroup>
+</Project>

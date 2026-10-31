@@ -1,0 +1,7 @@
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+NOTICE text eol=lf
+*.png binary
+*.ico binary
+*.gif binary

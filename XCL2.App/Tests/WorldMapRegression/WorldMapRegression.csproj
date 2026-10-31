@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/Worlds/NbtDocument.cs" Link="NbtDocument.cs" />
+    <Compile Include="../../Services/Worlds/WorldArchiveService.cs" Link="WorldArchiveService.cs" />
+    <Compile Include="../../Services/Worlds/WorldMapReader.cs" Link="WorldMapReader.cs" />
+    <Compile Include="../../Services/Worlds/WorldMapReader.Visualizations.cs" Link="WorldMapReader.Visualizations.cs" />
+    <Compile Include="../../Services/Worlds/WorldMapRasterizer.cs" Link="WorldMapRasterizer.cs" />
+  </ItemGroup>
+</Project>

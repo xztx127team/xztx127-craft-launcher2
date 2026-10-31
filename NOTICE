@@ -1,0 +1,38 @@
+XCL2 — project licensing and origin notice
+
+Copyright (C) 2026 XCL2 contributors, for their respective contributions.
+Existing copyright and attribution notices remain in force. Each contributor
+retains ownership of their contribution; this notice does not claim ownership
+of third-party material.
+
+Original project material that its licensors own or are entitled to license is
+licensed under the GNU Affero General Public License, version 3 only
+(SPDX: AGPL-3.0-only). The unmodified license text is in LICENSE.
+
+OPEN_SOURCE.md states the applicable origin/attribution terms under AGPL
+section 7(b)-(e), the brand-use policy, and the small-snippet additional
+permission under section 7. Preserve this reasonable legal notice in covered
+distributions. Third-party components retain their own terms; consult
+THIRD_PARTY_NOTICES.md and their original notices.
+
+An unofficial modified XCL2 distribution must identify its actual distributor
+and distinguish its changes from the original. It must not misrepresent its
+origin or imply that the original XCL2 maintainers created, published, or
+endorsed that third-party build. Unchanged mirrors must accurately preserve
+upstream authorship and identify the independent mirror distribution.
+
+The documentation contains ready-to-use notices and equivalent labeling
+options. These notices do not prohibit forks, commercial distribution, or any
+other use permitted by AGPL, and do not require upstream approval to exercise
+AGPL rights. No trademark endorsement is granted.
+
+For eligible ordinary one- or two-statement original snippets, OPEN_SOURCE.md
+grants a separate permission requiring only an acknowledgment comment. That
+permission does not cover third-party code or substantial extracted features.
+
+The software is provided without warranty to the extent stated in LICENSE.
+XCL2 is an independent project, not an official Mojang or Microsoft product.
+
+中文摘要：原创部分采用 AGPL-3.0-only；来源声明、品牌规则与少量代码引用
+额外许可见 OPEN_SOURCE.md。第三方分发须明确身份，修改版不得冒充原作；
+原样镜像须保留原作者归属。正常 fork、修改和收费分发并不被禁止。

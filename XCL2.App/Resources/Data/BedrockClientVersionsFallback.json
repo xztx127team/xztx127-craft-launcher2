@@ -1,0 +1,4447 @@
+{
+  "SchemaVersion": 2,
+  "RetrievedAtUtc": "2026-10-20T11:49:19.558106+00:00",
+  "Sources": [
+    "https://raw.githubusercontent.com/reversedcodes/minecraft-bedrock-meta-database/main/bedrock/client/versions.json",
+    "https://raw.githubusercontent.com/MCMrARM/mc-w10-versiondb/master/versions.json.min"
+  ],
+  "Versions": [
+    {
+      "Uuid": "",
+      "Name": "1.26.70.20",
+      "BaseVersion": "1.26.70.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.60.30",
+      "BaseVersion": "1.26.60.30",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.60.29",
+      "BaseVersion": "1.26.60.29",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.60.28",
+      "BaseVersion": "1.26.60.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.60.24",
+      "BaseVersion": "1.26.60.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.60.22",
+      "BaseVersion": "1.26.60.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.60.21",
+      "BaseVersion": "1.26.60.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.52.3",
+      "BaseVersion": "1.26.52.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.51.1",
+      "BaseVersion": "1.26.51.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.50.27",
+      "BaseVersion": "1.26.50.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.50.26",
+      "BaseVersion": "1.26.50.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.50.25",
+      "BaseVersion": "1.26.50.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.50.24",
+      "BaseVersion": "1.26.50.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.50.22",
+      "BaseVersion": "1.26.50.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.50.20",
+      "BaseVersion": "1.26.50.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.50.4",
+      "BaseVersion": "1.26.50.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.45.1",
+      "BaseVersion": "1.26.45.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.44.3",
+      "BaseVersion": "1.26.44.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.42.1",
+      "BaseVersion": "1.26.42.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.40.31",
+      "BaseVersion": "1.26.40.31",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.40.30",
+      "BaseVersion": "1.26.40.30",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.40.27",
+      "BaseVersion": "1.26.40.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.40.26",
+      "BaseVersion": "1.26.40.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.40.22",
+      "BaseVersion": "1.26.40.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.40.20",
+      "BaseVersion": "1.26.40.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.40.5",
+      "BaseVersion": "1.26.40.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.33.1",
+      "BaseVersion": "1.26.33.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.32.2",
+      "BaseVersion": "1.26.32.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.31.1",
+      "BaseVersion": "1.26.31.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.30.32",
+      "BaseVersion": "1.26.30.32",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.30.29",
+      "BaseVersion": "1.26.30.29",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.30.28",
+      "BaseVersion": "1.26.30.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.30.27",
+      "BaseVersion": "1.26.30.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.30.25",
+      "BaseVersion": "1.26.30.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.30.20",
+      "BaseVersion": "1.26.30.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.30.5",
+      "BaseVersion": "1.26.30.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.21.1",
+      "BaseVersion": "1.26.21.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.20.27",
+      "BaseVersion": "1.26.20.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.20.26",
+      "BaseVersion": "1.26.20.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.20.23",
+      "BaseVersion": "1.26.20.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.20.22",
+      "BaseVersion": "1.26.20.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.20.21",
+      "BaseVersion": "1.26.20.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.20.20",
+      "BaseVersion": "1.26.20.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.20.4",
+      "BaseVersion": "1.26.20.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.13.1",
+      "BaseVersion": "1.26.13.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.12.2",
+      "BaseVersion": "1.26.12.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.11.1",
+      "BaseVersion": "1.26.11.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.10.26",
+      "BaseVersion": "1.26.10.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.10.25",
+      "BaseVersion": "1.26.10.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.10.24",
+      "BaseVersion": "1.26.10.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.10.23",
+      "BaseVersion": "1.26.10.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.10.21",
+      "BaseVersion": "1.26.10.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.10.20",
+      "BaseVersion": "1.26.10.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.10.4",
+      "BaseVersion": "1.26.10.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.3.1",
+      "BaseVersion": "1.26.3.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.2.1",
+      "BaseVersion": "1.26.2.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.1.1",
+      "BaseVersion": "1.26.1.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.0.29",
+      "BaseVersion": "1.26.0.29",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.0.28",
+      "BaseVersion": "1.26.0.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.0.27",
+      "BaseVersion": "1.26.0.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.0.26",
+      "BaseVersion": "1.26.0.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.0.25",
+      "BaseVersion": "1.26.0.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.0.24",
+      "BaseVersion": "1.26.0.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.26.0.2",
+      "BaseVersion": "1.26.0.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.132.1",
+      "BaseVersion": "1.21.132.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.131.1",
+      "BaseVersion": "1.21.131.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.130.28",
+      "BaseVersion": "1.21.130.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.130.27",
+      "BaseVersion": "1.21.130.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.130.26",
+      "BaseVersion": "1.21.130.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.130.4",
+      "BaseVersion": "1.21.130.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.124.2",
+      "BaseVersion": "1.21.124.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.123.2",
+      "BaseVersion": "1.21.123.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.122.1",
+      "BaseVersion": "1.21.122.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.121.1",
+      "BaseVersion": "1.21.121.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": true
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.120.20",
+      "BaseVersion": "1.21.120.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.114.1",
+      "BaseVersion": "1.21.114.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.113.1",
+      "BaseVersion": "1.21.113.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.111.1",
+      "BaseVersion": "1.21.111.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.101.1",
+      "BaseVersion": "1.21.101.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.100.6",
+      "BaseVersion": "1.21.100.6",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.94.1",
+      "BaseVersion": "1.21.94.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.93.1",
+      "BaseVersion": "1.21.93.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.92.1",
+      "BaseVersion": "1.21.92.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.90.3",
+      "BaseVersion": "1.21.90.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.82.1",
+      "BaseVersion": "1.21.82.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.81.2",
+      "BaseVersion": "1.21.81.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.80.3",
+      "BaseVersion": "1.21.80.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.73.1",
+      "BaseVersion": "1.21.73.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.72.2",
+      "BaseVersion": "1.21.72.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.72.1",
+      "BaseVersion": "1.21.72.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.71.1",
+      "BaseVersion": "1.21.71.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "22deedff-5beb-4f8a-848d-33a588173637",
+      "Name": "1.21.70.20",
+      "BaseVersion": "1.21.70.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.70.3",
+      "BaseVersion": "1.21.70.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.62.1",
+      "BaseVersion": "1.21.62.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.61.1",
+      "BaseVersion": "1.21.61.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "11186fd0-c4a2-4da6-8b25-74dab41acaf1",
+      "Name": "1.21.60.25",
+      "BaseVersion": "1.21.60.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f5a9d362-7b9d-488c-a1f5-7aa05fc0a7fa",
+      "Name": "1.21.60.24",
+      "BaseVersion": "1.21.60.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6e1eaea0-b349-4448-b8d0-0398107e521a",
+      "Name": "1.21.60.23",
+      "BaseVersion": "1.21.60.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f85a073c-afcf-4425-a2b4-3e8438bdba5b",
+      "Name": "1.21.60.21",
+      "BaseVersion": "1.21.60.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.60.10",
+      "BaseVersion": "1.21.60.10",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f1d6a02f-046a-4907-a3d7-88a3b59c70d2",
+      "Name": "1.21.51.1",
+      "BaseVersion": "1.21.51.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "94660687-f733-4dde-bb46-f0c76a1ede58",
+      "Name": "1.21.50.29",
+      "BaseVersion": "1.21.50.29",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a1d35bd4-0c05-463f-9370-78edcdd56af7",
+      "Name": "1.21.50.28",
+      "BaseVersion": "1.21.50.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6c937c28-22da-4033-9f7f-f7ae28c6a2c5",
+      "Name": "1.21.50.26",
+      "BaseVersion": "1.21.50.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ef4de330-2359-4ae2-af2d-6cf6279f6b60",
+      "Name": "1.21.50.25",
+      "BaseVersion": "1.21.50.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "db9faf0e-52c0-4600-979e-9d251784a217",
+      "Name": "1.21.50.24",
+      "BaseVersion": "1.21.50.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "bf5c09f1-e88a-4b4c-b0bf-2faf43db7659",
+      "Name": "1.21.50.7",
+      "BaseVersion": "1.21.50.7",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7bc58f5c-adbc-4ff1-8e1a-6707c5b39d09",
+      "Name": "1.21.44.1",
+      "BaseVersion": "1.21.44.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c655d39c-af91-4a81-8ffb-48b086ea0abf",
+      "Name": "1.21.43.1",
+      "BaseVersion": "1.21.43.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ff00fd54-08c1-4df8-bc64-5640112e40d8",
+      "Name": "1.21.41.1",
+      "BaseVersion": "1.21.41.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8303ae30-23ef-4d61-8a58-5e24efa8d2b4",
+      "Name": "1.21.40.22",
+      "BaseVersion": "1.21.40.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4a365f93-c9d5-4ab8-84a6-3002cf93c0f8",
+      "Name": "1.21.40.21",
+      "BaseVersion": "1.21.40.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b596745b-2c9c-419d-a811-23bb8a958e1d",
+      "Name": "1.21.40.20",
+      "BaseVersion": "1.21.40.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d6d15520-b8c6-4252-b12b-c6c3a98aedc1",
+      "Name": "1.21.40.3",
+      "BaseVersion": "1.21.40.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e0189674-e1af-47aa-88b7-309686b635e2",
+      "Name": "1.21.31.4",
+      "BaseVersion": "1.21.31.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "dbf1bf47-35b3-43aa-9207-4743ea58ff4a",
+      "Name": "1.21.30.25",
+      "BaseVersion": "1.21.30.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cb444d33-f48c-49f7-887d-91ee99a6fbb1",
+      "Name": "1.21.30.24",
+      "BaseVersion": "1.21.30.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "2d5d523e-0688-4901-a39d-dd51418c0332",
+      "Name": "1.21.30.23",
+      "BaseVersion": "1.21.30.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "41423e27-d370-452b-8d89-65ffb962bf2d",
+      "Name": "1.21.30.22",
+      "BaseVersion": "1.21.30.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d86bf0ac-516d-4f01-978e-dbf404fa78f0",
+      "Name": "1.21.30.21",
+      "BaseVersion": "1.21.30.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "bf5746e4-6844-4124-8bc9-2fb979863c0e",
+      "Name": "1.21.30.3",
+      "BaseVersion": "1.21.30.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d0c8c626-8539-4ce0-a6fc-bae9db69727d",
+      "Name": "1.21.23.1",
+      "BaseVersion": "1.21.23.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "206c607e-73ba-4710-a698-6776c4f280a1",
+      "Name": "1.21.22.1",
+      "BaseVersion": "1.21.22.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c90d2602-5730-4276-be4a-7c0e507718e2",
+      "Name": "1.21.21.1",
+      "BaseVersion": "1.21.21.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f4c61bb4-8744-41d2-8b50-e244e402d621",
+      "Name": "1.21.20.22",
+      "BaseVersion": "1.21.20.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6cabf21f-4938-4a09-96c6-82767c67365c",
+      "Name": "1.21.20.21",
+      "BaseVersion": "1.21.20.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "5eeae3dd-bf5d-4b38-aa59-6e00686ddd89",
+      "Name": "1.21.20.3",
+      "BaseVersion": "1.21.20.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "98f6b51b-a5b5-434d-a273-680e36a19a52",
+      "Name": "1.21.10.23",
+      "BaseVersion": "1.21.10.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "691e3f47-e8f5-41e9-b085-2a1d48233d5f",
+      "Name": "1.21.10.20",
+      "BaseVersion": "1.21.10.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9a8e324e-7240-403a-a404-b7420421138c",
+      "Name": "1.21.2.2",
+      "BaseVersion": "1.21.2.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.21.1.3",
+      "BaseVersion": "1.21.1.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "073caaaf-4480-49fe-903a-9a57d76c921f",
+      "Name": "1.21.0.26",
+      "BaseVersion": "1.21.0.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "dd5c06b0-b249-4e2a-b46c-322c33c58f27",
+      "Name": "1.21.0.25",
+      "BaseVersion": "1.21.0.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ceff03fb-d202-40ec-a158-4e26949ad91f",
+      "Name": "1.21.0.23",
+      "BaseVersion": "1.21.0.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9cbdf7b6-c381-4fef-8306-a584ac2128f3",
+      "Name": "1.21.0.22",
+      "BaseVersion": "1.21.0.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "144cbbe7-09d4-4a14-b310-2f5c2f93a482",
+      "Name": "1.21.0.21",
+      "BaseVersion": "1.21.0.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "21c7d413-83d5-45de-b8b2-e9e6f87fb5fe",
+      "Name": "1.21.0.3",
+      "BaseVersion": "1.21.0.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "39b4a4c9-cd0a-49c2-971f-156aa4dbbc01",
+      "Name": "1.20.81.1",
+      "BaseVersion": "1.20.81.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "edb31b61-e4a8-4589-8666-cdf1a9703915",
+      "Name": "1.20.80.24",
+      "BaseVersion": "1.20.80.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0a83cf55-dc93-48e7-b948-c34291954a44",
+      "Name": "1.20.80.23",
+      "BaseVersion": "1.20.80.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6da8bba8-ff80-4594-b62b-3926d341d93c",
+      "Name": "1.20.80.22",
+      "BaseVersion": "1.20.80.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "bc2e37d0-34c8-4659-88e5-89422e77eecf",
+      "Name": "1.20.80.21",
+      "BaseVersion": "1.20.80.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "11b5f04d-52a1-4640-ac97-9c9cf118940e",
+      "Name": "1.20.80.20",
+      "BaseVersion": "1.20.80.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ddc36e8c-1b81-49a5-bcb6-b76c3a160c25",
+      "Name": "1.20.80.5",
+      "BaseVersion": "1.20.80.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1ead88d5-ebff-413a-be8a-71349421129b",
+      "Name": "1.20.73.1",
+      "BaseVersion": "1.20.73.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b7101d23-4658-48b0-a5c5-24202162309b",
+      "Name": "1.20.72.1",
+      "BaseVersion": "1.20.72.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4e001eeb-5e8d-4cc2-9bfb-2fe52c8ecf70",
+      "Name": "1.20.71.1",
+      "BaseVersion": "1.20.71.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "16307f78-6a59-4f93-b79e-5bec9a8da46b",
+      "Name": "1.20.70.25",
+      "BaseVersion": "1.20.70.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "79304725-0740-47f2-8922-f8f80e0cb40e",
+      "Name": "1.20.70.24",
+      "BaseVersion": "1.20.70.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1079afec-087a-4599-a7c9-3b40ec7b0322",
+      "Name": "1.20.70.22",
+      "BaseVersion": "1.20.70.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6735c30c-d93d-42a5-8fd8-cd393be3f758",
+      "Name": "1.20.70.21",
+      "BaseVersion": "1.20.70.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "64892e07-231b-4b4f-8427-d5181eaa54ca",
+      "Name": "1.20.62.1",
+      "BaseVersion": "1.20.62.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ddb0b769-d45f-41b3-b4f2-42f68fcfce21",
+      "Name": "1.20.60.26",
+      "BaseVersion": "1.20.60.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "dc202ed1-e02d-4d04-84e9-ad33641417e8",
+      "Name": "1.20.60.25",
+      "BaseVersion": "1.20.60.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6bfbebae-b3ac-42c2-b4d1-c468fb750df8",
+      "Name": "1.20.60.24",
+      "BaseVersion": "1.20.60.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "290a2a81-a041-4dcd-8b67-53cd9bab06b0",
+      "Name": "1.20.60.23",
+      "BaseVersion": "1.20.60.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7e939aea-c6a0-4b02-a0a0-ff6e39fddb2b",
+      "Name": "1.20.60.22",
+      "BaseVersion": "1.20.60.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8a596ec6-2ef2-47b7-bed4-927bad6f5252",
+      "Name": "1.20.60.21",
+      "BaseVersion": "1.20.60.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0052663e-3323-4fc9-9ead-84567336093a",
+      "Name": "1.20.60.4",
+      "BaseVersion": "1.20.60.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "58c5f0cd-09d7-4e99-a6b6-c3829fd62ac9",
+      "Name": "1.20.51.1",
+      "BaseVersion": "1.20.51.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "de3a5817-be6f-491e-b172-41bdbcdfe11d",
+      "Name": "1.20.50.24",
+      "BaseVersion": "1.20.50.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "07ad7d91-c18b-4224-8012-e5d05e496eef",
+      "Name": "1.20.50.23",
+      "BaseVersion": "1.20.50.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b737517b-57c9-46be-bb1a-9d7d1f9e75eb",
+      "Name": "1.20.50.22",
+      "BaseVersion": "1.20.50.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "048f67a3-633a-401e-8a91-2aeac15d0d0d",
+      "Name": "1.20.50.21",
+      "BaseVersion": "1.20.50.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "00f89f8f-72a2-4f6e-9eba-8d0217aa5e6d",
+      "Name": "1.20.50.20",
+      "BaseVersion": "1.20.50.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ae199742-9485-4902-911f-8988c36d41df",
+      "Name": "1.20.50.3",
+      "BaseVersion": "1.20.50.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "01c280b1-675d-486d-b22b-12bc9c732b22",
+      "Name": "1.20.41.2",
+      "BaseVersion": "1.20.41.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "675fa666-dcd6-4fc7-8b04-8ca8071ee982",
+      "Name": "1.20.40.24",
+      "BaseVersion": "1.20.40.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3b9f5141-ceb6-4525-ad9c-a903637eb091",
+      "Name": "1.20.40.23",
+      "BaseVersion": "1.20.40.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b39ad698-6e5e-40f8-8568-e597c9f4ba4e",
+      "Name": "1.20.40.22",
+      "BaseVersion": "1.20.40.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6037df8b-8cf7-4b6a-b1a2-ee70dc8eb87e",
+      "Name": "1.20.40.21",
+      "BaseVersion": "1.20.40.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6ed1a3ae-11d4-4e51-8ff6-befb7079d760",
+      "Name": "1.20.40.20",
+      "BaseVersion": "1.20.40.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cf4bd0ca-bcac-4b31-b09b-7973c61643d1",
+      "Name": "1.20.40.1",
+      "BaseVersion": "1.20.40.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1160615f-ca91-45f5-b0ef-40e17c13d57f",
+      "Name": "1.20.32.3",
+      "BaseVersion": "1.20.32.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cc2071ae-99fd-4112-b1e2-ff8ce34b9f6d",
+      "Name": "1.20.31.1",
+      "BaseVersion": "1.20.31.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d53407c7-88d3-4125-adab-7342af5ddcd3",
+      "Name": "1.20.30.25",
+      "BaseVersion": "1.20.30.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4e2ca821-6448-44f3-b766-fb741d8c4939",
+      "Name": "1.20.30.22",
+      "BaseVersion": "1.20.30.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7c79089e-6a33-4431-b5ea-2678adee97fd",
+      "Name": "1.20.30.21",
+      "BaseVersion": "1.20.30.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "51d6ffa2-1b5d-4f63-87d8-000f43307bcd",
+      "Name": "1.20.30.20",
+      "BaseVersion": "1.20.30.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e1ed9eb0-6611-4bf8-adf1-4df55b21a950",
+      "Name": "1.20.30.2",
+      "BaseVersion": "1.20.30.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e5a5da27-03b9-41f3-80dc-4762d2a24479",
+      "Name": "1.20.20.23",
+      "BaseVersion": "1.20.20.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "14eb9b19-c129-444a-ad64-b9f8c9cbd149",
+      "Name": "1.20.20.22",
+      "BaseVersion": "1.20.20.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e07dacf5-0654-4cc2-a3b0-9222d623b791",
+      "Name": "1.20.20.21",
+      "BaseVersion": "1.20.20.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "55ce5b86-05d6-452d-a53c-572e8a6f6884",
+      "Name": "1.20.20.20",
+      "BaseVersion": "1.20.20.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cf81ad8f-d5fb-4ed6-a910-36e9011e170a",
+      "Name": "1.20.15.1",
+      "BaseVersion": "1.20.15.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8cd36a7b-2da0-4389-ad6e-06f975a336ca",
+      "Name": "1.20.12.1",
+      "BaseVersion": "1.20.12.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1298a141-4501-4d91-9fd8-98ccf965bc33",
+      "Name": "1.20.10.21",
+      "BaseVersion": "1.20.10.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a4e6c359-6e08-4fba-bb09-d21809081512",
+      "Name": "1.20.10.20",
+      "BaseVersion": "1.20.10.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ea354812-8e56-4eb9-9530-fb7c86fe305d",
+      "Name": "1.20.10.1",
+      "BaseVersion": "1.20.10.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "38640519-dd50-4e80-8139-4607b7307761",
+      "Name": "1.20.1.2",
+      "BaseVersion": "1.20.1.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "5c43c764-b8d8-4744-a03b-dea76c2860d1",
+      "Name": "1.20.0.23",
+      "BaseVersion": "1.20.0.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a07daa93-aa15-4e78-971e-f771e2f8d603",
+      "Name": "1.20.0.22",
+      "BaseVersion": "1.20.0.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "5c15f066-f83d-4fdb-a0a8-627d1ae21672",
+      "Name": "1.20.0.21",
+      "BaseVersion": "1.20.0.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e048c0b3-cb39-4fe3-a467-296b23a4cf67",
+      "Name": "1.20.0.20",
+      "BaseVersion": "1.20.0.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6c853155-c111-4054-9833-f206e37ca7d5",
+      "Name": "1.20.0.1",
+      "BaseVersion": "1.20.0.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "383fa522-5568-48d1-94fa-dd44b31f02b3",
+      "Name": "1.19.83.1",
+      "BaseVersion": "1.19.83.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "950a8a92-a558-48b7-872b-41dbd663f29a",
+      "Name": "1.19.81.1",
+      "BaseVersion": "1.19.81.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "df155426-f980-493c-b73b-fdc652c12273",
+      "Name": "1.19.80.24",
+      "BaseVersion": "1.19.80.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "80dbcd81-cd11-4a93-b570-08c7c7d7f5e5",
+      "Name": "1.19.80.23",
+      "BaseVersion": "1.19.80.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "46e9d597-e8b9-49e3-ad13-e036921b2c7c",
+      "Name": "1.19.80.22",
+      "BaseVersion": "1.19.80.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e619437b-ec7e-4805-95c2-440b57d7c0c0",
+      "Name": "1.19.80.21",
+      "BaseVersion": "1.19.80.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7e97da4f-1afe-4c3c-a73f-accc8abefb59",
+      "Name": "1.19.80.20",
+      "BaseVersion": "1.19.80.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0998daff-f3f9-4887-aef5-d15f9e461604",
+      "Name": "1.19.80.2",
+      "BaseVersion": "1.19.80.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0ff7b03e-9748-47a9-b6be-4fd6a37e9c33",
+      "Name": "1.19.73.2",
+      "BaseVersion": "1.19.73.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ef4368c0-2166-4a80-8135-9482da48cbdf",
+      "Name": "1.19.71.2",
+      "BaseVersion": "1.19.71.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8c06d1cf-ef90-4090-a4be-750600ac1b47",
+      "Name": "1.19.70.24",
+      "BaseVersion": "1.19.70.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1a858916-b95f-4efd-8d2c-76ce4604df5d",
+      "Name": "1.19.70.23",
+      "BaseVersion": "1.19.70.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "542de049-3f15-4e52-8f10-73894d0e0922",
+      "Name": "1.19.70.22",
+      "BaseVersion": "1.19.70.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9b207aa4-153a-469b-a9a3-2fc55e406771",
+      "Name": "1.19.70.21",
+      "BaseVersion": "1.19.70.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d5e6e6ea-9927-4d1d-aff2-7e2db001b4cc",
+      "Name": "1.19.70.20",
+      "BaseVersion": "1.19.70.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "eb4ebf86-915f-4bbf-a50f-2d327558c98e",
+      "Name": "1.19.70.2",
+      "BaseVersion": "1.19.70.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "19477670-0d51-47de-99bd-8140dc6812ed",
+      "Name": "1.19.63.1",
+      "BaseVersion": "1.19.63.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "835f6541-b076-4515-8792-05f91792f999",
+      "Name": "1.19.62.1",
+      "BaseVersion": "1.19.62.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b56cd5ea-9f63-42ce-ae22-b841efc5640b",
+      "Name": "1.19.60.27",
+      "BaseVersion": "1.19.60.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3a971e56-5fdc-47f8-a3a3-95b5c956936d",
+      "Name": "1.19.60.26",
+      "BaseVersion": "1.19.60.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "50791383-578b-474d-be88-3cce2cd0225f",
+      "Name": "1.19.60.25",
+      "BaseVersion": "1.19.60.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0206c3a5-a60a-4f52-97dc-964f77a720db",
+      "Name": "1.19.60.24",
+      "BaseVersion": "1.19.60.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "abb651ed-93b5-4b59-b25e-46f3ecdd8677",
+      "Name": "1.19.60.23",
+      "BaseVersion": "1.19.60.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "351ab883-1561-4774-995c-c7fde2baccd2",
+      "Name": "1.19.60.22",
+      "BaseVersion": "1.19.60.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cd42c0a0-0a21-4200-b29e-787ac044efcb",
+      "Name": "1.19.60.20",
+      "BaseVersion": "1.19.60.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b77467c8-05e5-4196-9e1c-eab38286c98f",
+      "Name": "1.19.60.3",
+      "BaseVersion": "1.19.60.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "916e7a8f-5899-4fe8-970c-9ec39f361241",
+      "Name": "1.19.51.1",
+      "BaseVersion": "1.19.51.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "afb184e8-201e-4d20-9d6e-d48550c2ea06",
+      "Name": "1.19.50.23",
+      "BaseVersion": "1.19.50.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "adcc36b5-0afe-4f13-b0fb-a108896a6bc3",
+      "Name": "1.19.50.22",
+      "BaseVersion": "1.19.50.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ccf03008-c7a9-48dc-bb50-20bc0487b76e",
+      "Name": "1.19.50.21",
+      "BaseVersion": "1.19.50.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6345d3bf-44ac-458a-b137-25919f3e34f7",
+      "Name": "1.19.50.20",
+      "BaseVersion": "1.19.50.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ce5fcdc1-5b4c-49e5-94d6-afef3282e58c",
+      "Name": "1.19.50.2",
+      "BaseVersion": "1.19.50.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "93b0b8d8-1787-44c5-8ca4-825fada0f105",
+      "Name": "1.19.41.1",
+      "BaseVersion": "1.19.41.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d54c5515-febf-46cf-9c02-e02db95aa463",
+      "Name": "1.19.40.24",
+      "BaseVersion": "1.19.40.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1fd77fbe-c806-438c-b578-fe124a972fbb",
+      "Name": "1.19.40.23",
+      "BaseVersion": "1.19.40.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "115d47db-32a5-422b-abdd-79cb9e9366ae",
+      "Name": "1.19.40.22",
+      "BaseVersion": "1.19.40.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b82b9887-6f7a-4efd-a142-cac192b3f7c5",
+      "Name": "1.19.40.21",
+      "BaseVersion": "1.19.40.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8e3cf94f-ab8d-45e7-b7dd-1f2a670d2e65",
+      "Name": "1.19.40.2",
+      "BaseVersion": "1.19.40.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3702b4c4-d244-4e7c-9566-d5fa97df02ef",
+      "Name": "1.19.31.1",
+      "BaseVersion": "1.19.31.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "45f5256b-0511-4dfd-a46e-4669601fdc6e",
+      "Name": "1.19.30.25",
+      "BaseVersion": "1.19.30.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7209714f-1c94-4218-b3d1-fed1141ae13c",
+      "Name": "1.19.30.23",
+      "BaseVersion": "1.19.30.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c3b71ea8-b539-4fe5-b68a-5bf3ef4892d2",
+      "Name": "1.19.30.22",
+      "BaseVersion": "1.19.30.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0eee2956-c6ac-480a-aae6-87ac56fd62cc",
+      "Name": "1.19.30.20",
+      "BaseVersion": "1.19.30.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "226b8035-899a-4a58-a1af-d4341568d96f",
+      "Name": "1.19.30.4",
+      "BaseVersion": "1.19.30.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c5ab1807-ef8b-46f8-837e-7929820121bc",
+      "Name": "1.19.22.1",
+      "BaseVersion": "1.19.22.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7a67b807-6e27-468e-8d3d-372364364eb9",
+      "Name": "1.19.21.1",
+      "BaseVersion": "1.19.21.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1fc60666-9d53-4595-aceb-6f38b862cc6b",
+      "Name": "1.19.20.24",
+      "BaseVersion": "1.19.20.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "14fbf174-5755-4169-baf2-6885d3898c8c",
+      "Name": "1.19.20.23",
+      "BaseVersion": "1.19.20.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c8607823-f81a-42e4-9f46-c1bb3fbb06ed",
+      "Name": "1.19.20.22",
+      "BaseVersion": "1.19.20.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "49ba15bb-d0a2-428f-a8a9-3b2a17cc96c2",
+      "Name": "1.19.20.20",
+      "BaseVersion": "1.19.20.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6fbce732-132a-4fcd-af47-d9ae4152380a",
+      "Name": "1.19.20.2",
+      "BaseVersion": "1.19.20.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "57c66c18-ae99-4776-9deb-4a0bf98b2425",
+      "Name": "1.19.11.1",
+      "BaseVersion": "1.19.11.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0179e0d4-dd33-4f3c-b76c-be40496fcea0",
+      "Name": "1.19.10.24",
+      "BaseVersion": "1.19.10.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "297a3833-310d-4bdc-9607-6443f7d28cb7",
+      "Name": "1.19.10.22",
+      "BaseVersion": "1.19.10.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d8e31166-9e3c-4deb-9590-964022eb61b8",
+      "Name": "1.19.10.21",
+      "BaseVersion": "1.19.10.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "165d7914-4597-4398-9325-1820003168b5",
+      "Name": "1.19.10.20",
+      "BaseVersion": "1.19.10.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "de502964-5528-4665-80bf-47e43a4082a1",
+      "Name": "1.19.10.3",
+      "BaseVersion": "1.19.10.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "61cab36e-3b4b-483c-9633-3915a3bd4f12",
+      "Name": "1.19.2.2",
+      "BaseVersion": "1.19.2.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "916af7b2-7eb4-4b18-83d5-cc302bf82e7f",
+      "Name": "1.19.0.35",
+      "BaseVersion": "1.19.0.35",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9f08fa32-4eaa-454f-8a4b-43e99e515066",
+      "Name": "1.19.0.34",
+      "BaseVersion": "1.19.0.34",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fd9a07cd-49e7-4fe6-9791-5358d0c23138",
+      "Name": "1.19.0.33",
+      "BaseVersion": "1.19.0.33",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fef8b6d8-452a-4f37-a98d-cc9f917f4ddc",
+      "Name": "1.19.0.32",
+      "BaseVersion": "1.19.0.32",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4cfc96bf-f319-442a-b48d-c88956669414",
+      "Name": "1.19.0.31",
+      "BaseVersion": "1.19.0.31",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "471d48ef-7bc2-4ee2-9f82-18338eeff6a2",
+      "Name": "1.19.0.30",
+      "BaseVersion": "1.19.0.30",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c8d89b8b-6e1e-41ed-a3ba-a700cc13e5b5",
+      "Name": "1.19.0.29",
+      "BaseVersion": "1.19.0.29",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cfb51e62-ba3c-496e-b4ca-2c4bcbf3ca04",
+      "Name": "1.19.0.28",
+      "BaseVersion": "1.19.0.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6e4c1c50-3d50-4589-8504-eab4747b55e0",
+      "Name": "1.19.0.27",
+      "BaseVersion": "1.19.0.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e5912e3f-8555-4edd-a153-1d824a259eb3",
+      "Name": "1.19.0.26",
+      "BaseVersion": "1.19.0.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f76c2e43-6ac1-4959-8573-a85636ffcee3",
+      "Name": "1.19.0.25",
+      "BaseVersion": "1.19.0.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f115410f-f682-4110-bfc0-a17219f2deb6",
+      "Name": "1.19.0.24",
+      "BaseVersion": "1.19.0.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "779ff155-e5ae-4c5f-8847-fb36f1d91579",
+      "Name": "1.19.0.21",
+      "BaseVersion": "1.19.0.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "46c548cd-6b9d-4a11-93e0-3150370151fc",
+      "Name": "1.19.0.20",
+      "BaseVersion": "1.19.0.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "28d2f975-a0fc-401a-9987-9a6a117f8922",
+      "Name": "1.19.0.5",
+      "BaseVersion": "1.19.0.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "05098106-ffcf-4b13-8e59-8608547501c1",
+      "Name": "1.18.31.4",
+      "BaseVersion": "1.18.31.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9e228ff9-9374-498f-a1b4-f84b080ad940",
+      "Name": "1.18.30.31",
+      "BaseVersion": "1.18.30.31",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "37a7cf3b-fd0e-46bd-988c-d3a84c9d89a4",
+      "Name": "1.18.30.30",
+      "BaseVersion": "1.18.30.30",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fd7cc6b0-aadf-48c4-8487-185cdcd0bea0",
+      "Name": "1.18.30.29",
+      "BaseVersion": "1.18.30.29",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "521a991e-bd32-49ca-acd9-5b45ca52f823",
+      "Name": "1.18.30.28",
+      "BaseVersion": "1.18.30.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4959b0c0-9d57-49dc-8fa6-bb3b88f20611",
+      "Name": "1.18.30.27",
+      "BaseVersion": "1.18.30.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "249cbbdd-9547-46c1-92b8-008d7d1744df",
+      "Name": "1.18.30.26",
+      "BaseVersion": "1.18.30.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c1a7f56e-11ed-498b-8d64-17cab53a5eb3",
+      "Name": "1.18.30.23",
+      "BaseVersion": "1.18.30.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3bd93974-f377-4e8e-bae7-479a3741bf59",
+      "Name": "1.18.30.22",
+      "BaseVersion": "1.18.30.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a24bdd6a-0e28-45e4-85a3-b52507eb249c",
+      "Name": "1.18.30.21",
+      "BaseVersion": "1.18.30.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cea2f5ea-9231-4de1-a3b0-d65689a1ae98",
+      "Name": "1.18.30.20",
+      "BaseVersion": "1.18.30.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "63e6744c-e38f-4c0f-bcb9-56b863cf1ab8",
+      "Name": "1.18.30.4",
+      "BaseVersion": "1.18.30.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ef5bcd23-ab79-47de-b337-acc9dbdcbd1e",
+      "Name": "1.18.20.30",
+      "BaseVersion": "1.18.20.30",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "37996955-b602-4697-962b-9825ebf2686e",
+      "Name": "1.18.20.29",
+      "BaseVersion": "1.18.20.29",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d30fcbb2-4fde-4bb5-84c1-abb0dd549188",
+      "Name": "1.18.20.28",
+      "BaseVersion": "1.18.20.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "93ccef94-0bd0-45d8-b152-20a25a51a8f5",
+      "Name": "1.18.20.27",
+      "BaseVersion": "1.18.20.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "012d3665-b5e8-4f35-97f3-94edc3efa311",
+      "Name": "1.18.20.26",
+      "BaseVersion": "1.18.20.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0b1009e4-52b3-4407-bf1d-274ddf2fdacc",
+      "Name": "1.18.20.25",
+      "BaseVersion": "1.18.20.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "212e5a7d-9c44-4082-ad24-26a49e333869",
+      "Name": "1.18.20.23",
+      "BaseVersion": "1.18.20.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3cfb13ad-0f43-48df-9c9d-61f701f83cd8",
+      "Name": "1.18.20.21",
+      "BaseVersion": "1.18.20.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ec829b28-dee8-4886-9194-f0641ba2b669",
+      "Name": "1.18.12.1",
+      "BaseVersion": "1.18.12.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "148424bf-d82e-4154-919f-7db2bf696223",
+      "Name": "1.18.10.28",
+      "BaseVersion": "1.18.10.28",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f214d608-0bf5-482e-a2fc-dabc87a2e132",
+      "Name": "1.18.10.27",
+      "BaseVersion": "1.18.10.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "428c00af-493d-460d-8ee8-58ff8f0bb870",
+      "Name": "1.18.10.26",
+      "BaseVersion": "1.18.10.26",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8eb5cf27-160e-42db-bd8c-f010492cfb03",
+      "Name": "1.18.10.21",
+      "BaseVersion": "1.18.10.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "46ac4b44-2ee4-430c-b367-d91544bd44cb",
+      "Name": "1.18.10.20",
+      "BaseVersion": "1.18.10.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "661f0eb8-1345-46b8-8682-42454c9e3c43",
+      "Name": "1.18.10.4",
+      "BaseVersion": "1.18.10.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "2b5252f5-9271-4ed8-9739-e0fb14ffcae8",
+      "Name": "1.18.2.3",
+      "BaseVersion": "1.18.2.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4a33b451-ac0f-44eb-8773-6d2c10a240b8",
+      "Name": "1.18.1.2",
+      "BaseVersion": "1.18.1.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6dcb1475-ba02-4302-b1c9-f8faaf2e392a",
+      "Name": "1.18.0.27",
+      "BaseVersion": "1.18.0.27",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "43202b04-8641-4ccd-81f8-8735765d1719",
+      "Name": "1.18.0.25",
+      "BaseVersion": "1.18.0.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0cfb4c09-e66a-48b7-a160-dce0f78f41ec",
+      "Name": "1.18.0.24",
+      "BaseVersion": "1.18.0.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ac0eb940-5560-4f85-9824-60dc4fdeada8",
+      "Name": "1.18.0.22",
+      "BaseVersion": "1.18.0.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ec1d14a2-e181-4146-b7e8-6f6466aabc74",
+      "Name": "1.18.0.21",
+      "BaseVersion": "1.18.0.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "537f8e54-c38c-4994-baf3-2d2059ff3240",
+      "Name": "1.18.0.20",
+      "BaseVersion": "1.18.0.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c4a7d44d-eec2-4f5f-bdba-8f3fe0aee7fc",
+      "Name": "1.18.0.2",
+      "BaseVersion": "1.18.0.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ad386d9f-fde0-4a00-b1aa-627f90d5eaa4",
+      "Name": "1.17.41.1",
+      "BaseVersion": "1.17.41.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0cbfa585-81a0-405f-9aaf-f9ec06a38354",
+      "Name": "1.17.40.23",
+      "BaseVersion": "1.17.40.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ebb39b8b-60bc-4623-be6e-fe6eb0ba820d",
+      "Name": "1.17.40.21",
+      "BaseVersion": "1.17.40.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "62710269-0913-4339-9c9a-4a039adeb535",
+      "Name": "1.17.40.20",
+      "BaseVersion": "1.17.40.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "23ae1916-3419-4c12-a0e6-be478a0984b3",
+      "Name": "1.17.40.6",
+      "BaseVersion": "1.17.40.6",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "50632099-9e31-4f34-8b7b-7627bdcc9820",
+      "Name": "1.17.34.2",
+      "BaseVersion": "1.17.34.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d2c451fa-9e16-4906-9c86-3ca389290d26",
+      "Name": "1.17.32.2",
+      "BaseVersion": "1.17.32.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e9660b30-7787-43b4-96d1-1af1215623fa",
+      "Name": "1.17.30.25",
+      "BaseVersion": "1.17.30.25",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "bef02359-7187-49bc-9c7b-7f7e4b0011e7",
+      "Name": "1.17.30.24",
+      "BaseVersion": "1.17.30.24",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8aada731-1de6-4425-9863-8686c50378f2",
+      "Name": "1.17.30.23",
+      "BaseVersion": "1.17.30.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7d9d6cdf-494a-4f7e-9817-b77ca5906a06",
+      "Name": "1.17.30.22",
+      "BaseVersion": "1.17.30.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ed9598f6-125d-45e7-99cb-699f59ed4413",
+      "Name": "1.17.30.21",
+      "BaseVersion": "1.17.30.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c1ad1e94-3414-480b-89d8-b41c2cbda51f",
+      "Name": "1.17.30.20",
+      "BaseVersion": "1.17.30.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a2d318b1-f699-4a24-9314-35ade861c3d1",
+      "Name": "1.17.30.4",
+      "BaseVersion": "1.17.30.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6d8b5454-9d55-443a-8fd9-06dc87490d75",
+      "Name": "1.17.20.23",
+      "BaseVersion": "1.17.20.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "026432e4-b1af-4b86-a258-3674101eec39",
+      "Name": "1.17.20.22",
+      "BaseVersion": "1.17.20.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d4d72af7-d729-45f1-8dfb-ed626b2fac3d",
+      "Name": "1.17.20.21",
+      "BaseVersion": "1.17.20.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1062bba9-2045-4ea9-a67a-621edd2cd260",
+      "Name": "1.17.20.20",
+      "BaseVersion": "1.17.20.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a0dcfb59-7e5e-49ca-9ab8-0958cf12b889",
+      "Name": "1.17.11.1",
+      "BaseVersion": "1.17.11.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ffbe8303-8f32-419a-9312-80f7703978d7",
+      "Name": "1.17.10.23",
+      "BaseVersion": "1.17.10.23",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "971f3059-6f5b-4d52-8b57-2e180433fffd",
+      "Name": "1.17.10.22",
+      "BaseVersion": "1.17.10.22",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b8d61194-14f4-45a8-8c1e-19da9d55e7a4",
+      "Name": "1.17.10.21",
+      "BaseVersion": "1.17.10.21",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7c09f339-af39-45bf-ad44-c1881e9cf3ff",
+      "Name": "1.17.10.20",
+      "BaseVersion": "1.17.10.20",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e156df1e-3d33-4aa1-9fdb-d074ca37e3cb",
+      "Name": "1.17.10.4",
+      "BaseVersion": "1.17.10.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "509fff69-8614-40e8-add8-c4cb594bb7b2",
+      "Name": "1.17.2.1",
+      "BaseVersion": "1.17.2.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "264a3857-1be7-4048-8077-4522de47315e",
+      "Name": "1.17.0.56",
+      "BaseVersion": "1.17.0.56",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "83f1d4c1-8b7d-4582-b7d2-64464689d28e",
+      "Name": "1.17.0.54",
+      "BaseVersion": "1.17.0.54",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "de07ae11-e05d-4bc5-b8e1-316863d4e4ca",
+      "Name": "1.17.0.52",
+      "BaseVersion": "1.17.0.52",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d3e26204-aa23-4dfb-b007-741cbad2ca51",
+      "Name": "1.17.0.50",
+      "BaseVersion": "1.17.0.50",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "24c14b31-634d-4dfc-a185-15878cee9dc6",
+      "Name": "1.17.0.2",
+      "BaseVersion": "1.17.0.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "db76bd0c-c9fd-4e5a-b2c4-eef157bd6164",
+      "Name": "1.16.230.56",
+      "BaseVersion": "1.16.230.56",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "69c75adb-d19f-4ca3-b79d-cf6d8df91004",
+      "Name": "1.16.230.54",
+      "BaseVersion": "1.16.230.54",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7a0e602e-e437-4356-8378-c2ad2ababe49",
+      "Name": "1.16.230.52",
+      "BaseVersion": "1.16.230.52",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b946e005-5ea9-4d13-8a36-93d0ffa7d95a",
+      "Name": "1.16.230.50",
+      "BaseVersion": "1.16.230.50",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "bc9ded47-a0be-4bcd-a008-2f1c247a22ef",
+      "Name": "1.16.221.1",
+      "BaseVersion": "1.16.221.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c9a31802-83bd-4c72-829b-21bf9d58068b",
+      "Name": "1.16.220.52",
+      "BaseVersion": "1.16.220.52",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "13afe26e-56a7-4ca9-bfde-e7e362c0fec2",
+      "Name": "1.16.220.51",
+      "BaseVersion": "1.16.220.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cf26df75-c043-4f19-b96e-de741dc4c4bf",
+      "Name": "1.16.220.50",
+      "BaseVersion": "1.16.220.50",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "96d47f16-d0ad-453c-aa68-6f394f4c521b",
+      "Name": "1.16.220.2",
+      "BaseVersion": "1.16.220.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "52e122b0-977f-486a-9b42-a053eead00aa",
+      "Name": "1.16.210.60",
+      "BaseVersion": "1.16.210.60",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0750a709-e666-4cda-8762-a5edf7e5bedf",
+      "Name": "1.16.210.59",
+      "BaseVersion": "1.16.210.59",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "19a4227b-5af5-4331-8921-49c384bff13a",
+      "Name": "1.16.210.58",
+      "BaseVersion": "1.16.210.58",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d8938828-8fd2-425e-b2d3-a28a5d72c1a0",
+      "Name": "1.16.210.57",
+      "BaseVersion": "1.16.210.57",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c325d7bf-7d42-4171-9f44-1f809117b7f1",
+      "Name": "1.16.210.56",
+      "BaseVersion": "1.16.210.56",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "47720aa6-9654-4f3e-bb24-c74a479f3351",
+      "Name": "1.16.210.55",
+      "BaseVersion": "1.16.210.55",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6d5b0db4-52e7-421f-b9f9-8da8fe0f9d42",
+      "Name": "1.16.210.54",
+      "BaseVersion": "1.16.210.54",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1b280354-38bd-4d72-8cc0-d054c4ee3d39",
+      "Name": "1.16.210.53",
+      "BaseVersion": "1.16.210.53",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7f25ed67-6225-4203-8631-7f2c8bc034ac",
+      "Name": "1.16.210.50",
+      "BaseVersion": "1.16.210.50",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8bc5ce35-7f7c-4980-8015-4041e3500abd",
+      "Name": "1.16.210.5",
+      "BaseVersion": "1.16.210.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d252bd3c-7331-43cc-a67c-3e5519bdb792",
+      "Name": "1.16.201.2",
+      "BaseVersion": "1.16.201.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fe912e0c-a2ad-455c-abd6-cbd2234da2b0",
+      "Name": "1.16.200.57",
+      "BaseVersion": "1.16.200.57",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3d5ce213-fac4-48ca-b810-fdd1cf726b76",
+      "Name": "1.16.200.56",
+      "BaseVersion": "1.16.200.56",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "06469736-4bf7-4030-a6cc-fb3d0ebebff1",
+      "Name": "1.16.200.55",
+      "BaseVersion": "1.16.200.55",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "48cc1988-24bb-45b1-a00f-8d8d008b7998",
+      "Name": "1.16.200.51",
+      "BaseVersion": "1.16.200.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "53cad706-4191-4289-8eee-c401a486ad1a",
+      "Name": "1.16.200.2",
+      "BaseVersion": "1.16.200.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a5731b4a-195a-434f-9024-d9d843f87049",
+      "Name": "1.16.100.60",
+      "BaseVersion": "1.16.100.60",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f5a4f244-08ba-45f5-9081-c67488d95177",
+      "Name": "1.16.100.59",
+      "BaseVersion": "1.16.100.59",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9ba3a7fd-0370-4410-abc7-74bc9704316f",
+      "Name": "1.16.100.57",
+      "BaseVersion": "1.16.100.57",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "5aacf097-4ac1-467a-8a51-e8b844b52cec",
+      "Name": "1.16.100.56",
+      "BaseVersion": "1.16.100.56",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "288e8fd4-73c6-40d2-9df3-f53b56485185",
+      "Name": "1.16.100.55",
+      "BaseVersion": "1.16.100.55",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f8947dd1-fda6-446d-8251-36867403c85c",
+      "Name": "1.16.100.54",
+      "BaseVersion": "1.16.100.54",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "58b91a25-6c24-47cc-b0b3-6fbc0cd8842a",
+      "Name": "1.16.100.53",
+      "BaseVersion": "1.16.100.53",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d07c1071-bcd2-4078-8857-e5d7b609931a",
+      "Name": "1.16.100.52",
+      "BaseVersion": "1.16.100.52",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3a2391c1-e5cc-4218-a321-620e997de0f4",
+      "Name": "1.16.100.51",
+      "BaseVersion": "1.16.100.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fb76b4d6-c62f-43b4-892f-46d327fe7040",
+      "Name": "1.16.100.50",
+      "BaseVersion": "1.16.100.50",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d8107807-40f7-4552-a78c-f410fe1ae1df",
+      "Name": "1.16.100.4",
+      "BaseVersion": "1.16.100.4",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "49968828-1578-4f5a-b182-1455ec2b57d6",
+      "Name": "1.16.40.2",
+      "BaseVersion": "1.16.40.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0466c7a7-9600-468a-aaa8-411aeb0b763d",
+      "Name": "1.16.20.54",
+      "BaseVersion": "1.16.20.54",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6a89153e-c43c-4716-a645-dcc2414a6b60",
+      "Name": "1.16.20.53",
+      "BaseVersion": "1.16.20.53",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8bca2ce7-a6cd-449d-8a83-6df41cda3c58",
+      "Name": "1.16.20.52",
+      "BaseVersion": "1.16.20.52",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "337f2222-cddc-4a2c-99f8-2e7b944a8b62",
+      "Name": "1.16.20.50",
+      "BaseVersion": "1.16.20.50",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a3306a97-5e87-4a00-8327-5d44b27ead8b",
+      "Name": "1.16.20.3",
+      "BaseVersion": "1.16.20.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fa089b11-1468-428e-8762-8b7bc8adfc17",
+      "Name": "1.16.10.2",
+      "BaseVersion": "1.16.10.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "b76ea735-b1a3-4ffc-b4ca-f5ad67e9e45f",
+      "Name": "1.16.1.2",
+      "BaseVersion": "1.16.1.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e005e0c6-e2f6-45a4-954d-f527e866a8fc",
+      "Name": "1.16.0.68",
+      "BaseVersion": "1.16.0.68",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fcc2a65c-07e7-45c4-b66b-78a0ab673cbe",
+      "Name": "1.16.0.60",
+      "BaseVersion": "1.16.0.60",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c65b287d-bd9f-47a7-bf7d-7948dbd43ad4",
+      "Name": "1.16.0.59",
+      "BaseVersion": "1.16.0.59",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "45b1cdf6-2456-4660-b2f9-a6acb8893ee5",
+      "Name": "1.16.0.58",
+      "BaseVersion": "1.16.0.58",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e4085e2a-e74e-4091-a61d-86eff77a2335",
+      "Name": "1.16.0.57",
+      "BaseVersion": "1.16.0.57",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3f097757-b8e2-422a-bbc4-0de2d65fae22",
+      "Name": "1.16.0.55",
+      "BaseVersion": "1.16.0.55",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fed93fc5-d026-49fc-a5b3-2fabaca0fd18",
+      "Name": "1.16.0.53",
+      "BaseVersion": "1.16.0.53",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ccdd414e-8ecb-48c0-a0bc-cc7d9ae050e3",
+      "Name": "1.16.0.51",
+      "BaseVersion": "1.16.0.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8ecef46e-e8be-473c-bfe3-db35ef3c173d",
+      "Name": "1.16.0.2",
+      "BaseVersion": "1.16.0.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "1da5f729-2ede-4a62-ac13-33b142909cf5",
+      "Name": "1.15.0.54",
+      "BaseVersion": "1.15.0.54",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "60334da6-1f55-40a4-a34b-f20cf654d889",
+      "Name": "1.15.0.53",
+      "BaseVersion": "1.15.0.53",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "38283a74-3311-4a49-bc4e-6550ea511e99",
+      "Name": "1.15.0.51",
+      "BaseVersion": "1.15.0.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a7048ece-24fa-429a-8df4-dc19a7ca751d",
+      "Name": "1.14.60.5",
+      "BaseVersion": "1.14.60.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "88094472-d550-4ff6-86ac-32701c4eb3e1",
+      "Name": "1.14.30.51",
+      "BaseVersion": "1.14.30.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d2785376-3c4b-4e7f-b903-9293180769e7",
+      "Name": "1.14.30.2",
+      "BaseVersion": "1.14.30.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "5e8cc245-1d16-4176-8326-bec907c64705",
+      "Name": "1.14.25.1",
+      "BaseVersion": "1.14.25.1",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d807bbf1-c63a-4d67-a53a-cc7d78398ffc",
+      "Name": "1.14.20.1",
+      "BaseVersion": "1.14.20.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f7cfe4a1-f9ba-4104-85fd-b6426598de01",
+      "Name": "1.14.2.51",
+      "BaseVersion": "1.14.2.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3e896ea1-99a0-4969-823b-3b6c574a7bcc",
+      "Name": "1.14.2.50",
+      "BaseVersion": "1.14.2.50",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "28e6e288-5296-42ed-b086-0a629a4f68aa",
+      "Name": "1.14.1.5",
+      "BaseVersion": "1.14.1.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e5547916-efd1-45b8-b6d2-3dfdc7510cbf",
+      "Name": "1.14.1.3",
+      "BaseVersion": "1.14.1.3",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "d470d913-e6be-4c8f-93d4-2b61a98d8efa",
+      "Name": "1.14.0.52",
+      "BaseVersion": "1.14.0.52",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0b3ea232-b51c-46c7-ab0a-aeaecd2fa8aa",
+      "Name": "1.14.0.51",
+      "BaseVersion": "1.14.0.51",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e67df0cc-2a09-44c1-ba77-c441c331dae0",
+      "Name": "1.14.0.9",
+      "BaseVersion": "1.14.0.9",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "17914518-ed69-4854-8810-4b2d3554db86",
+      "Name": "1.14.0.4",
+      "BaseVersion": "1.14.0.4",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4451a98a-9393-4dd4-b3b0-a39f1e5187c4",
+      "Name": "1.14.0.3",
+      "BaseVersion": "1.14.0.3",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3b01a06f-f924-4366-a4a9-93b4d47c9eb5",
+      "Name": "1.14.0.2",
+      "BaseVersion": "1.14.0.2",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9fbdfd18-dc7d-4ca6-a698-4e01ba137752",
+      "Name": "1.14.0.1",
+      "BaseVersion": "1.14.0.1",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "01fb9b77-507d-420d-8116-0a1042c1e680",
+      "Name": "1.13.1.5",
+      "BaseVersion": "1.13.1.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "29de2df8-a8fd-43c7-9594-09fd8c9ae8a1",
+      "Name": "1.13.0.34",
+      "BaseVersion": "1.13.0.34",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "79f703ec-d35c-49a0-9da2-167d3c314e4f",
+      "Name": "1.13.0.15",
+      "BaseVersion": "1.13.0.15",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "37e9eb3a-8bd7-4d2a-8409-04489e252ec1",
+      "Name": "1.13.0.13",
+      "BaseVersion": "1.13.0.13",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c930805d-d9b2-4e91-8f25-74d405d817fb",
+      "Name": "1.13.0.9",
+      "BaseVersion": "1.13.0.9",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c2aa0020-9b46-4a28-9de3-8085d980f5ed",
+      "Name": "1.13.0.6",
+      "BaseVersion": "1.13.0.6",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "edc9edea-537b-4f80-b6cf-589eebbe1349",
+      "Name": "1.13.0.5",
+      "BaseVersion": "1.13.0.5",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e5cd10aa-e542-46d2-91f5-4bd20205ee19",
+      "Name": "1.13.0.4",
+      "BaseVersion": "1.13.0.4",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "61a56d78-eb35-436b-a185-36bf2bec7aef",
+      "Name": "1.13.0.2",
+      "BaseVersion": "1.13.0.2",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "5a588f69-e65d-4651-aaa9-b015ded8d019",
+      "Name": "1.13.0.1",
+      "BaseVersion": "1.13.0.1",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "afa14647-f21b-4191-aa98-b88f164c5201",
+      "Name": "1.12.1.1",
+      "BaseVersion": "1.12.1.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "dd4e7be3-57f9-47fe-aeea-8caab07e6469",
+      "Name": "1.12.0.28",
+      "BaseVersion": "1.12.0.28",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8ae06369-e856-4f4a-a37a-edb2d1c7e095",
+      "Name": "1.12.0.14",
+      "BaseVersion": "1.12.0.14",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "227f8ad1-b12f-479c-b296-9cb634209738",
+      "Name": "1.12.0.13",
+      "BaseVersion": "1.12.0.13",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "2ebd91f9-099a-414b-a56a-c2c61e48dc3f",
+      "Name": "1.12.0.12",
+      "BaseVersion": "1.12.0.12",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "e1c2796d-a8f5-4762-be14-9d75ef1c4e87",
+      "Name": "1.12.0.11",
+      "BaseVersion": "1.12.0.11",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9d9e9a1b-da15-42e1-977b-e44ab504be8c",
+      "Name": "1.12.0.10",
+      "BaseVersion": "1.12.0.10",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "865de55b-cd3f-472e-808b-1a6f0aece65f",
+      "Name": "1.12.0.9",
+      "BaseVersion": "1.12.0.9",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a41272a8-140e-4f4b-a4fb-7c48cd2f8827",
+      "Name": "1.12.0.6",
+      "BaseVersion": "1.12.0.6",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f2e9f47c-b633-40b8-80d4-899dd3ec3ef8",
+      "Name": "1.12.0.4",
+      "BaseVersion": "1.12.0.4",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "44b546b7-70a6-4384-b4c6-1cdc3a320060",
+      "Name": "1.12.0.3",
+      "BaseVersion": "1.12.0.3",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "625de0c6-bb52-41fa-8adf-2f21c6cf5b8a",
+      "Name": "1.12.0.2",
+      "BaseVersion": "1.12.0.2",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "fc1de9e4-cf9f-47c3-8654-2835ec993964",
+      "Name": "1.11.4.2",
+      "BaseVersion": "1.11.4.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c1f34823-2e07-4af0-940a-184cfffd076e",
+      "Name": "1.11.3.1",
+      "BaseVersion": "1.11.3.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "ce39153e-e937-454a-9fb0-70b35c723062",
+      "Name": "1.11.1.2",
+      "BaseVersion": "1.11.1.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "0a6af6d0-3ef4-47bd-b105-07b91a1d23ee",
+      "Name": "1.11.0.23",
+      "BaseVersion": "1.11.0.23",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "55e4a122-6229-40e9-97d0-168b824c23df",
+      "Name": "1.11.0.10",
+      "BaseVersion": "1.11.0.10",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "dd82b611-3799-48d6-ab97-c146f28e39bb",
+      "Name": "1.11.0.9",
+      "BaseVersion": "1.11.0.9",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "c3e74ea2-6b65-42fd-a291-4e6d6853b11f",
+      "Name": "1.11.0.8",
+      "BaseVersion": "1.11.0.8",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a7a465c1-84ee-4d44-9276-d61135b8ca7b",
+      "Name": "1.11.0.7",
+      "BaseVersion": "1.11.0.7",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f310e0c3-1c19-4725-99c0-f1949f0791b3",
+      "Name": "1.11.0.5",
+      "BaseVersion": "1.11.0.5",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "f12dc2c0-344d-4c1a-af4a-c484f662b890",
+      "Name": "1.11.0.4",
+      "BaseVersion": "1.11.0.4",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "a4020779-d76d-4a41-a308-20822644265e",
+      "Name": "1.11.0.3",
+      "BaseVersion": "1.11.0.3",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "667B6F0B-5747-416C-A60B-82ABD49AA58D",
+      "Name": "1.11.0.1",
+      "BaseVersion": "1.11.0.1",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "47f37eee-fa8e-442c-8edd-e9f28a2497cf",
+      "Name": "1.10.1.1",
+      "BaseVersion": "1.10.1.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "cf55c488-6839-4888-b892-562f92bb3dce",
+      "Name": "1.10.0.7",
+      "BaseVersion": "1.10.0.7",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "F2E656DD-86F2-42BE-A157-253A2782B462",
+      "Name": "1.10.0.4",
+      "BaseVersion": "1.10.0.4",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "DDB8196F-A608-4436-B3BD-CC60D5A9D1AD",
+      "Name": "1.9.0.15",
+      "BaseVersion": "1.9.0.15",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3276661D-8B7A-4A30-A325-AE05A6B9CBB1",
+      "Name": "1.8.1.2",
+      "BaseVersion": "1.8.1.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "659F8B59-3FC7-4242-A06E-DA1AB4BDE3C4",
+      "Name": "1.8.0.24",
+      "BaseVersion": "1.8.0.24",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "AC26D7E8-AEEB-43CA-9F09-01E082EF2D2D",
+      "Name": "1.7.1.0",
+      "BaseVersion": "1.7.1.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "E88DE30C-8981-4D92-8141-435689A237F4",
+      "Name": "1.7.0.13",
+      "BaseVersion": "1.7.0.13",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "3AFBABDD-876F-4C5F-8054-90210EC05AF8",
+      "Name": "1.6.1.0",
+      "BaseVersion": "1.6.1.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "5808C125-7001-47EF-871D-A38B20FE8D79",
+      "Name": "1.6.0.14",
+      "BaseVersion": "1.6.0.14",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "39EA04C0-CAB0-4859-A2BC-BFEBB18E68F4",
+      "Name": "1.5.3.0",
+      "BaseVersion": "1.5.3.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "F5C3D6B3-AE74-47CA-9579-5C324B0BAD17",
+      "Name": "1.5.2.1",
+      "BaseVersion": "1.5.2.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "9BC7BE70-4F65-44A5-A83D-B60CEE491A6D",
+      "Name": "1.5.0.14",
+      "BaseVersion": "1.5.0.14",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6C0C633F-C6D1-4DE7-8AA0-4A66866996C8",
+      "Name": "1.5.0.0",
+      "BaseVersion": "1.5.0.0",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "E361D881-AED0-44E3-9D13-D4AA943F6463",
+      "Name": "1.4.2.0",
+      "BaseVersion": "1.4.2.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.2.306.6",
+      "BaseVersion": "1.2.306.6",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.2.203.6",
+      "BaseVersion": "1.2.203.6",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "825166E1-197B-4845-ADE7-D12A1B8A18D0",
+      "Name": "1.2.10.2",
+      "BaseVersion": "1.2.10.2",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "A2612767-B607-49E0-9145-6BD4AEC49FE7",
+      "Name": "1.2.8.0",
+      "BaseVersion": "1.2.8.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "53F27416-ED1B-4372-B7DB-556E4472513C",
+      "Name": "1.2.5.13",
+      "BaseVersion": "1.2.5.13",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "57586DDC-3E4D-43BC-8DF2-7DC7F5EAAA57",
+      "Name": "1.2.3.6",
+      "BaseVersion": "1.2.3.6",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "6402FC0E-F392-488C-9557-35C1BB8FD4A4",
+      "Name": "1.2.3.3",
+      "BaseVersion": "1.2.3.3",
+      "Date": null,
+      "Preview": true,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "2A36511E-3221-41D1-8BE4-8D49E05CB669",
+      "Name": "1.2.2.3",
+      "BaseVersion": "1.2.2.3",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.1.500.6",
+      "BaseVersion": "1.1.500.6",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "60C20FD7-B456-4FF6-AD66-7E7AB62527BA",
+      "Name": "1.1.5.0",
+      "BaseVersion": "1.1.5.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "1.0.16.6",
+      "BaseVersion": "1.0.16.6",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4234690B-30B9-46A4-A5F9-811953A151D5",
+      "Name": "1.0.0.16",
+      "BaseVersion": "1.0.0.16",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.1601.0.0",
+      "BaseVersion": "0.1601.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.1600.0.5",
+      "BaseVersion": "0.1600.0.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.1510.0.0",
+      "BaseVersion": "0.1510.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.159.0.0",
+      "BaseVersion": "0.159.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.158.0.0",
+      "BaseVersion": "0.158.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.157.0.1",
+      "BaseVersion": "0.157.0.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.156.0.0",
+      "BaseVersion": "0.156.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.154.0.1",
+      "BaseVersion": "0.154.0.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.150.0.0",
+      "BaseVersion": "0.150.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.142.0.1",
+      "BaseVersion": "0.142.0.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.140.0.1",
+      "BaseVersion": "0.140.0.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "",
+      "Name": "0.132.0.0",
+      "BaseVersion": "0.132.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "786FA001-04F9-42DE-A556-E98AF3684525",
+      "Name": "0.16.1.0",
+      "BaseVersion": "0.16.1.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "88FCAC52-F717-442E-A667-2B1943F7DAD3",
+      "Name": "0.16.0.5",
+      "BaseVersion": "0.16.0.5",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "C2FC6B6E-7548-4FDA-8936-C105C740B1E7",
+      "Name": "0.15.10.0",
+      "BaseVersion": "0.15.10.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7E035D83-C675-4248-BED1-2087F739356E",
+      "Name": "0.15.9.0",
+      "BaseVersion": "0.15.9.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "367BE4B5-A71C-4D36-BC46-D11468777F7F",
+      "Name": "0.15.8.0",
+      "BaseVersion": "0.15.8.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "7EBC0F58-4AF1-4893-9465-FCBF57FDDE99",
+      "Name": "0.15.7.1",
+      "BaseVersion": "0.15.7.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "8FC80FC6-192C-4C50-8533-C5B49A5D3901",
+      "Name": "0.15.6.0",
+      "BaseVersion": "0.15.6.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "EC51A839-B3EE-44E6-BB8F-C75154547E66",
+      "Name": "0.15.4.1",
+      "BaseVersion": "0.15.4.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "28354370-EB00-498C-B6CB-1B2DBBDD8042",
+      "Name": "0.15.0.0",
+      "BaseVersion": "0.15.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "A4A7A7D3-9739-43A1-8668-1556DDDB4CD4",
+      "Name": "0.14.2.1",
+      "BaseVersion": "0.14.2.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "B17C2923-587A-442B-9BC6-76A13C02978C",
+      "Name": "0.14.0.1",
+      "BaseVersion": "0.14.0.1",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "B114152D-E4A6-4A35-8C18-EC079EB4A17F",
+      "Name": "0.13.2.0",
+      "BaseVersion": "0.13.2.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "4B64779C-D1CD-4659-B1C5-03C858232579",
+      "Name": "0.13.1.0",
+      "BaseVersion": "0.13.1.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    },
+    {
+      "Uuid": "985D1EE4-0E9D-49DE-9A99-E208ADC08D0C",
+      "Name": "0.13.0.0",
+      "BaseVersion": "0.13.0.0",
+      "Date": null,
+      "Preview": false,
+      "Url": null,
+      "DirectUrlAvailable": false
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+namespace System.Windows
+{
+    public enum Visibility { Visible, Hidden, Collapsed }
+    public enum HorizontalAlignment { Left, Stretch }
+    public enum VerticalAlignment { Stretch }
+    public class RoutedEventArgs : EventArgs { }
+    public class FrameworkElement
+    {
+        public FixtureDispatcher Dispatcher { get; } = new();
+        public bool IsLoaded { get; set; } = true;
+        public Visibility Visibility { get; set; }
+        public HorizontalAlignment HorizontalAlignment { get; set; }
+        public VerticalAlignment VerticalAlignment { get; set; }
+        public double MinHeight { get; set; }
+    }
+    public class Window { public static Window GetWindow(FrameworkElement element) => new(); }
+    public class FixtureDispatcher { public Task InvokeAsync(Action action) { action(); return Task.CompletedTask; } }
+}
+namespace Microsoft.Win32
+{
+    public class SaveFileDialog
+    {
+        public string Title { get; set; } = "";
+        public string FileName { get; set; } = "";
+        public string DefaultExt { get; set; } = "";
+        public string Filter { get; set; } = "";
+        public bool AddExtension { get; set; }
+        public bool OverwritePrompt { get; set; }
+        public static bool? NextResult { get; set; } = false;
+        public static Action? OnShowing { get; set; }
+        public bool? ShowDialog(System.Windows.Window owner) { OnShowing?.Invoke(); return NextResult; }
+    }
+}
+namespace System.Windows.Controls
+{
+    public class UserControl : System.Windows.FrameworkElement { }
+    public class TextChangedEventArgs : System.Windows.RoutedEventArgs { }
+    public class TextBox { public string Text { get; set; } = ""; }
+    public class TextBlock { public string Text { get; set; } = ""; }
+    public class Button : System.Windows.FrameworkElement
+    {
+        public bool IsEnabled { get; set; } = true;
+        public object? ToolTip { get; set; }
+    }
+    public class Border : System.Windows.FrameworkElement { }
+    public class Grid : System.Windows.FrameworkElement
+    {
+        public List<System.Windows.FrameworkElement> Children { get; } = new();
+    }
+}
+namespace Microsoft.Web.WebView2.Core
+{
+    public enum CoreWebView2DownloadState { InProgress, Completed, Interrupted }
+    public class CoreWebView2DownloadOperation
+    {
+        public CoreWebView2DownloadState State { get; set; }
+        public string ResultFilePath { get; set; } = "";
+        public string InterruptReason { get; set; } = "UserCanceled";
+        public event EventHandler<object>? StateChanged;
+        public int CancelCount { get; private set; }
+        public bool ThrowOnCancel { get; set; }
+        public void Cancel()
+        {
+            CancelCount++;
+            if (ThrowOnCancel) throw new System.Runtime.InteropServices.COMException("closed operation");
+            State = CoreWebView2DownloadState.Interrupted;
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        }
+        public void Complete() { State = CoreWebView2DownloadState.Completed; StateChanged?.Invoke(this, EventArgs.Empty); }
+        public void Interrupt() { State = CoreWebView2DownloadState.Interrupted; StateChanged?.Invoke(this, EventArgs.Empty); }
+    }
+    public class CoreWebView2Deferral : IDisposable
+    {
+        public int DisposeCount { get; private set; }
+        public bool ThrowOnDispose { get; set; }
+        public void Dispose()
+        {
+            DisposeCount++;
+            if (ThrowOnDispose) throw new System.Runtime.InteropServices.COMException("closed deferral");
+        }
+    }
+    public class CoreWebView2DownloadStartingEventArgs : EventArgs
+    {
+        public bool Handled { get; set; }
+        private bool _cancel;
+        public bool ThrowOnCancel { get; set; }
+        public bool Cancel
+        {
+            get => _cancel;
+            set { if (ThrowOnCancel) throw new System.Runtime.InteropServices.COMException("closed event"); _cancel = value; }
+        }
+        public string ResultFilePath { get; set; } = "icon.png";
+        public CoreWebView2DownloadOperation DownloadOperation { get; } = new();
+        public CoreWebView2Deferral Deferral { get; } = new();
+        public CoreWebView2Deferral GetDeferral() => Deferral;
+    }
+    public enum CoreWebView2WebErrorStatus { Unknown, OperationCanceled, ConnectionAborted }
+    public class CoreWebView2NavigationStartingEventArgs(ulong navigationId, string uri) : EventArgs
+    {
+        public ulong NavigationId { get; } = navigationId;
+        public string Uri { get; } = uri;
+    }
+    public class CoreWebView2NavigationCompletedEventArgs(ulong navigationId, bool success, CoreWebView2WebErrorStatus error) : EventArgs
+    {
+        public ulong NavigationId { get; } = navigationId;
+        public bool IsSuccess { get; } = success;
+        public CoreWebView2WebErrorStatus WebErrorStatus { get; } = error;
+    }
+    public class CoreWebView2Settings
+    {
+        public bool AreDefaultContextMenusEnabled { get; set; }
+        public bool AreDevToolsEnabled { get; set; }
+    }
+    public class CoreWebView2
+    {
+        public event EventHandler<CoreWebView2DownloadStartingEventArgs>? DownloadStarting;
+        public CoreWebView2Settings Settings { get; } = new();
+        public event EventHandler<CoreWebView2NavigationStartingEventArgs>? NavigationStarting;
+        public event EventHandler<CoreWebView2NavigationCompletedEventArgs>? NavigationCompleted;
+        public string? RequestedUrl { get; private set; }
+        public void Navigate(string uri) => RequestedUrl = uri;
+        public void Download(CoreWebView2DownloadStartingEventArgs args) => DownloadStarting?.Invoke(this, args);
+        public void Start(ulong id, string uri) => NavigationStarting?.Invoke(this, new(id, uri));
+        public void Complete(ulong id, bool success) => NavigationCompleted?.Invoke(this,
+            new(id, success, CoreWebView2WebErrorStatus.OperationCanceled));
+    }
+}
+namespace Microsoft.Web.WebView2.Wpf
+{
+    public class WebView2 : System.Windows.FrameworkElement, IDisposable
+    {
+        public Microsoft.Web.WebView2.Core.CoreWebView2 CoreWebView2 { get; } = new();
+        public Task EnsureCoreWebView2Async() => Task.CompletedTask;
+        public void Dispose() { }
+    }
+}
+namespace XCL2.App.Services
+{
+    public static class WebView2RuntimeDetector { public static bool IsAvailable() => true; }
+    public static class ErrorPresenter { public static void LogTechnicalDetail(string message) { } }
+}
+namespace XCL2.App.Views
+{
+    public static class MessageBoxDialog { public static void ShowWarning(string text, string title) { } }
+}
+namespace XCL2.App.Views.Tools
+{
+    public partial class Web2BrowserTool
+    {
+        private readonly System.Windows.Controls.TextBox UrlBox = new();
+        private readonly System.Windows.Controls.Button OpenEmbeddedButton = new();
+        private readonly System.Windows.Controls.Button OpenExternalButton = new() { Visibility = System.Windows.Visibility.Collapsed };
+        private readonly System.Windows.Controls.TextBlock Web2StatusText = new();
+        private readonly System.Windows.Controls.Border BrowserCard = new();
+        private readonly System.Windows.Controls.Grid BrowserHost = new();
+        private void InitializeComponent() { }
+        internal bool HasFallback => OpenExternalButton.Visibility == System.Windows.Visibility.Visible;
+        internal string? Fallback => _fallbackUrl;
+        internal string Status => Web2StatusText.Text;
+        internal async Task<Microsoft.Web.WebView2.Core.CoreWebView2> AttachFixtureBrowserAsync()
+        {
+            var version = ++_browserVersion;
+            _browser = Services.EmbeddedWebView.Create(
+                (success, error) => Browser_NavigationCompleted(version, success, error),
+                navigationStarting: uri => Browser_NavigationStarting(version, uri));
+            await _browser.InitializeAsync();
+            return ((Microsoft.Web.WebView2.Wpf.WebView2)_browser.View).CoreWebView2;
+        }
+        internal void RequestFixtureNavigation(string uri)
+        {
+            HideExternalFallback();
+            _browserAddressVersion = _addressVersion;
+            _navigationUrl = uri;
+            _browser!.Navigate(uri);
+        }
+        internal void EditAddress(string uri)
+        {
+            UrlBox.Text = uri;
+            UrlBox_TextChanged(this, new());
+        }
+        internal void LeavePage() => Web2BrowserTool_Unloaded(this, new());
+    }
+}

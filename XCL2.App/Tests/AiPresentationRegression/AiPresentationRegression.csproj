@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>XCL2</AssemblyName><RootNamespace>XCL2.App</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/AiDisclosureMotion.cs" Link="Services/AiDisclosureMotion.cs"/>
+    <Page Include="../../Resources/Themes/AiConversation.xaml" Link="Resources/Themes/AiConversation.xaml"/>
+  </ItemGroup>
+</Project>

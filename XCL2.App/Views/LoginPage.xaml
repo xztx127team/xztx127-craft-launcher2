@@ -1,0 +1,115 @@
+<UserControl x:Class="XCL2.App.Views.LoginPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:services="clr-namespace:XCL2.App.Services"
+             xmlns:models="clr-namespace:XCL2.App.Models">
+    <UserControl.Resources>
+        <!-- 只有离线账户(Type=Offline)才需要显示"皮肤"按钮；微软账户的皮肤由 Mojang 托管。 -->
+        <models:AccountTypeToOfflineVisibilityConverter x:Key="AccountTypeToOfflineVisibilityConverter"/>
+        <models:AccountLoginStatusConverter x:Key="AccountLoginStatusConverter"/>
+        
+        <models:AccountTypeToNonOfflineVisibilityConverter x:Key="AccountTypeToNonOfflineVisibilityConverter"/>
+    </UserControl.Resources>
+    <Border Background="{DynamicResource PanelBrush}" CornerRadius="10" Padding="24">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <DockPanel>
+            <TextBlock DockPanel.Dock="Top" Text="{DynamicResource Str_Nav_Accounts}" FontSize="20" FontWeight="Bold" Margin="0,0,0,16"/>
+
+            <!-- 常用登录保持两条明确的行；次要方式只在主动展开/点菜单时出现。 -->
+            <Grid DockPanel.Dock="Top" Margin="0,0,0,14">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="72"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Text="离线账户" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                <TextBox x:Name="OfflineNameBox" Grid.Column="1" MinHeight="34" Padding="8,5" Margin="0,0,8,0"
+                         VerticalContentAlignment="Center" Text="Player" ToolTip="游戏内用户名" AutomationProperties.Name="离线账户用户名"/>
+                <Button Grid.Column="2" Content="{DynamicResource Str_Ui_Add_Offline_Account}" Style="{StaticResource PrimaryButton}"
+                        MinHeight="34" Padding="12,5" Click="AddOffline_Click"/>
+                <TextBlock Grid.Row="1" Text="微软账户" VerticalAlignment="Center" Margin="0,10,0,0" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button Content="微软账户登录" Style="{StaticResource PrimaryButton}" MinHeight="34" Padding="14,5"
+                            ToolTip="通过系统默认浏览器登录微软账户" Click="AddMicrosoft_Click"/>
+                    <Button Content="其他方式" MinHeight="34" Padding="12,5" Margin="8,0,0,0" ToolTip="更多微软账户登录方式"
+                            Click="AccountActions_Click">
+                        <Button.ContextMenu><ContextMenu>
+                            <MenuItem Header="在启动器内登录（WebView2）" Click="AddMicrosoftEmbedded_Click"/>
+                        </ContextMenu></Button.ContextMenu>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <Expander DockPanel.Dock="Top" Header="第三方认证服务器登录" IsExpanded="False" Margin="0,0,0,12">
+                <Border Background="{DynamicResource SideBrush}" CornerRadius="6" Padding="12" Margin="0,8,0,0">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource Str_Ui_Sign_In_With_A_Third_Party_Auth_Server_A}"
+                                   FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                        <TextBlock Text="{DynamicResource Str_Ui_Auth_Server_Address_Api_Root}" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,5"/>
+                        <TextBox x:Name="AuthServerRootBox" Padding="8,5" MinHeight="34" VerticalContentAlignment="Center" Margin="0,0,0,10"
+                                 AutomationProperties.Name="认证服务器 API 地址" ToolTip="{DynamicResource Str_Ui_Auth_Server_Api_Root_E_G_Https_Example_C}"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock Text="用户名或邮箱" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,8,5"/>
+                            <TextBlock Grid.Column="1" Text="密码" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,8,5"/>
+                            <TextBox x:Name="AuthServerUsernameBox" Grid.Row="1" MinWidth="70" Padding="8,5" MinHeight="34" VerticalContentAlignment="Center" Margin="0,0,8,0"
+                                     AutomationProperties.Name="认证服务器用户名或邮箱" ToolTip="{DynamicResource Str_Ui_Skin_Server_Email_Or_Username}"/>
+                            <PasswordBox x:Name="AuthServerPasswordBox" Grid.Row="1" Grid.Column="1" MinWidth="70" Padding="8,5" MinHeight="34" Margin="0,0,8,0"
+                                         AutomationProperties.Name="认证服务器密码"/>
+                            <Button Grid.Row="1" Grid.Column="2" Content="{DynamicResource Str_Ui_Sign_In}" Style="{StaticResource PrimaryButton}"
+                                    MinHeight="34" MinWidth="70" Padding="12,5" Click="AddAuthServer_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </Expander>
+
+            <TextBlock DockPanel.Dock="Top" x:Name="StatusText" Foreground="{DynamicResource AccentBrush}"
+                       Margin="0,0,0,10" TextWrapping="Wrap"/>
+
+            <TextBlock DockPanel.Dock="Top" Text="{DynamicResource Str_Ui_Saved_Accounts_Offline_And_Microsoft_Acc}" FontWeight="Bold" Margin="0,0,0,8"/>
+            <ListBox x:Name="AccountListBox" MaxHeight="360" BorderThickness="0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.Resources><services:AccountAvatarConverter x:Key="AccountAvatarConverter"/></ListBox.Resources>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid Margin="0,0,12,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                <Image Width="32" Height="32" Margin="0,0,10,0" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                       Source="{Binding Converter={StaticResource AccountAvatarConverter}}"/>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding DisplayLabel}" FontSize="15" TextTrimming="CharacterEllipsis" ToolTip="{Binding DisplayLabel}"/>
+                                    <TextBlock Text="{Binding Uuid}" FontSize="11" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding Converter={StaticResource AccountLoginStatusConverter}}" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                            <Button Grid.Column="1" Content="{DynamicResource Str_Ui_Use}" Style="{StaticResource PrimaryButton}" Margin="0,0,6,0"
+                                    VerticalAlignment="Center" Tag="{Binding}" Click="SelectAccount_Click"/>
+                            <Button Grid.Column="2" Content="⋯" Padding="10,5" VerticalAlignment="Center" Tag="{Binding}"
+                                    ToolTip="账户操作" Click="AccountActions_Click">
+                                <Button.ContextMenu>
+                                    <ContextMenu DataContext="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource Self}}">
+                                        <MenuItem Header="3D 纸娃娃" Tag="{Binding}" Click="SkinModel_Click"/>
+                                        <MenuItem Header="{DynamicResource Str_Ui_Skin}" Tag="{Binding}" Click="Skin_Click"
+                                                  Visibility="{Binding Type, Converter={StaticResource AccountTypeToOfflineVisibilityConverter}}"/>
+                                        <Separator/>
+                                        <MenuItem Header="导入头像照片…" Tag="{Binding}" Click="ImportAvatarPhoto_Click"/>
+                                        <MenuItem Header="清除头像照片" Tag="{Binding}" Click="ClearAvatarPhoto_Click"/>
+                                        <MenuItem Header="复制 UUID" Tag="{Binding}" Click="CopyUuid_Click"/>
+                                        <MenuItem Header="账户页面" Tag="{Binding}" Click="OpenAccountPortal_Click"
+                                                  Visibility="{Binding Type, Converter={StaticResource AccountTypeToNonOfflineVisibilityConverter}}"/>
+                                        <Separator/>
+                                        <MenuItem Header="{DynamicResource Str_Common_Delete}" Tag="{Binding}" Click="RemoveAccount_Click"/>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+        </ScrollViewer>
+    </Border>
+</UserControl>

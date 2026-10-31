@@ -1,0 +1,1960 @@
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using Microsoft.Win32;
+using XCL2.App.Models;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+/// <summary>
+/// 服务端管理页：目前实现了"核心下载"（Vanilla/Paper/Fabric 直接下载，Forge/NeoForge
+/// 下载安装器 + 本地运行安装）、"服务器列表"、"资源包下载"（复用 DownloadCenterPage 同一套
+/// Modrinth/CurseForge 搜索+下载逻辑，目标目录换成选中的服务器实例）。"插件下载"仍先占位，
+/// 待后续实现。
+/// </summary>
+public partial class ServerManagerPage : UserControl
+{
+    private readonly MainWindow _owner;
+    private readonly ServerCoreDownloadService _coreService = new();
+    private readonly JavaService _javaService = new();
+
+    private ServerCoreType _selectedCoreType = ServerCoreType.Vanilla;
+    private readonly ObservableCollection<string> _mcVersions = new();
+    private readonly ObservableCollection<ServerCoreBuild> _buildVersions = new();
+
+    // 旧版支持“下载后手动运行安装器/BuildTools”，新版改为下载队列自动完成整条流水线。
+    // 两套能力都保留：默认自动执行；自动执行失败后把下载产物留在这里，允许用户修复 Java/Git/网络后手动重试。
+    private ServerCoreDownloadResult? _pendingInstallResult;
+    private string? _pendingInstallTargetDir;
+    private string? _pendingInstallMcVersion;
+    private ServerCoreType _pendingInstallCoreType;
+
+    // ===== 资源包下载面板：与 DownloadCenterPage 的材质包分类共用 ModrinthService/CurseForgeService/
+    // ModSearchService（这几个服务类本身不跟 .minecraft 目录绑定，创建成本也很低，没必要要求
+    // MainWindow 注入同一个实例；跟 DownloadCenterPage 保持各自独立一份是该项目里已有的模式，
+    // 比如 CurseForgeMapPickerDialog/ModManagerPage 也都是各自 new 一份）。
+    private readonly ModrinthService _resourceModrinth = new();
+    private readonly CurseForgeKeyService _resourceCurseForgeKeyService = new();
+    private CurseForgeService? _resourceCurseForge;
+    private ModSearchService? _resourceModSearch;
+    private readonly ObservableCollection<UnifiedResourceItem> _serverResources = new();
+    private ModSource _serverResourceSource = ModSource.Combined;
+    
+
+    private ModrinthResourceType _serverResourceType = ModrinthResourceType.Plugin;
+    private DispatcherTimer? _serverResourceDebounceTimer;
+    private Action? _pendingServerResourceDebouncedAction;
+    private int _serverResourceSearchSeq;
+    private bool _serverResourcePanelLoaded;
+    private int _instanceRefreshGeneration;
+    private CancellationTokenSource? _instanceRefreshCancellation;
+    private bool _instanceRefreshNeeded = true;
+    private int _mcVersionRequest;
+    private int _buildVersionRequest;
+
+    /// <summary>
+    /// 是否已经跑完构造函数里的 InitializeComponent()。
+    ///
+    /// 崩溃根因：与 DownloadCenterPage 完全相同的时序问题——XAML 里左侧分类栏默认选中的
+    /// RadioButton 会在 InitializeComponent() 解析阶段同步触发 Checked 事件，但此时
+    /// CorePanel/InstancesPanel/ServerResourcePanel 等自动生成字段还没赋值，
+    /// Category_Checked 一读就是 NullReferenceException。用同一套 _initialized 短路方案。
+    /// </summary>
+    private bool _initialized;
+    private string _serverListFilter = "all";
+    private IInputElement? _detailReturnFocus;
+
+    public ServerManagerPage(MainWindow owner)
+    {
+        _owner = owner;
+        InitializeComponent();
+        KeyDown += (_, e) =>
+        {
+            if (e.Handled || e.Key != Key.Escape || Keyboard.Modifiers != ModifierKeys.None
+                || DetailHost.Visibility != Visibility.Visible) return;
+            HideServerResourceDetail();
+            e.Handled = true;
+        };
+
+        McVersionCombo.ItemsSource = _mcVersions;
+        BuildVersionCombo.ItemsSource = _buildVersions;
+        BuildVersionCombo.DisplayMemberPath = nameof(ServerCoreBuild.DisplayVersion);
+
+        TargetDirBox.Text = System.IO.Path.Combine(App.DataDir, "servers");
+
+        ServerResourceListBox.ItemsSource = _serverResources;
+        _serverResourceDebounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _serverResourceDebounceTimer.Tick += (_, _) =>
+        {
+            _serverResourceDebounceTimer.Stop();
+            var action = _pendingServerResourceDebouncedAction;
+            _pendingServerResourceDebouncedAction = null;
+            action?.Invoke();
+        };
+
+        // 后台下载任务（创建服务器/核心下载）完成后会登记新实例，列表需要自动刷新。
+        Loaded += (_, _) =>
+        {
+            _owner.ServerInstanceService.InstanceAdded += OnInstanceAddedByBackgroundTask;
+            PresentationPreferencesService.Changed += OnAddressDisplayChanged;
+            ResumeInstanceRefresh();
+        };
+        InstancesPanel.IsVisibleChanged += (_, e) =>
+        {
+            if ((bool)e.NewValue) ResumeInstanceRefresh();
+            else CancelInstanceRefresh();
+        };
+        Unloaded += (_, _) =>
+        {
+            _owner.ServerInstanceService.InstanceAdded -= OnInstanceAddedByBackgroundTask;
+            PresentationPreferencesService.Changed -= OnAddressDisplayChanged;
+            CancelInstanceRefresh();
+            _instanceRefreshNeeded = true;
+            _serverResourceDebounceTimer?.Stop();
+        };
+
+        _initialized = true;
+        Category_Checked(CatHome, new RoutedEventArgs()); // 补上初始化阶段被跳过的那次面板显隐
+
+        _ = LoadMcVersionsAsync();
+    }
+
+    private void ServerListMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button anchor) return;
+        var cfg = _owner.ConfigService.Config;
+        cfg.FavoriteServerIds ??= new(); cfg.RecentServerIds ??= new();
+        var menu = new ContextMenu { PlacementTarget = anchor };
+        foreach (var (key, text) in new[] { ("all", "所有服务器"), ("favorites", "已收藏"), ("recent", "最近启动") })
+        {
+            var item = new MenuItem { Header = text, IsCheckable = true, IsChecked = _serverListFilter == key };
+            item.Click += (_, _) => { _serverListFilter = key; RefreshInstanceList(); };
+            menu.Items.Add(item);
+        }
+        menu.Items.Add(new Separator());
+        var history = new MenuItem { Header = "记录最近启动的服务器", IsCheckable = true, IsChecked = cfg.EnableRecentServerHistory };
+        history.Click += (_, _) =>
+        {
+            cfg.EnableRecentServerHistory = history.IsChecked;
+            if (!history.IsChecked) cfg.RecentServerIds.Clear();
+            _owner.ConfigService.Save(); RefreshInstanceList();
+        };
+        menu.Items.Add(history);
+        var clear = new MenuItem { Header = "清空服务器启动记录", IsEnabled = cfg.RecentServerIds.Count > 0 };
+        clear.Click += (_, _) => { cfg.RecentServerIds.Clear(); _owner.ConfigService.Save(); RefreshInstanceList(); }; menu.Items.Add(clear);
+        menu.Items.Add(new Separator());
+        var guide = new MenuItem { Header = "如何联机 / 端口转发教程…" }; guide.Click += OpenNetworkGuide_Click; menu.Items.Add(guide);
+        menu.IsOpen = true;
+    }
+
+    private void OnAddressDisplayChanged()
+    {
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _instanceRefreshNeeded = true;
+            if (IsLoaded && InstancesPanel.IsVisible) RefreshInstanceList();
+        }));
+    }
+
+    private void OnInstanceAddedByBackgroundTask() => _ = Dispatcher.BeginInvoke(new Action(RefreshInstanceList));
+
+    private void Category_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return; // InitializeComponent() 过程中触发的事件：控件树还没解析完，直接跳过
+        if (sender is not RadioButton rb) return;
+        DetailHost.Visibility = Visibility.Collapsed;
+        DetailHost.Content = null;
+        _detailReturnFocus = null;
+        foreach (var panel in ListPanelsHost.Children.OfType<FrameworkElement>())
+            PageTransitionBehavior.SetTransitionDirection(panel, 1);
+        var tag = rb.Tag as string;
+        if (tag == "instances") _instanceRefreshNeeded = true;
+        else CancelInstanceRefresh();
+
+        HomePanel.Visibility = tag == "home" ? Visibility.Visible : Visibility.Collapsed;
+        CorePanel.Visibility = tag == "core" ? Visibility.Visible : Visibility.Collapsed;
+        InstancesPanel.Visibility = tag == "instances" ? Visibility.Visible : Visibility.Collapsed;
+        // "插件下载"和"资源包"现在共用同一个 ServerResourcePanel（内部靠 SrvRes* 单选按钮切换
+        // 具体资源类型），不再是两个分开的入口/占位符。左侧点"插件下载"时把面板内的类型选择器
+        // 也同步切到"插件"，点"资源包"时切到"资源包"，避免出现"点插件却看到材质包"的错觉。
+        ServerResourcePanel.Visibility = tag is "plugins" or "resourcepack" ? Visibility.Visible : Visibility.Collapsed;
+        ListPanelsHost.Visibility = Visibility.Visible;
+
+        if (tag == "instances") ResumeInstanceRefresh();
+        if (tag == "plugins")
+        {
+            InitServerResourcePanel();
+            if (SrvResPlugin.IsChecked != true) SrvResPlugin.IsChecked = true;
+            else RefreshServerResourceTitle();
+        }
+        else if (tag == "resourcepack")
+        {
+            InitServerResourcePanel();
+            if (SrvResResourcePack.IsChecked != true) SrvResResourcePack.IsChecked = true;
+            else RefreshServerResourceTitle();
+        }
+    }
+
+    private async void CoreType_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return; // 同上：避免 InitializeComponent() 解析阶段的默认选中触发未初始化字段访问
+        if (sender is not RadioButton rb || rb.Tag is not string tag) return;
+        if (!Enum.TryParse<ServerCoreType>(tag, out var coreType)) return;
+        _selectedCoreType = coreType;
+
+        // Vanilla 没有单独的"构建版本"概念，隐藏该栏；Spigot 走 BuildTools 本地编译同样没有
+        // build 号概念（只需要选 MC 版本），也隐藏；其余类型显示对应标签
+        BuildVersionPanel.Visibility = coreType is ServerCoreType.Vanilla or ServerCoreType.Spigot
+            ? Visibility.Collapsed : Visibility.Visible;
+        BuildVersionLabel.Text = coreType switch
+        {
+            ServerCoreType.Paper => "Build 号",
+            ServerCoreType.Fabric => "Loader 版本",
+            ServerCoreType.Forge => "安装器版本",
+            ServerCoreType.NeoForge => "版本号",
+            ServerCoreType.Purpur => "Build 号",
+            ServerCoreType.Folia => "Build 号",
+            ServerCoreType.Velocity => "Build 号",
+            ServerCoreType.Waterfall => "Build 号",
+            _ => "构建版本"
+        };
+
+        await LoadMcVersionsAsync();
+    }
+
+    private async Task LoadMcVersionsAsync()
+    {
+        var request = ++_mcVersionRequest;
+        ++_buildVersionRequest;
+        var coreType = _selectedCoreType;
+        _mcVersions.Clear();
+        _buildVersions.Clear();
+        McVersionCombo.IsEnabled = false;
+        DownloadCoreBtn.IsEnabled = false;
+
+        try
+        {
+            List<string> versions = coreType switch
+            {
+                ServerCoreType.Vanilla => await _coreService.GetVanillaVersionsAsync(includeSnapshots: false),
+                ServerCoreType.Paper => await _coreService.GetPaperVersionsAsync(),
+                ServerCoreType.Fabric => await _coreService.GetFabricMcVersionsAsync(),
+                ServerCoreType.Forge => await _coreService.GetForgeVersionsAsync(),
+                ServerCoreType.NeoForge => await LoadNeoForgeMcVersionPlaceholderAsync(),
+                ServerCoreType.Purpur => await _coreService.GetPurpurVersionsAsync(),
+                ServerCoreType.Folia => await _coreService.GetFoliaVersionsAsync(),
+                ServerCoreType.Velocity => await _coreService.GetVelocityVersionsAsync(),
+                ServerCoreType.Waterfall => await _coreService.GetWaterfallVersionsAsync(),
+                ServerCoreType.Spigot => await _coreService.GetVanillaVersionsAsync(includeSnapshots: false),
+                _ => new List<string>()
+            };
+
+            if (request != _mcVersionRequest || coreType != _selectedCoreType) return;
+            // 快速切换核心时只接收最后一次请求，避免旧列表返回导致第二次布局和闪动。
+            foreach (var v in versions) _mcVersions.Add(v);
+
+            if (_mcVersions.Count > 0) McVersionCombo.SelectedIndex = 0;
+        }
+        catch (Exception ex)
+        {
+            if (request != _mcVersionRequest) return;
+            ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Couldn_T_Fetch_The_Version_List_This_Is_", "获取版本列表失败，可能是网络连接问题或下载源暂时不可用，请检查网络后重试。"), $"[获取版本列表失败] {ex}", "获取版本列表失败");
+        }
+        finally
+        {
+            if (request == _mcVersionRequest)
+            {
+                McVersionCombo.IsEnabled = true;
+                DownloadCoreBtn.IsEnabled = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// NeoForge 的版本号是独立编号（如 21.1.100），不是直接的 MC 版本号；
+    /// 这里直接把 NeoForge 版本号本身列出来供用户选择，"MC 版本"栏对 NeoForge 而言
+    /// 实际展示的就是完整 NeoForge 版本号，下载时二者取值相同。
+    /// 后续如果要做"输入 MC 版本反查 NeoForge 版本"的映射，需要额外解析 NeoForge 版本号的命名约定，
+    /// 当前先用该更简单但完全可用的方式实现。
+    /// </summary>
+    private async Task<List<string>> LoadNeoForgeMcVersionPlaceholderAsync()
+        => await _coreService.GetNeoForgeVersionsAsync();
+
+    private async void McVersionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var request = ++_buildVersionRequest;
+        var coreType = _selectedCoreType;
+        _buildVersions.Clear();
+        if (McVersionCombo.SelectedItem is not string mcVersion) return;
+        if (_selectedCoreType == ServerCoreType.Vanilla) return;
+        if (_selectedCoreType == ServerCoreType.NeoForge) return; // NeoForge 的"版本"栏就是完整版本号，无需二级选择
+        if (_selectedCoreType == ServerCoreType.Spigot) return; // Spigot 走本地编译，没有 build 号可选
+
+        try
+        {
+            List<ServerCoreBuild> builds = coreType switch
+            {
+                ServerCoreType.Paper => await _coreService.GetPaperBuildsAsync(mcVersion),
+                ServerCoreType.Fabric => await _coreService.GetFabricLoaderVersionsAsync(),
+                ServerCoreType.Forge => await _coreService.GetForgeInstallerVersionsAsync(mcVersion),
+                ServerCoreType.Purpur => await _coreService.GetPurpurBuildsAsync(mcVersion),
+                ServerCoreType.Folia => await _coreService.GetFoliaBuildsAsync(mcVersion),
+                ServerCoreType.Velocity => await _coreService.GetVelocityBuildsAsync(mcVersion),
+                ServerCoreType.Waterfall => await _coreService.GetWaterfallBuildsAsync(mcVersion),
+                _ => new List<ServerCoreBuild>()
+            };
+
+            if (request != _buildVersionRequest || coreType != _selectedCoreType ||
+                !string.Equals(McVersionCombo.SelectedItem as string, mcVersion, StringComparison.Ordinal)) return;
+            foreach (var b in builds) _buildVersions.Add(b);
+
+            var recommended = builds.FirstOrDefault(b => b.IsRecommended);
+            BuildVersionCombo.SelectedItem = recommended ?? builds.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            if (request != _buildVersionRequest) return;
+            ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Couldn_T_Fetch_The_Build_List_This_Is_Us", "获取构建版本列表失败，可能是网络连接问题或下载源暂时不可用，请检查网络后重试。"), $"[获取构建版本列表失败] {ex}", "获取构建版本列表失败");
+        }
+    }
+
+    private void BrowseTargetDir_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择服务端安装位置" };
+        if (System.IO.Directory.Exists(TargetDirBox.Text)) dialog.InitialDirectory = TargetDirBox.Text;
+        if (dialog.ShowDialog() == true)
+            TargetDirBox.Text = dialog.FolderName;
+    }
+
+    private void DownloadCore_Click(object sender, RoutedEventArgs e)
+    {
+        if (McVersionCombo.SelectedItem is not string mcVersion)
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Please_Choose_A_Minecraft_Version_First", "请先选择 Minecraft 版本。"));
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(TargetDirBox.Text))
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Please_Choose_An_Install_Location_First", "请先选择安装位置。"));
+            return;
+        }
+
+        // 目标目录已存在且非空时提醒一下，避免用户没意识到会往一个已有文件夹里混入服务端文件
+        if (System.IO.Directory.Exists(TargetDirBox.Text) &&
+            System.IO.Directory.EnumerateFileSystemEntries(TargetDirBox.Text).Any())
+        {
+            var confirm = MessageBoxDialog.ShowConfirm(
+                $"目标目录「{TargetDirBox.Text}」不是空目录，服务端文件会下载到该目录下。确定继续吗？",
+                "确认");
+            if (!confirm) return;
+        }
+
+        var buildVersion = (BuildVersionCombo.SelectedItem as ServerCoreBuild)?.DisplayVersion;
+
+        var req = new ServerCoreDownloadRequest
+        {
+            CoreType = _selectedCoreType,
+            McVersion = mcVersion,
+            TargetDir = TargetDirBox.Text
+        };
+
+        // Forge 的"构建版本"下拉框里存的就是完整安装器版本号（mcVer-forgeVer），
+        // NeoForge 则直接用选中的 McVersion 本身（见 LoadNeoForgeMcVersionPlaceholderAsync 的说明）
+        if (_selectedCoreType == ServerCoreType.Forge) req.InstallerVersion = buildVersion;
+        else if (_selectedCoreType == ServerCoreType.NeoForge) req.InstallerVersion = mcVersion;
+        else req.BuildOrLoaderVersion = buildVersion;
+
+        // 下载 → (需要时)编译/运行安装器 → 登记服务器实例，整条流水线作为一个任务放进统一下载队列
+        // （标题栏右上角的下载抽屉），不再占用本页的进度条，也不再需要用户在中途再点一次"安装/编译"按钮。
+        var coreType = _selectedCoreType;
+        var queueName = $"服务端核心 {coreType} {mcVersion}";
+        if (DownloadQueueService.Instance.Items.Any(i => i.Name == queueName &&
+                (i.IsRunning || i.IsCleaningUp || i.Status is DownloadQueueItemStatus.Paused or DownloadQueueItemStatus.Waiting)))
+        {
+            MessageBoxDialog.ShowInfo("该核心已经在下载列表中了，请等它完成。");
+            return;
+        }
+
+        DownloadQueueService.Instance.StartNew(queueName, async (item, ct) =>
+        {
+            var progress = item.CreateProgress();
+            var textProgress = item.CreateTextProgress();
+
+            var result = await _coreService.DownloadAsync(req, progress, ct);
+
+            string launchTarget;
+            bool launchTargetIsScript = false;
+            string? javaPath = null;
+
+            if (result.RequiresBuild || result.RequiresInstall)
+            {
+                try
+                {
+                    var cfgService = _owner.ConfigService;
+                    javaPath = _javaService.FindJava(cfgService.Config.JavaPath, result.RequiredJavaMajorVersion, cfgService)
+                        ?? _javaService.FindJava(cfgService.Config.JavaPath, cfgService.Config.PreferredJavaMajorVersion, cfgService);
+                    if (javaPath == null)
+                        throw new InvalidOperationException("没有找到可用的 Java，无法运行安装器。请先在「设置」页配置或下载 Java 后再试。");
+
+                    string resultPath;
+                    if (result.RequiresBuild)
+                    {
+                        item.StatusText = Loc.T("Str_Cs_Building_Spigot_With_Buildtools", "正在用 BuildTools 编译 Spigot");
+                        resultPath = await _coreService.RunSpigotBuildToolsAsync(
+                            result.DownloadedFilePath, req.TargetDir, javaPath, mcVersion, textProgress, ct);
+                    }
+                    else
+                    {
+                        item.StatusText = Loc.T("Str_Cs_Running_The_Installer", "正在运行安装器");
+                        resultPath = await _coreService.RunForgeInstallerAsync(
+                            result.DownloadedFilePath, req.TargetDir, javaPath, textProgress, ct);
+                    }
+
+                    launchTarget = Path.GetFileName(resultPath);
+                    launchTargetIsScript = File.Exists(resultPath) &&
+                        (resultPath.EndsWith("run.bat", StringComparison.OrdinalIgnoreCase) ||
+                         resultPath.EndsWith("run.sh", StringComparison.OrdinalIgnoreCase));
+
+                    await _owner.Dispatcher.InvokeAsync(() =>
+                    {
+                        if (ReferenceEquals(_pendingInstallResult, result))
+                        {
+                            _pendingInstallResult = null;
+                            _pendingInstallTargetDir = null;
+                            _pendingInstallMcVersion = null;
+                            InstallRequiredPanel.Visibility = Visibility.Collapsed;
+                        }
+                    });
+                }
+                catch
+                {
+                    // 自动流水线失败时不丢弃已经下载好的 installer/BuildTools。
+                    // 把旧版的手动执行入口恢复成真正可用的“修复环境后重试”路径。
+                    await _owner.Dispatcher.InvokeAsync(() =>
+                    {
+                        _pendingInstallResult = result;
+                        _pendingInstallTargetDir = req.TargetDir;
+                        _pendingInstallMcVersion = mcVersion;
+                        _pendingInstallCoreType = coreType;
+                        InstallHintText.Text = result.RequiresBuild
+                            ? "BuildTools 已下载，但自动编译失败。请确认已安装 Git、Java 版本正确且网络可用，然后点击下方按钮重试。"
+                            : "安装器已下载，但自动安装失败。请确认 Java 版本正确且网络可用，然后点击下方按钮重试。";
+                        RunInstallerBtn.Content = result.RequiresBuild ? "重新编译 Spigot" : "重新运行安装器";
+                        InstallRequiredPanel.Visibility = Visibility.Visible;
+                    });
+                    throw;
+                }
+            }
+            else
+            {
+                launchTarget = result.ServerJarFileName ?? "server.jar";
+            }
+
+            item.ProgressPercent = 100;
+
+            await _owner.Dispatcher.InvokeAsync(() =>
+            {
+                var registered = RegisterDownloadedInstance(req.TargetDir, coreType, mcVersion,
+                    launchTarget, launchTargetIsScript, result.RequiredJavaMajorVersion, javaPath);
+                var fullDir = Path.GetFullPath(req.TargetDir);
+                var instance = _owner.ServerInstanceService.Instances.FirstOrDefault(i =>
+                    string.Equals(Path.GetFullPath(i.Directory), fullDir, StringComparison.OrdinalIgnoreCase));
+                if (registered && instance != null)
+                    ServerPostInstallPrompt.AskConfigurePort(_owner, instance, "服务端核心已安装完成，并已添加到「服务器列表」。");
+                else
+                {
+                    _owner.EnsureVisibleForDialog();
+                    MessageBoxDialog.ShowSuccess($"服务端核心已安装完成：\n{req.TargetDir}\n\n（未能自动添加到服务器列表，可以在「创建服务器」里手动指向该目录。）");
+                }
+            });
+        }, supportsPause: false);
+    }
+
+    /// <summary>
+    /// 手动重试旧版安装器/BuildTools 流程。新版仍优先走下载队列自动安装；
+    /// 只有自动流程失败并保留了下载产物时，此入口才会出现。
+    /// </summary>
+    private async void RunInstaller_Click(object sender, RoutedEventArgs e)
+    {
+        var result = _pendingInstallResult;
+        var targetDir = _pendingInstallTargetDir;
+        var mcVersion = _pendingInstallMcVersion;
+        var coreType = _pendingInstallCoreType;
+        if (result == null || string.IsNullOrWhiteSpace(targetDir)) return;
+
+        var cfgService = _owner.ConfigService;
+        var javaPath = _javaService.FindJava(cfgService.Config.JavaPath, result.RequiredJavaMajorVersion, cfgService)
+            ?? _javaService.FindJava(cfgService.Config.JavaPath, cfgService.Config.PreferredJavaMajorVersion, cfgService);
+        if (javaPath == null)
+        {
+            MessageBoxDialog.ShowWarning(
+                "没有找到可用的 Java，无法运行安装器。请先在「设置」页配置或下载 Java 后再试。",
+                Loc.T("Str_Cs_Java_Missing", "缺少 Java"));
+            return;
+        }
+
+        RunInstallerBtn.IsEnabled = false;
+        ProgressPanel.Visibility = Visibility.Visible;
+        ProgressStageText.Text = result.RequiresBuild
+            ? Loc.T("Str_Cs_Building_Spigot_With_Buildtools", "正在用 BuildTools 编译 Spigot")
+            : Loc.T("Str_Cs_Running_The_Installer", "正在运行安装器");
+        ProgressDetailText.Text = result.RequiresBuild
+            ? "正在手动重试编译；首次编译可能需要几分钟。"
+            : "正在手动重试安装；首次安装可能需要下载额外库文件。";
+        ProgressBarCtl.IsIndeterminate = true;
+        var progress = new Progress<string>(line => ProgressDetailText.Text = line);
+
+        try
+        {
+            string resultPath;
+            if (result.RequiresBuild)
+            {
+                if (string.IsNullOrWhiteSpace(mcVersion))
+                    throw new InvalidOperationException("内部错误：缺少 Spigot 编译所需的 Minecraft 版本号。");
+                resultPath = await _coreService.RunSpigotBuildToolsAsync(
+                    result.DownloadedFilePath, targetDir, javaPath, mcVersion, progress);
+            }
+            else
+            {
+                resultPath = await _coreService.RunForgeInstallerAsync(
+                    result.DownloadedFilePath, targetDir, javaPath, progress);
+            }
+
+            string launchTarget;
+            bool launchTargetIsScript;
+            if (File.Exists(resultPath) &&
+                (resultPath.EndsWith("run.bat", StringComparison.OrdinalIgnoreCase) ||
+                 resultPath.EndsWith("run.sh", StringComparison.OrdinalIgnoreCase)))
+            {
+                launchTarget = Path.GetFileName(resultPath);
+                launchTargetIsScript = true;
+            }
+            else if (File.Exists(resultPath) && resultPath.EndsWith(".jar", StringComparison.OrdinalIgnoreCase))
+            {
+                launchTarget = Path.GetFileName(resultPath);
+                launchTargetIsScript = false;
+            }
+            else
+            {
+                var fallbackJar = Directory.Exists(targetDir)
+                    ? Directory.GetFiles(targetDir, "*.jar")
+                        .Select(Path.GetFileName)
+                        .FirstOrDefault(f => f != null && !f.Contains("installer", StringComparison.OrdinalIgnoreCase) &&
+                            !f.Equals(Path.GetFileName(result.DownloadedFilePath), StringComparison.OrdinalIgnoreCase))
+                    : null;
+                if (fallbackJar == null)
+                    throw new InvalidOperationException("安装/编译完成，但没有找到可识别的启动文件。请检查服务器目录。");
+                launchTarget = fallbackJar;
+                launchTargetIsScript = false;
+            }
+
+            var registered = RegisterDownloadedInstance(targetDir, coreType, mcVersion ?? "",
+                launchTarget, launchTargetIsScript, result.RequiredJavaMajorVersion, javaPath);
+            var fullDir = Path.GetFullPath(targetDir);
+            var instance = _owner.ServerInstanceService.Instances.FirstOrDefault(i =>
+                string.Equals(Path.GetFullPath(i.Directory), fullDir, StringComparison.OrdinalIgnoreCase));
+
+            _pendingInstallResult = null;
+            _pendingInstallTargetDir = null;
+            _pendingInstallMcVersion = null;
+            InstallRequiredPanel.Visibility = Visibility.Collapsed;
+
+            if (registered && instance != null)
+                ServerPostInstallPrompt.AskConfigurePort(_owner, instance, "手动重试成功，服务端已安装并添加到「服务器列表」。");
+            else
+                MessageBoxDialog.ShowSuccess($"安装/编译完成：\n{targetDir}\n\n生成文件：{resultPath}");
+        }
+        catch (Exception ex)
+        {
+            var isBuild = result.RequiresBuild;
+            ErrorPresenter.ShowFriendlyError(
+                isBuild
+                    ? "编译失败，可能是网络连接问题、缺少 Git，或该 Minecraft 版本 BuildTools 不再支持，请检查后重试。"
+                    : "安装失败，可能是网络连接问题、Java 不匹配、下载源暂时不可用，或安装文件已损坏，请检查后重试。",
+                $"[{(isBuild ? Loc.T("Str_Cs_Build", "编译") : Loc.T("Str_Common_Install", "安装"))}失败] {ex}",
+                isBuild ? "编译失败" : "安装失败");
+        }
+        finally
+        {
+            RunInstallerBtn.IsEnabled = true;
+            ProgressPanel.Visibility = Visibility.Collapsed;
+            ProgressBarCtl.IsIndeterminate = false;
+        }
+    }
+
+    private bool RegisterDownloadedInstance(string targetDir, ServerCoreType coreType, string mcVersion,
+        string launchTarget, bool isScript, int requiredJavaMajorVersion, string? javaPath = null)
+    {
+        try
+        {
+            var fullDir = Path.GetFullPath(targetDir);
+
+            var existing = _owner.ServerInstanceService.Instances.FirstOrDefault(i =>
+                string.Equals(Path.GetFullPath(i.Directory), fullDir, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null)
+            {
+                existing.CoreType = coreType;
+                existing.McVersion = mcVersion;
+                existing.LaunchTarget = launchTarget;
+                existing.LaunchTargetIsScript = isScript;
+                existing.RequiredJavaMajorVersion = requiredJavaMajorVersion;
+                if (!string.IsNullOrEmpty(javaPath)) existing.JavaPath = javaPath;
+                _owner.ServerInstanceService.Update(existing);
+                RefreshInstanceList();
+                return true;
+            }
+
+            var resolvedJavaPath = javaPath
+                ?? _javaService.FindJava(_owner.ConfigService.Config.JavaPath, requiredJavaMajorVersion, _owner.ConfigService);
+
+            var displayName = Path.GetFileName(fullDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(displayName)) displayName = $"{coreType} {mcVersion}";
+
+            // 名称冲突时加序号，跟服务器列表其它地方对重名的处理方式保持一致
+            var baseName = displayName;
+            var suffix = 1;
+            while (_owner.ServerInstanceService.Instances.Any(i => i.DisplayName == displayName))
+            {
+                suffix++;
+                displayName = $"{baseName} ({suffix})";
+            }
+
+            var instance = new ServerInstance
+            {
+                DisplayName = displayName,
+                Directory = fullDir,
+                CoreType = coreType,
+                McVersion = mcVersion,
+                LaunchTarget = launchTarget,
+                LaunchTargetIsScript = isScript,
+                JavaPath = resolvedJavaPath,
+                RequiredJavaMajorVersion = requiredJavaMajorVersion
+            };
+
+            _owner.ServerInstanceService.Add(instance);
+            RefreshInstanceList();
+            return true;
+        }
+        catch
+        {
+            // 登记失败不应该掩盖"下载/安装已经成功"该事实——调用方会在提示文案里说明
+            // "未能自动添加到服务器列表，可以手动创建"，用户手头的服务端文件本身没有任何损失。
+            return false;
+        }
+    }
+
+    // ============================================================
+    // 首页磁贴：四个入口分别对应"傻瓜式开服/启动所选/插件资源包/服务器参数"
+    // ============================================================
+
+    /// <summary>
+    /// "启动所选的服务器"和"设置选中的服务器参数"这两个磁贴需要先确定"选中的服务器"是哪一个，
+    /// 但首页本身没有单独的服务器选择控件（不想在磁贴上再叠一层下拉框，违背"磁贴=一步到位"
+    /// 的设计初衷）。这里用同一套"默认服务器优先，没设默认就用列表第一个"规则：
+    /// - 用户在服务器列表页右键某个实例"设为默认服务器"过，这里就精确对应那一个；
+    /// - 完全没设置过默认时，回退成"服务器列表"面板里最上面那个（Instances 列表第一项），
+    /// 这样只有一台服务器的最常见场景不需要额外操作，直接就是它。
+    /// 列表为空（还没创建过任何服务器）时返回 null，调用方据此提示用户先去"傻瓜式开服"。
+    /// </summary>
+    private ServerInstance? GetPreferredInstance()
+    {
+        var instances = _owner.ServerInstanceService.Instances;
+        if (instances.Count == 0) return null;
+        return instances.FirstOrDefault(i => i.IsDefault) ?? instances[0];
+    }
+
+    /// <summary>
+    /// "傻瓜式开服"：直接复用"创建服务器"向导——它本身就是"选核心类型/MC版本 -> 自动下载
+    /// -> 需要时自动装安装器/编译 -> 自动匹配 Java -> 登记成服务器实例"一整条不需要用户
+    /// 理解任何底层细节的流程，不需要为首页再单独做一套简化版。
+    /// </summary>
+    private void TileEasySetup_Click(object sender, RoutedEventArgs e)
+    {
+        CreateServer_Click(sender, e);
+    }
+
+    /// <summary>
+    /// "启动所选的服务器"：目标实例正在运行时不重复启动（避免用户连点两次导致端口冲突之类的
+    /// 报错），改为直接打开它的控制台窗口，跟点服务器列表卡片上"打开控制台"的效果一致。
+    /// </summary>
+    private void TileStartSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var instance = GetPreferredInstance();
+        if (instance == null)
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_You_Don_T_Have_Any_Servers_Yet_Use_The_G", "还没有任何服务器，请先用「傻瓜式开服」创建一个。"));
+            return;
+        }
+
+        if (_owner.ServerProcessManager.IsRunning(instance.Id))
+        {
+            OpenConsole(instance);
+            return;
+        }
+
+        StartInstance(instance);
+    }
+
+    /// <summary>
+    /// "插件、资源包管理"：跳到左侧"插件下载"分类。插件和资源包本来就共用同一个
+    /// ServerResourcePanel（内部用 SrvRes* 单选按钮切类型），选中"插件下载"该分类
+    /// 就已经能在同一个面板里切到资源包，不需要在首页额外做"插件"和"资源包"两个磁贴。
+    /// </summary>
+    private void TilePluginResource_Click(object sender, RoutedEventArgs e)
+    {
+        CatPlugins.IsChecked = true;
+    }
+
+    /// <summary>
+    /// "设置选中的服务器参数"：对 GetPreferredInstance() 选出的目标实例打开
+    /// ServerPropertiesWindow，跟服务器列表卡片上"服务器设置"菜单项调用的是同一个方法。
+    /// </summary>
+    private void TileServerSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var instance = GetPreferredInstance();
+        if (instance == null)
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_You_Don_T_Have_Any_Servers_Yet_Use_The_G", "还没有任何服务器，请先用「傻瓜式开服」创建一个。"));
+            return;
+        }
+
+        OpenServerProperties(instance);
+    }
+
+    private sealed record InstanceCardData(ServerInstance Instance, int Port, string ConnectionText, ImageSource? Icon);
+
+    private void CancelInstanceRefresh()
+    {
+        ++_instanceRefreshGeneration;
+        _instanceRefreshCancellation?.Cancel();
+        _instanceRefreshCancellation = null;
+    }
+
+    private void ResumeInstanceRefresh()
+    {
+        // 托盘隐藏或卸载会取消未完成的读取；重新可见时只恢复那次待加载任务。
+        // IsVisibleChanged 与 Category_Checked/Loaded 可能在同一次调用栈触发，
+        // 已有 CTS 时不再重复启动，完成后的列表也无需因窗口显示而重新读取。
+        if (_initialized && IsLoaded && InstancesPanel.IsVisible && _instanceRefreshNeeded &&
+            _instanceRefreshCancellation == null)
+            RefreshInstanceList();
+    }
+
+    private async void RefreshInstanceList()
+    {
+        _instanceRefreshNeeded = true;
+        if (!IsLoaded || !InstancesPanel.IsVisible) return;
+        CancelInstanceRefresh();
+        var generation = _instanceRefreshGeneration;
+        var cancellation = new CancellationTokenSource();
+        _instanceRefreshCancellation = cancellation;
+        var token = cancellation.Token;
+        var config = _owner.ConfigService.Config;
+        config.FavoriteServerIds ??= new(); config.RecentServerIds ??= new();
+        var allInstances = _owner.ServerInstanceService.Instances.ToArray();
+        var instances = (_serverListFilter == "favorites" ? allInstances.Where(i => config.FavoriteServerIds.Contains(i.Id))
+            : _serverListFilter == "recent" ? allInstances.Where(i => config.EnableRecentServerHistory && config.RecentServerIds.Contains(i.Id))
+                .OrderBy(i => config.RecentServerIds.IndexOf(i.Id)) : allInstances.AsEnumerable()).ToArray();
+        ServerListMenuButton.Content = _serverListFilter == "favorites" ? "已收藏 ▾" : _serverListFilter == "recent" ? "最近启动 ▾" : "筛选与更多 ▾";
+        UiAnimationHelper.Reset(InstanceListPanel);
+        InstanceListPanel.Children.Clear();
+
+        if (instances.Length == 0)
+        {
+            InstanceListPanel.Children.Add(new TextBlock
+            {
+                Text = allInstances.Length == 0 ? "还没有创建任何服务器，点击右上角「创建服务器」开始。"
+                    : _serverListFilter == "recent" && !config.EnableRecentServerHistory ? "最近启动记录默认关闭。可在「筛选与更多」菜单中开启，或切回所有服务器。"
+                    : "此筛选下没有服务器。可在卡片的更多菜单中收藏，或切回所有服务器。",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
+                Margin = new Thickness(0, 20, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center
+            });
+            _instanceRefreshNeeded = false;
+            _instanceRefreshCancellation = null;
+            cancellation.Dispose();
+            return;
+        }
+
+        InstanceListPanel.Children.Add(LoadingPlaceholderFactory.Create("正在读取服务器信息"));
+
+        // 文件读取、DNS 和图片解码原来在每张卡片的 UI 构造中同步执行。
+        // 后台只读取快照/生成冻结的图像，WPF 控件始终留在 UI 线程创建。
+        var requests = instances.Select(instance => (
+            Instance: instance,
+            Snapshot: new ServerInstance
+            {
+                Directory = instance.Directory,
+                CoreType = instance.CoreType,
+                ServerPort = instance.ServerPort
+            },
+            IconPath: instance.IconPath,
+            RunningPort: _owner.ServerProcessManager.GetRunning(instance.Id)?.ServerPort)).ToArray();
+        try
+        {
+            var data = await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                var ip = ServerConnectionInfoService.GetLocalLanIPv4();
+                return requests.Select(request =>
+                {
+                    token.ThrowIfCancellationRequested();
+                    int port;
+                    try { port = request.RunningPort ?? ServerPortService.ReadPort(request.Snapshot); }
+                    catch { port = request.Snapshot.ServerPort ?? ServerPortService.DefaultPort; }
+                    BitmapImage? icon = null;
+                    if (!string.IsNullOrWhiteSpace(request.IconPath))
+                    {
+                        try
+                        {
+                            using var stream = File.OpenRead(request.IconPath);
+                            var bitmap = new BitmapImage();
+                            bitmap.BeginInit();
+                            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                            bitmap.DecodePixelWidth = 80;
+                            bitmap.StreamSource = stream;
+                            bitmap.EndInit();
+                            bitmap.Freeze();
+                            icon = bitmap;
+                        }
+                        catch { /* 图标损坏或已移除时使用原占位图标。 */ }
+                    }
+                    var address = ip != null ? $"{ip}:{port}" : $"localhost:{port}";
+                    return new InstanceCardData(request.Instance, port, address, icon);
+                }).ToArray();
+            }, token);
+
+            if (generation != _instanceRefreshGeneration || !IsLoaded || !InstancesPanel.IsVisible) return;
+            var cards = new List<Border>(data.Length);
+            foreach (var entry in data)
+            {
+                token.ThrowIfCancellationRequested();
+                entry.Instance.ServerPort = entry.Port;
+                cards.Add(BuildInstanceCard(entry));
+                // 大列表分批生成，给加载图标与用户输入留下调度机会。
+                if (cards.Count % 4 == 0)
+                    await System.Windows.Threading.Dispatcher.Yield(DispatcherPriority.Background);
+                if (generation != _instanceRefreshGeneration || !IsLoaded || !InstancesPanel.IsVisible) return;
+            }
+            var animate = !UiAnimationHelper.HasActivePageAncestor(InstanceListPanel);
+            if (animate) UiAnimationHelper.PrepareEntrance(InstanceListPanel);
+            InstanceListPanel.Children.Clear();
+            foreach (var card in cards) InstanceListPanel.Children.Add(card);
+            _instanceRefreshNeeded = false;
+            if (animate) UiAnimationHelper.StartPreparedEntrance(InstanceListPanel);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (generation != _instanceRefreshGeneration) return;
+            InstanceListPanel.Children.Clear();
+            InstanceListPanel.Children.Add(new TextBlock
+            {
+                Text = "服务器信息加载失败，请重新打开服务器列表。",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(12)
+            });
+            _instanceRefreshNeeded = false;
+            System.Diagnostics.Debug.WriteLine($"[服务器列表加载失败] {ex}");
+        }
+        finally
+        {
+            if (ReferenceEquals(_instanceRefreshCancellation, cancellation)) _instanceRefreshCancellation = null;
+            cancellation.Dispose();
+        }
+    }
+
+    private Border BuildInstanceCard(InstanceCardData data)
+    {
+        var instance = data.Instance;
+        var isRunning = _owner.ServerProcessManager.IsRunning(instance.Id);
+
+        var card = new Border
+        {
+            Background = (System.Windows.Media.Brush)FindResource("SideBrush"),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(16, 12, 16, 12),
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // 图标：有自定义图标就加载显示，否则用一个占位方块 + 首字符，保持卡片布局不因缺图标而错位。
+        var iconHost = new Border
+        {
+            Width = 40, Height = 40, CornerRadius = new CornerRadius(6),
+            Background = (System.Windows.Media.Brush)FindResource("GlowSoftBrush"),
+            Margin = new Thickness(0, 0, 12, 0), ClipToBounds = true
+        };
+        if (data.Icon != null)
+        {
+            iconHost.Child = new Image { Source = data.Icon, Stretch = Stretch.UniformToFill };
+        }
+        else
+        {
+            iconHost.Child = BuildIconPlaceholder(instance.DisplayName);
+        }
+        Grid.SetColumn(iconHost, 0);
+        grid.Children.Add(iconHost);
+
+        var infoPanel = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+        var titleLine = new Grid();
+        titleLine.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        titleLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        titleLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        titleLine.Children.Add(new TextBlock
+        {
+            Text = (_owner.ConfigService.Config.FavoriteServerIds?.Contains(instance.Id) == true ? "★ " : "") + instance.DisplayName,
+            ToolTip = instance.DisplayName, TextTrimming = TextTrimming.CharacterEllipsis,
+            FontSize = 15, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center
+        });
+        var statusBadge = new Border
+        {
+            Background = isRunning ? Brushes.SeaGreen : Brushes.Gray,
+            CornerRadius = new CornerRadius(4), Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(8, 0, 0, 0),
+            Child = new TextBlock { Text = isRunning ? "运行中" : "已停止", Foreground = Brushes.White, FontSize = 11 }
+        };
+        Grid.SetColumn(statusBadge, 1); titleLine.Children.Add(statusBadge);
+        if (instance.IsDefault)
+        {
+            var defaultBadge = new Border
+            {
+                Background = (Brush)FindResource("AccentBrush"), CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6, 1, 6, 1), Margin = new Thickness(6, 0, 0, 0),
+                Child = new TextBlock { Text = "默认", Foreground = Brushes.White, FontSize = 11 }
+            };
+            Grid.SetColumn(defaultBadge, 2); titleLine.Children.Add(defaultBadge);
+        }
+        infoPanel.Children.Add(titleLine);
+        infoPanel.Children.Add(new TextBlock
+        {
+            Text = $"{instance.CoreType} · MC {instance.McVersion} · 内存 {instance.MinMemoryMb}~{instance.MaxMemoryMb}MB" +
+                   (instance.CpuLimitPercent != null ? $" · CPU上限 {instance.CpuLimitPercent}%" : ""),
+            Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
+            FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis,
+            Margin = new Thickness(0, 4, 0, 0)
+        });
+
+        // 连接地址：修复"新增出来的服务器没有 IP 地址"——之前卡片完全不展示怎么连进该服务器，
+        // 这里读取 server.properties 的 server-port + 本机局域网 IP 拼出连接地址；
+        // 未运行时也照样展示（server.properties 在核心下载完成后就已经存在，不需要等服务器启动）。
+        var connectionText = data.ConnectionText;
+        var addressLine = new Grid { Margin = new Thickness(0, 4, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        addressLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto, MaxWidth = 420 });
+        addressLine.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        addressLine.Children.Add(new TextBlock
+        {
+            Text = "连接地址：" + PresentationPreferencesService.FormatServerAddress(connectionText, _owner.ConfigService.Config),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            Foreground = (System.Windows.Media.Brush)FindResource("TextSecondaryBrush"),
+            FontSize = 12
+        });
+        var copyAddrBtn = new Button
+        {
+            Content = "复制", Style = (Style)FindResource("SecondaryButton"),
+            Padding = new Thickness(8, 3, 8, 3), FontSize = 11, MinWidth = 54,
+            Margin = new Thickness(6, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center
+        };
+        var copyFeedbackVersion = 0;
+        copyAddrBtn.Click += async (_, _) =>
+        {
+            var feedback = ++copyFeedbackVersion;
+            try
+            {
+                Clipboard.SetText(ServerConnectionCopyService.AddressOnly(connectionText));
+                copyAddrBtn.Content = "已复制 ✓"; ToastService.ShowSuccess("连接地址已复制。");
+                await Task.Delay(1800);
+                if (feedback == copyFeedbackVersion) copyAddrBtn.Content = "复制";
+            }
+            catch { ToastService.ShowWarning("复制失败，请检查连接地址或稍后重试。"); }
+        };
+        var copyMenu = new ContextMenu();
+        var sensitiveCopy = new MenuItem { Header = "复制 RCON 连接信息（含密码）…" };
+        sensitiveCopy.Click += async (_, _) =>
+        {
+            if (await MessageBoxDialog.ShowConfirmAsync("RCON 连接信息含管理密码。复制后，其他能读取剪贴板的程序可能访问这些信息。确认复制？", "复制敏感连接信息", "复制") != true) return;
+            try
+            {
+                var text = await Task.Run(() => ServerConnectionCopyService.BuildRconConnection(instance.Directory, connectionText));
+                Clipboard.SetText(text);
+                ToastService.ShowSuccess("RCON 连接信息已复制，请勿公开分享。");
+            }
+            catch (Exception ex) { ToastService.ShowWarning(DiagnosticRedactionService.Sanitize(ex.Message, 1000)); }
+        };
+        copyMenu.Items.Add(sensitiveCopy);
+        copyAddrBtn.ContextMenu = copyMenu;
+        copyAddrBtn.ToolTip = "复制游戏连接地址；右键可选择复制 RCON 管理连接信息。";
+        Grid.SetColumn(copyAddrBtn, 1);
+        addressLine.Children.Add(copyAddrBtn);
+        infoPanel.Children.Add(addressLine);
+
+        Grid.SetColumn(infoPanel, 1);
+        grid.Children.Add(infoPanel);
+
+        var btnPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+
+        if (isRunning)
+        {
+            var consoleBtn = new Button { Content = "控制台", Style = (Style)FindResource("PrimaryButton"), Margin = new Thickness(0, 0, 6, 0) };
+            consoleBtn.Click += (_, _) => OpenConsole(instance);
+            btnPanel.Children.Add(consoleBtn);
+
+            var stopBtn = new Button
+            {
+                Content = "■ 停止", Style = (Style)FindResource("PrimaryButton"),
+                Background = System.Windows.Media.Brushes.IndianRed, Margin = new Thickness(0, 0, 6, 0)
+            };
+            stopBtn.Click += async (_, _) => await StopInstanceAsync(instance);
+            btnPanel.Children.Add(stopBtn);
+        }
+        else
+        {
+            var startBtn = new Button { Content = "▶ 启动", Style = (Style)FindResource("PrimaryButton"), Margin = new Thickness(0, 0, 6, 0) };
+            startBtn.Click += (_, _) => StartInstance(instance);
+            btnPanel.Children.Add(startBtn);
+
+            var deleteBtn = new Button
+            {
+                Content = "删除", Style = (Style)FindResource("PrimaryButton"),
+                Background = System.Windows.Media.Brushes.Gray, Margin = new Thickness(0, 0, 6, 0)
+            };
+            deleteBtn.Click += (_, _) => DeleteInstance(instance);
+            btnPanel.Children.Add(deleteBtn);
+        }
+
+        // "更多"按钮：承载导入导出/自定义图标/设为默认/重新覆盖安装这几个不常用的操作，
+        // 避免每张卡片挤上 6-7 个常驻按钮导致列表过宽、误触风险变高。
+        var moreBtn = new Button { Content = "⋯", Style = (Style)FindResource("PrimaryButton"), Background = System.Windows.Media.Brushes.Gray, Padding = new Thickness(10, 8, 10, 8) };
+        moreBtn.Click += (_, _) => ShowInstanceMoreMenu(moreBtn, instance);
+        btnPanel.Children.Add(moreBtn);
+
+        Grid.SetColumn(btnPanel, 2);
+        grid.Children.Add(btnPanel);
+
+        card.Child = grid;
+        return card;
+    }
+
+    private static Border BuildIconPlaceholder(string displayName)
+    {
+        var ch = string.IsNullOrEmpty(displayName) ? "?" : displayName.Substring(0, 1).ToUpperInvariant();
+        return new Border
+        {
+            Child = new TextBlock
+            {
+                Text = ch, FontSize = 16, FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+            }
+        };
+    }
+
+    /// <summary>
+    /// "更多"菜单：导入/导出/自定义图标/设为(取消)默认/重新覆盖安装。用 ContextMenu 而不是
+    /// 常驻按钮组，因为这几项都是低频操作，塞进主按钮行会让每张卡片的操作区过宽。
+    /// </summary>
+    private void ShowInstanceMoreMenu(Button anchor, ServerInstance instance)
+    {
+        var menu = new ContextMenu { PlacementTarget = anchor };
+        var config = _owner.ConfigService.Config;
+        config.FavoriteServerIds ??= new();
+        var favorite = new MenuItem { Header = config.FavoriteServerIds.Contains(instance.Id) ? "取消收藏" : "收藏服务器" };
+        favorite.Click += (_, _) =>
+        {
+            if (!config.FavoriteServerIds.Remove(instance.Id)) config.FavoriteServerIds.Add(instance.Id);
+            _owner.ConfigService.Save(); RefreshInstanceList();
+        };
+        menu.Items.Add(favorite); menu.Items.Add(new Separator());
+
+        // 修复"没有自定义服务器名称功能"：创建向导里虽然可以填初始名称，但创建完之后
+        // 没有任何地方能改名字——之前"更多"菜单只有导入/导出/图标/默认/重装这几项，缺重命名。
+        var renameItem = new MenuItem { Header = "重命名..." };
+        renameItem.Click += (_, _) => RenameInstance(instance);
+        menu.Items.Add(renameItem);
+
+        var exportItem = new MenuItem { Header = "导出存档..." };
+        exportItem.Click += (_, _) => ExportInstance(instance);
+        menu.Items.Add(exportItem);
+
+        var importItem = new MenuItem { Header = "导入存档 (覆盖此实例)..." };
+        importItem.Click += (_, _) => ImportInstance(instance);
+        menu.Items.Add(importItem);
+
+        var modpackItem = new MenuItem { Header = "安装整合包到此服务器..." };
+        modpackItem.Click += async (_, _) => await InstallModpackToServerAsync(instance);
+        menu.Items.Add(modpackItem);
+
+        menu.Items.Add(new Separator());
+
+        var iconItem = new MenuItem { Header = "设置自定义图标..." };
+        iconItem.Click += (_, _) => SetInstanceIcon(instance);
+        menu.Items.Add(iconItem);
+
+        if (!string.IsNullOrEmpty(instance.IconPath))
+        {
+            var clearIconItem = new MenuItem { Header = "清除自定义图标" };
+            clearIconItem.Click += (_, _) => ClearInstanceIcon(instance);
+            menu.Items.Add(clearIconItem);
+        }
+
+        menu.Items.Add(new Separator());
+
+        var defaultItem = new MenuItem { Header = instance.IsDefault ? "取消默认服务器" : "设为默认服务器" };
+        defaultItem.Click += (_, _) => ToggleDefaultInstance(instance);
+        menu.Items.Add(defaultItem);
+
+        menu.Items.Add(new Separator());
+
+        var propertiesItem = new MenuItem { Header = "服务器设置..." };
+        propertiesItem.Click += (_, _) => OpenServerProperties(instance);
+        menu.Items.Add(propertiesItem);
+
+        menu.Items.Add(new Separator());
+
+        var selectJavaItem = new MenuItem { Header = "选择 Java..." };
+        selectJavaItem.Click += (_, _) => SelectInstanceJava(instance);
+        menu.Items.Add(selectJavaItem);
+
+        var reinstallItem = new MenuItem { Header = "重新覆盖安装核心..." };
+        reinstallItem.Click += (_, _) => ReinstallInstanceCore(instance);
+        menu.Items.Add(reinstallItem);
+
+        menu.Items.Add(new Separator());
+
+        // "清除服务器数据"：跟卡片上的"删除"按钮不同，该会连同磁盘上的服务端文件夹
+        // 一起永久删除（世界存档/插件/配置/日志全部清掉），是这批操作里最具破坏性的一个，
+        // 单独放在最后一组、并且加上警示色文字，跟前面的常规操作明显区分开。
+        var clearDataItem = new MenuItem
+        {
+            Header = "清除服务器数据（永久删除文件）...",
+            Foreground = (System.Windows.Media.Brush)FindResource("DangerBrush")
+        };
+        clearDataItem.Click += (_, _) => ClearServerData(instance);
+        menu.Items.Add(clearDataItem);
+
+        menu.IsOpen = true;
+    }
+
+    private void OpenServerProperties(ServerInstance instance)
+    {
+        var window = new ServerPropertiesWindow(instance, _owner.ServerInstanceService, _owner.ServerProcessManager);
+        if (window.ShowDialog() == true) RefreshInstanceList();
+    }
+
+    private void SelectInstanceJava(ServerInstance instance)
+    {
+        var dlg = new SelectJavaDialog(_owner.ConfigService, instance.JavaId, instance.JavaPath);
+        if (OverlayDialogService.ShowModal(dlg) != true) return;
+
+        instance.JavaId = dlg.SelectedJavaId;
+        instance.JavaPath = dlg.SelectedJavaPath ?? instance.JavaPath;
+        _owner.ServerInstanceService.Update(instance);
+        MessageBoxDialog.ShowSuccess($"「{instance.DisplayName}」的 Java 已更新。", "已保存");
+    }
+
+    private void CreateServer_Click(object sender, RoutedEventArgs e)
+    {
+        var wizard = new CreateServerWindow(_owner);
+        wizard.ShowDialog();
+        RefreshInstanceList(); // 无论用户是否成功创建/取消，都刷新一遍，成功创建时列表会多一条
+    }
+
+    private void StartInstance(ServerInstance instance)
+    {
+        try
+        {
+            var previousPort = ServerPortService.ReadPort(instance);
+            var process = _owner.ServerProcessManager.Start(instance);
+            var config = _owner.ConfigService.Config;
+            if (config.EnableRecentServerHistory)
+            {
+                config.RecentServerIds ??= new();
+                config.RecentServerIds.RemoveAll(id => id == instance.Id);
+                config.RecentServerIds.Insert(0, instance.Id);
+                if (config.RecentServerIds.Count > 12) config.RecentServerIds.RemoveRange(12, config.RecentServerIds.Count - 12);
+                _owner.ConfigService.Save();
+            }
+            _owner.ServerInstanceService.Update(instance);
+            if (process.ServerPort != previousPort)
+                ToastService.ShowWarning($"端口 {previousPort} 已占用或与其他服务器冲突，本次使用 {process.ServerPort}。");
+            RefreshInstanceList();
+            OpenConsole(instance);
+            MaybeShowNetworkGuide();
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError($"启动失败：\n{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 服务器列表页顶部"🌐 如何联机/内网穿透教程"按钮：手动打开教程窗口，不判断
+    /// ShowServerNetworkGuideOnStart（那个开关只管"启动服务器后是否自动弹"，手动点击该
+    /// 按钮时用户明确想看教程，不应该因为之前勾选过"不再自动提示"就被挡住）。
+    /// 打开后如果用户又勾选了"不再自动提示"，一样写回配置——跟自动弹出那次行为一致。
+    /// </summary>
+    private void OpenNetworkGuide_Click(object sender, RoutedEventArgs e)
+    {
+        var guide = new ServerNetworkGuideWindow();
+        guide.ShowDialog();
+        if (guide.DontShowAgain)
+        {
+            _owner.ConfigService.Config.ShowServerNetworkGuideOnStart = false;
+            _owner.ConfigService.Save();
+        }
+    }
+
+    /// <summary>
+    /// 服务器启动成功后，按用户设置弹出"如何开放外网访问"教程（内网穿透/路由器映射/云服务器）。
+    /// 用 AppConfig.ShowServerNetworkGuideOnStart 控制是否弹出，用户在教程窗口里勾选
+    /// "不再提示"后这里写回配置并保存，之后启动服务器就不会再自动弹出。现在还有另一个独立入口
+    /// （服务器列表页顶部的"🌐 如何联机/内网穿透教程"按钮，见 OpenNetworkGuide_Click），
+    /// 那个入口不受该开关影响，随时可以手动打开。
+    /// </summary>
+    private void MaybeShowNetworkGuide()
+    {
+        var cfg = _owner.ConfigService.Config;
+        if (!cfg.ShowServerNetworkGuideOnStart) return;
+
+        var guide = new ServerNetworkGuideWindow();
+        guide.ShowDialog();
+        if (guide.DontShowAgain)
+        {
+            cfg.ShowServerNetworkGuideOnStart = false;
+            _owner.ConfigService.Save();
+        }
+    }
+
+    private async Task StopInstanceAsync(ServerInstance instance)
+    {
+        var confirm = MessageBoxDialog.ShowConfirm(
+            $"确定要停止服务器「{instance.DisplayName}」吗？会先尝试正常关服保存世界。",
+            "确认停止");
+        if (!confirm) return;
+
+        try
+        {
+            await _owner.ServerProcessManager.StopAsync(instance.Id);
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError($"停止失败：\n{ex.Message}");
+        }
+        finally
+        {
+            RefreshInstanceList();
+        }
+    }
+
+    private void OpenConsole(ServerInstance instance)
+    {
+        var console = new ServerConsoleWindow(_owner, instance);
+        // ServerConsoleWindow 已迁移成内嵌 Overlay，没有 Window.Closed，
+        // 改用等价的 IOverlayDialog.RequestClose。
+        console.OverlayClosed += (_, _) => RefreshInstanceList(); // 控制台关闭时（可能服务器也被停止了）刷新状态
+        console.Show();
+    }
+
+    private void DeleteInstance(ServerInstance instance)
+    {
+        if (_owner.ServerProcessManager.IsRunning(instance.Id))
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_The_Server_Is_Running_Stop_It_Before_Del", "服务器正在运行，请先停止后再删除。"));
+            return;
+        }
+
+        var confirm = MessageBoxDialog.ShowConfirm(
+            $"确定要删除服务器「{instance.DisplayName}」吗？\n\n" +
+            "这里只会移除启动器里的记录，不会删除磁盘上的服务端文件夹。\n" +
+            "如果需要连同存档/配置一起删除，请使用「更多」菜单里的「清除服务器数据」。",
+            Loc.T("Str_Cs_Confirm_Deletion", "确认删除"));
+        if (!confirm) return;
+
+        try
+        {
+            _owner.ServerInstanceService.Remove(instance.Id, deleteFiles: false);
+            RefreshInstanceList();
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError($"删除失败：\n{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// "清除服务器数据"：跟上面 DeleteInstance（只移除启动器记录，保留磁盘文件）不同，
+    /// 这里连同服务端目录本身一起永久删除——对应 ServerInstanceService.Remove 早就支持的
+    /// deleteFiles=true 分支，之前只是没有任何 UI 入口调用它。
+    /// 需要正在运行时先拒绝（避免删除一个还在写文件的目录导致中间状态错乱），
+    /// 并要求用户在 ClearServerDataWindow 里原样输入服务器名称才会真正执行。
+    /// </summary>
+    private void ClearServerData(ServerInstance instance)
+    {
+        if (_owner.ServerProcessManager.IsRunning(instance.Id))
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_The_Server_Is_Running_Stop_It_Before_Cle", "服务器正在运行，请先停止后再清除数据。"));
+            return;
+        }
+
+        var dlg = new ClearServerDataDialog(instance.DisplayName, instance.Directory);
+        if (OverlayDialogService.ShowModal(dlg) != true || !dlg.Confirmed) return;
+
+        try
+        {
+            _owner.ServerInstanceService.Remove(instance.Id, deleteFiles: true);
+            RefreshInstanceList();
+            MessageBoxDialog.ShowSuccess($"「{instance.DisplayName}」的数据已永久清除。", "已清除");
+        }
+        catch (Exception ex)
+        {
+            // Remove() 内部：实例记录已经先被移除并 Save() 了，只是删文件夹这一步失败
+            // （常见于文件被其它程序占用），这里如实告知"记录已删、文件没删掉"，
+            // 不让用户误以为"点了没反应"又对着同一个目录重复操作。
+            ErrorPresenter.ShowFriendlyError(
+                $"启动器记录已移除，但删除磁盘文件失败（可能是文件正被占用）：\n{ex.Message}\n\n" +
+                $"可以手动删除目录：\n{instance.Directory}",
+                $"[清除服务器数据] {ex}", "清除失败");
+            RefreshInstanceList();
+        }
+    }
+
+    // ============================================================
+    // 存档导入导出 / 自定义图标 / 默认服务器 / 重新覆盖安装
+    // ============================================================
+
+    private readonly ServerInstanceTransferService _transferService = new();
+
+    private void ExportInstance(ServerInstance instance)
+    {
+        var dlg = new SaveFileDialog
+        {
+            Title = "导出服务器存档",
+            Filter = "XCL2 服务器存档 (*.xcl2server)|*.xcl2server",
+            FileName = $"{instance.DisplayName}.xcl2server"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            _transferService.Export(instance, dlg.FileName);
+            MessageBoxDialog.ShowSuccess(Loc.T("Str_Cs_Export_Complete_2", "导出完成。"), Loc.T("Str_Cs_World_Export", "存档导出"));
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError($"导出失败：\n{ex.Message}");
+        }
+    }
+
+    private void ImportInstance(ServerInstance instance)
+    {
+        if (_owner.ServerProcessManager.IsRunning(instance.Id))
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_The_Server_Is_Running_Stop_It_Before_Imp", "服务器正在运行，请先停止后再导入。"));
+            return;
+        }
+
+        var dlg = new OpenFileDialog { Title = "导入服务器存档", Filter = "XCL2 服务器存档 (*.xcl2server)|*.xcl2server|所有文件 (*.*)|*.*" };
+        if (dlg.ShowDialog() != true) return;
+
+        var confirm = MessageBoxDialog.ShowConfirm(
+            $"即将把存档内容合并覆盖到「{instance.DisplayName}」的服务器目录：\n{instance.Directory}\n\n" +
+            "同名文件会被存档内容覆盖，其余现有文件保留。此操作不可撤销，建议先自行备份重要数据。",
+            Loc.T("Str_Cs_Confirm_Import", "确认导入"));
+        if (!confirm) return;
+
+        try
+        {
+            var manifest = _transferService.Import(dlg.FileName, instance.Directory);
+            var extra = manifest != null
+                ? $"\n\n存档内附带的原始配置：{manifest.CoreType} · MC {manifest.McVersion}，内存 {manifest.MinMemoryMb}~{manifest.MaxMemoryMb}MB。\n" +
+                  "如果需要按这份配置更新当前实例，请手动在创建/编辑向导里调整。"
+                : "";
+            MessageBoxDialog.ShowSuccess(Loc.T("Str_Cs_Import_Complete", "导入完成。") + extra, Loc.T("Str_Cs_World_Import", "存档导入"));
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError($"导入失败：\n{ex.Message}");
+        }
+    }
+
+    private readonly HashSet<string> _serverModpackImports = new(StringComparer.OrdinalIgnoreCase);
+    private async Task InstallModpackToServerAsync(ServerInstance instance, string? suppliedPath = null)
+    {
+        if (_owner.ServerProcessManager.IsRunning(instance.Id))
+        { MessageBoxDialog.ShowInfo("请先停止服务器，再导入整合包。"); return; }
+        var path = suppliedPath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            var dialog = new OpenFileDialog { Title = "选择 Modrinth、CurseForge 或 XCL2 整合包", Filter = "整合包|*.mrpack;*.zip;*.xclpack|所有文件|*.*" };
+            if (dialog.ShowDialog() != true) return;
+            path = dialog.FileName;
+        }
+        if (!_serverModpackImports.Add(instance.Id))
+        { ToastService.ShowInfo("此服务器已有整合包导入任务，请等待完成。"); return; }
+        try
+        {
+            var source = path;
+            var isMrpack = await Task.Run(() => ModpackService.IsMrpack(source));
+            var isCurseForge = !isMrpack && await Task.Run(() => ModpackService.IsCurseForgePack(source));
+            var requirements = await Task.Run(() => new ModpackInstallService(_owner.ConfigService.Config).ReadRequirements(source));
+            if ((isMrpack || isCurseForge) && string.IsNullOrWhiteSpace(requirements.McVersion))
+                throw new InvalidDataException("整合包未声明 Minecraft 版本，无法核对服务器环境，未执行导入。");
+            if (!string.IsNullOrWhiteSpace(requirements.McVersion) && !string.Equals(requirements.McVersion, instance.McVersion, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"整合包需要 Minecraft {requirements.McVersion}，当前服务器是 {instance.McVersion}。请先创建匹配的服务器，未执行导入。");
+            if (!string.IsNullOrWhiteSpace(requirements.Loader) && !string.Equals(requirements.Loader, instance.CoreType.ToString(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"整合包需要 {requirements.Loader}，当前服务器核心为 {instance.CoreType}。请先安装匹配的核心，未执行导入。");
+            var note = isCurseForge ? "CurseForge 清单不标注每个模组的客户端/服务端用途，请确认这是适用于服务器的包。可选文件不会自动下载。\n" : "";
+            if (!MessageBoxDialog.ShowConfirm(note + $"将内容合并到服务器「{instance.DisplayName}」：\n{instance.Directory}\n同名内容会被覆盖。此操作不更换服务器核心或加载器，请先备份重要数据。", "导入服务器整合包")) return;
+            var result = await DownloadQueueService.Instance.RunAndWaitAsync("服务器整合包 " + instance.DisplayName, async (item, ct) =>
+            {
+                if (_owner.ServerProcessManager.IsRunning(instance.Id)) throw new InvalidOperationException("服务器已启动，未执行整合包导入。");
+                var taskProgress = item.CreateProgress();
+                var progress = new Progress<string>(message => taskProgress.Report(new ProgressInfo(message, 0, 1, "")));
+                var service = new ModpackService();
+                return await Task.Run(async () =>
+                {
+                    if (isMrpack) return await service.ImportMrpackAsync(source, instance.Directory, progress, ct, server: true);
+                    if (isCurseForge) return await service.ImportCurseForgeAsync(source, instance.Directory, progress, ct);
+                    ct.ThrowIfCancellationRequested();
+                    var manifest = service.Import(source, instance.Directory, progress);
+                    return new MrpackImportResult(manifest?.Name ?? Path.GetFileNameWithoutExtension(source), manifest?.McVersion, new());
+                }, ct);
+            });
+            if (result.FailedFiles.Count > 0)
+                MessageBoxDialog.ShowWarning($"服务器内容部分导入，但 {result.FailedFiles.Count} 个文件未完成，请补齐后启动：\n" + string.Join("\n", result.FailedFiles.Take(10)), "服务器整合包未完整导入");
+            else MessageBoxDialog.ShowSuccess($"整合包内容已导入服务器「{instance.DisplayName}」。服务器核心保持原配置。");
+        }
+        catch (OperationCanceledException) { ToastService.ShowInfo("服务器整合包导入已取消，已完成的内容保留，请核对后再启动。"); }
+        catch (Exception ex) { MessageBoxDialog.ShowError($"服务器整合包导入未完成：{ex.Message}"); }
+        finally { _serverModpackImports.Remove(instance.Id); }
+    }
+
+    private void ServerManagerPage_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void ServerManagerPage_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        var files = (string[])e.Data.GetData(DataFormats.FileDrop)!;
+        var path = files.FirstOrDefault(f => f.EndsWith(".mrpack", StringComparison.OrdinalIgnoreCase) ||
+                                             f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+                                             f.EndsWith(".xclpack", StringComparison.OrdinalIgnoreCase));
+        var target = _owner.ServerInstanceService.Instances.FirstOrDefault(i => i.IsDefault) ?? _owner.ServerInstanceService.Instances.FirstOrDefault();
+        if (path == null || target == null)
+        {
+            MessageBoxDialog.ShowInfo("请先创建或选择一个服务器，再拖入整合包。", "提示");
+            return;
+        }
+        await InstallModpackToServerAsync(target, path);
+    }
+
+    private void SetInstanceIcon(ServerInstance instance)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "选择服务器图标",
+            Filter = "图片文件 (*.png;*.jpg;*.jpeg;*.gif;*.bmp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp"
+        };
+        if (dlg.ShowDialog() != true) return;
+
+        try
+        {
+            var savedPath = _owner.ServerInstanceService.SetIcon(instance.Id, dlg.FileName);
+            instance.IconPath = savedPath;
+            _owner.ServerInstanceService.Update(instance);
+            RefreshInstanceList();
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError($"设置图标失败：\n{ex.Message}");
+        }
+    }
+
+    private void ClearInstanceIcon(ServerInstance instance)
+    {
+        _owner.ServerInstanceService.ClearIcon(instance.IconPath);
+        instance.IconPath = null;
+        _owner.ServerInstanceService.Update(instance);
+        RefreshInstanceList();
+    }
+
+    private void RenameInstance(ServerInstance instance)
+    {
+        var dlg = new RenameInstanceDialog(
+            instance.DisplayName,
+            isNameTaken: candidate => candidate != instance.DisplayName &&
+                _owner.ServerInstanceService.Instances.Any(i => i.Id != instance.Id && i.DisplayName == candidate),
+            title: "重命名服务器");
+
+        if (OverlayDialogService.ShowModal(dlg) != true) return;
+
+        instance.DisplayName = dlg.NewName;
+        _owner.ServerInstanceService.Update(instance);
+        RefreshInstanceList();
+    }
+
+    private void ToggleDefaultInstance(ServerInstance instance)
+    {
+        _owner.ServerInstanceService.SetDefault(instance.IsDefault ? null : instance.Id);
+        RefreshInstanceList();
+    }
+
+    /// <summary>
+    /// 重新覆盖安装核心：复用创建向导 CreateServerWindow 的"选加载器/版本 -> 下载 -> (若需要)本地安装"
+    /// 整套流程，而不是在这里重写一份下载 UI。窗口以 reinstallTarget 模式打开时不写入新的
+    /// ServerInstance 记录，而是把下载/安装结果直接落到传入实例的 Directory 下，完成后更新
+    /// 该实例现有记录的 CoreType/McVersion/LaunchTarget 等字段（而不是新增一条记录）。
+    /// </summary>
+    private void ReinstallInstanceCore(ServerInstance instance)
+    {
+        if (_owner.ServerProcessManager.IsRunning(instance.Id))
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_The_Server_Is_Running_Stop_It_Before_Rei", "服务器正在运行，请先停止后再重新安装核心。"));
+            return;
+        }
+
+        var confirm = MessageBoxDialog.ShowConfirm(
+            $"即将为「{instance.DisplayName}」重新下载并覆盖安装服务端核心文件。\n" +
+            "world 存档等其余文件不会被清空，但核心 jar/启动脚本会被替换。是否继续？",
+            Loc.T("Str_Cs_Confirm_Reinstall", "确认重新安装"));
+        if (!confirm) return;
+
+        var wizard = new CreateServerWindow(_owner, reinstallTarget: instance);
+        wizard.ShowDialog();
+        RefreshInstanceList();
+    }
+
+    // ===== 服务端资源下载面板：统一承载 插件/资源包/数据包/光影包/Mod 五个分类，逻辑结构
+    // 对齐 DownloadCenterPage 材质包分类那一套（SwitchResourceCategory/RunResourceSearchAsync/
+    // ViewResourceVersions_Click），区别是：1) 目标目录来自"选中的服务器实例"而不是
+    // ".minecraft 版本目录"；2) 用 _serverResourceType 记录当前选中的资源类型，所有搜索/下载
+    // 都按该类型分派，不再像之前那样写死 ModrinthResourceType.ResourcePack。 =====
+
+    private CurseForgeService GetResourceCurseForge() => _resourceCurseForge ??= new CurseForgeService(_resourceCurseForgeKeyService);
+    private ModSearchService GetResourceModSearch() => _resourceModSearch ??= new ModSearchService(_resourceModrinth, GetResourceCurseForge());
+
+    private void ServerResourceDebounce(Action action)
+    {
+        if (!_initialized || _serverResourceDebounceTimer == null) return;
+        _pendingServerResourceDebouncedAction = action;
+        _serverResourceDebounceTimer.Stop();
+        _serverResourceDebounceTimer.Start();
+    }
+
+    /// <summary>第一次切到"插件下载"/"资源包"分类时：填充服务器下拉框 + 触发一次默认搜索（浏览热门）。
+    /// 之后再切回来不重复搜索，跟 DownloadCenterPage 的 _lastLoadedResourceType 是同一个思路——
+    /// 用 _serverResourcePanelLoaded 记录"是否已经初始化过一次"。</summary>
+    private void InitServerResourcePanel()
+    {
+        RefreshServerTargetCombo();
+
+        if (_serverResourcePanelLoaded) return;
+        _serverResourcePanelLoaded = true;
+        _ = RunServerResourceSearchAsync();
+    }
+
+    /// <summary>资源类型切换(插件/资源包/数据包/光影包/Mod)：更新标题文案、决定"目标世界文件夹"
+    /// 输入框是否显示(只有数据包需要)，并重新触发一次搜索——不同类型对应完全不同的 Modrinth
+    /// project_type/CurseForge classId，结果集不能沿用上一个类型的搜索结果。</summary>
+    private void ServerResourceType_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return;
+        if (sender is not RadioButton rb || rb.Tag is not string tag) return;
+        if (!Enum.TryParse<ModrinthResourceType>(tag, out var type)) return;
+
+        _serverResourceType = type;
+        ServerDataPackWorldPanel.Visibility = type == ModrinthResourceType.DataPack ? Visibility.Visible : Visibility.Collapsed;
+        RefreshServerResourceTitle();
+        _ = RunServerResourceSearchAsync();
+    }
+
+    private void RefreshServerResourceTitle()
+    {
+        ServerResourcePanelTitle.Text = _serverResourceType switch
+        {
+            ModrinthResourceType.Plugin => "服务端插件下载",
+            ModrinthResourceType.ResourcePack => "服务端资源包下载",
+            ModrinthResourceType.DataPack => "服务端数据包下载",
+            ModrinthResourceType.Shader => "服务端光影包下载",
+            ModrinthResourceType.Mod => "服务端 Mod 下载",
+            _ => "服务端资源下载"
+        };
+    }
+
+    /// <summary>刷新"下载到服务器"下拉框的候选列表。每次切到该分类都刷一次（而不是只在
+    /// 首次加载时刷），这样如果用户是先创建了服务器、再回来点资源分类，下拉框也能看到新建的。
+    /// 尽量保留用户原来选中的那一项（按 Id 比较，服务器改名不受影响）。</summary>
+    private void RefreshServerTargetCombo()
+    {
+        var previouslySelected = (ServerTargetCombo.SelectedItem as ServerInstance)?.Id;
+        var instances = _owner.ServerInstanceService.Instances;
+
+        ServerTargetCombo.ItemsSource = instances;
+        if (instances.Count == 0)
+        {
+            ServerResourceNoTargetHint.Visibility = Visibility.Collapsed;
+            ServerTargetCombo.ToolTip = "可先浏览资源；下载前请选择或创建目标服务器。";
+            // 没有目标时仍可浏览资源；实际安装时再要求选择目标。
+            ServerResourceListBox.Visibility = Visibility.Visible;
+            SrvResMod.IsEnabled = true;
+            return;
+        }
+
+        ServerResourceNoTargetHint.Visibility = Visibility.Collapsed;
+        ServerResourceListBox.Visibility = Visibility.Visible;
+
+        var matched = previouslySelected != null ? instances.FirstOrDefault(i => i.Id == previouslySelected) : null;
+        ServerTargetCombo.SelectedItem = matched ?? instances.FirstOrDefault(i => i.IsDefault) ?? instances[0];
+        RefreshServerResourceModLoaderVisibility();
+    }
+
+    /// <summary>选服务器实例变化时：Mod 分类只有目标是 Fabric/Forge/NeoForge(modded 服务端)才有意义，
+    /// 纯 Vanilla/Paper/Purpur 服务端选中时禁用"Mod"该类型按钮，避免用户装了一堆装不上的 mod jar。
+    /// 插件(Plugin)不受此限制——插件是 Bukkit/Spigot/Paper 生态的东西，跟 Mod 完全是两回事。</summary>
+    private void ServerTargetCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized) return;
+        RefreshServerResourceModLoaderVisibility();
+        if (_serverResourcePanelLoaded) _ = RunServerResourceSearchAsync();
+    }
+
+    private void RefreshServerResourceModLoaderVisibility()
+    {
+        // 分类是浏览入口，不能因当前选中 Paper/Vanilla 或尚未建服而失去点击能力。
+        // 是否可安装及加载器匹配在实际点击下载时检查。
+        SrvResMod.IsEnabled = true;
+        var target = ServerTargetCombo.SelectedItem as ServerInstance;
+        SrvResMod.ToolTip = target != null && ServerResourceInstallPolicy.GetModLoader(target.CoreType) != null
+            ? "浏览并下载与当前服务端加载器匹配的模组"
+            : "可以浏览模组；安装前请选用 Fabric、Forge、NeoForge 或 Quilt 等模组服务端。";
+    }
+
+    private async void ServerResourceSearch_Click(object sender, RoutedEventArgs e) => await RunServerResourceSearchAsync(showEmptyHint: true);
+
+    /// <summary>"重置条件"：清空名称/游戏版本输入框，重新按当前类型搜索一次（浏览热门资源）。
+    /// 不清空"目标世界文件夹"（数据包场景），也不重置类型/来源/目标服务器——这几个决定的是
+    /// "这次操作的对象是什么"，跟"筛选条件"是两回事，重置筛选不应该连带清空这些选择。</summary>
+    private void ServerResourceFilterReset_Click(object sender, RoutedEventArgs e)
+    {
+        ServerResourceSearchBox.Text = "";
+        ServerResourceGameVersionBox.Text = "";
+        _serverResourceDebounceTimer?.Stop();
+        _ = RunServerResourceSearchAsync(showEmptyHint: true);
+    }
+
+    
+    private void ServerResourceVersionChip_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        ServerResourceGameVersionBox.Text = btn.Tag as string ?? "";
+    }
+
+    private void ServerResourceFilter_Changed(object sender, RoutedEventArgs e) => ServerResourceDebounce(() => _ = RunServerResourceSearchAsync());
+
+    private void ServerResourceSourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized) return;
+        _serverResourceSource = ((ServerResourceSourceCombo.SelectedItem as ComboBoxItem)?.Tag as string) switch
+        {
+            "modrinth" => ModSource.Modrinth,
+            "curseforge" => ModSource.CurseForge,
+            _ => ModSource.Combined
+        };
+        _ = RunServerResourceSearchAsync();
+    }
+
+    private async Task RunServerResourceSearchAsync(bool showEmptyHint = false)
+    {
+        var seq = ++_serverResourceSearchSeq;
+        try
+        {
+            var keyword = ServerResourceSearchBox.Text?.Trim() ?? "";
+            var gameVersion = ServerResourceGameVersionBox.Text?.Trim();
+            // 插件/Mod 可以按目标服务器的核心类型进一步过滤，减少搜到装不上的结果：
+            // - Mod 场景：核心类型就是加载器(Fabric/Forge/NeoForge)，直接传。
+            // - 插件场景：只有 Paper 核心才有意义传"paper"分类facet(Modrinth 插件分类用的是
+            //   paper/spigot/purpur/bukkit/folia 这套词汇，Vanilla/Fabric/Forge/NeoForge
+            //   对插件搜索毫无意义，传了反而会把结果过滤没——所以这里只在核心是 Paper 时才传，
+            //   其余核心类型(包括还没做插件下载的 Vanilla)不加该 facet，交给用户自己筛选)。
+            var targetCore = (ServerTargetCombo.SelectedItem as ServerInstance)?.CoreType;
+            var loaderFilter = _serverResourceType == ModrinthResourceType.Mod
+                ? (targetCore.HasValue ? ServerResourceInstallPolicy.GetModLoader(targetCore.Value) : null)
+                : (_serverResourceType == ModrinthResourceType.Plugin && targetCore == ServerCoreType.Paper
+                    ? "paper" : null);
+            ModSearchOutcome<UnifiedResourceItem> outcome;
+            if (_serverResourceType == ModrinthResourceType.Mod)
+            {
+                // 模组走专用搜索通道；资源包通道会直接跳过 CurseForge 的 Mod。
+                var mods = await GetResourceModSearch().SearchAsync(_serverResourceSource, keyword,
+                    string.IsNullOrEmpty(gameVersion) ? null : gameVersion, loaderFilter);
+                outcome = new ModSearchOutcome<UnifiedResourceItem>();
+                outcome.Warnings.AddRange(mods.Warnings);
+                outcome.Items.AddRange(mods.Items.Select(mod => new UnifiedResourceItem
+                {
+                    Source = mod.Source, SourceId = mod.SourceId, Title = mod.Title,
+                    Description = mod.Description, Author = mod.Author, IconUrl = mod.IconUrl,
+                    Downloads = mod.Downloads, RawItem = mod.RawItem
+                }));
+            }
+            else
+            {
+                outcome = await GetResourceModSearch().SearchResourcesAsync(_serverResourceSource, _serverResourceType,
+                    keyword, string.IsNullOrEmpty(gameVersion) ? null : gameVersion, modLoader: loaderFilter);
+            }
+
+            if (seq != _serverResourceSearchSeq) return; // 期间已有更新的搜索发出，这次结果已过时，丢弃
+
+            _serverResources.Clear();
+            var showIcons = _owner.ConfigService.Config.ShowModIcons;
+            foreach (var item in outcome.Items)
+            {
+                item.ShowIcon = showIcons;
+                _serverResources.Add(item);
+            }
+
+            if (showEmptyHint)
+            {
+                if (outcome.Items.Count == 0 && outcome.Warnings.Count == 0)
+                    MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Nothing_Matched_Try_A_Different_Keyword", "没有找到匹配的资源，换个关键词试试。"));
+                else if (outcome.Warnings.Count > 0)
+                    MessageBoxDialog.ShowWarning(string.Join("\n", outcome.Warnings), Loc.T("Str_Cs_Some_Sources_Failed_To_Return_Results", "部分来源搜索失败"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (seq != _serverResourceSearchSeq) return;
+            if (showEmptyHint)
+                ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Search_Failed_Most_Likely_A_Network_Prob", "搜索失败，可能是网络连接问题，请检查网络后重试。"), $"[搜索失败] {ex}", "搜索失败");
+        }
+    }
+
+    private async void ServerResourceListItem_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Grid grid || grid.Tag is not UnifiedResourceItem item) return;
+        await OpenServerResourceDetailAsync(item);
+    }
+
+    /// <summary>点击资源条目：整页跳转到 ModDetailPage，取代原来已废弃的"卡片内联展开"样式
+    /// (旧版 ToggleServerResourceExpandAsync)——跟客户端 DownloadCenterPage.OpenResourceDetailAsync
+    /// 是同一套交互，区别只在于：1) 下载目标目录是 ServerTargetCombo 选中的服务器实例目录，
+    /// 不是 .minecraft 文件夹；2) 数据包场景下"目标世界文件夹"来自 ServerDataPackWorldBox 该
+    /// 单一输入框（不是像客户端那样扫描现有存档列表），所以 SaveNames 只填一项；3) 服务端资源
+    /// 暂不接入收藏功能，onFavoriteToggle 传 null。</summary>
+    private async Task OpenServerResourceDetailAsync(UnifiedResourceItem item)
+    {
+        var targetInstance = ServerTargetCombo.SelectedItem as ServerInstance;
+        var resourceType = _serverResourceType;
+        item.IsDataPack = resourceType == ModrinthResourceType.DataPack;
+        if (item.IsDataPack)
+        {
+            var worldName = string.IsNullOrWhiteSpace(ServerDataPackWorldBox.Text) ? "world" : ServerDataPackWorldBox.Text.Trim();
+            item.SaveNames.Clear();
+            item.SaveNames.Add(worldName);
+            item.SelectedSaveName = worldName;
+        }
+
+        var sourceUrl = item.RawItem switch
+        {
+            ModrinthSearchHit h => $"https://modrinth.com/{ServerResourceProjectTypeSlug(resourceType)}/{h.Slug}",
+            CurseForgeMod m => m.Links?.WebsiteUrl,
+            _ => null
+        };
+
+        var detail = new ModDetailPage(
+            ModDetailPage.DetailMode.DirectDownload,
+            item.Title, item.Description, item.IconUrl, item.Author, item.Downloads,
+            item.SourceLabel, sourceUrl, item, item.IsFavorite,
+            onFavoriteToggle: null,
+            onBack: HideServerResourceDetail,
+            onDownload: entry => DownloadServerResourceInlineAsync(item, entry, targetInstance, resourceType),
+            isDataPack: item.IsDataPack,
+            saveNames: item.SaveNames,
+            isMod: resourceType == ModrinthResourceType.Mod);
+
+        ShowServerResourceDetail(detail);
+
+        if (item.VersionsLoaded)
+        {
+            detail.SetFlatEntries(item.Versions);
+            detail.ShowGroups(item.Groups);
+            return;
+        }
+
+        detail.ShowLoading();
+        await LoadServerResourceVersionsAsync(item, ServerResourceGameVersionBox.Text?.Trim(), resourceType, targetInstance?.CoreType);
+        detail.SetFlatEntries(item.Versions);
+        detail.ShowGroups(item.Groups);
+    }
+
+    private void ShowServerResourceDetail(ModDetailPage page)
+    {
+        if (DetailHost.Visibility != Visibility.Visible) _detailReturnFocus = Keyboard.FocusedElement;
+        ListPanelsHost.Visibility = Visibility.Hidden;
+        page.UseHostPageTransition();
+        PageTransitionBehavior.SetTransitionDirection(DetailHost, 1);
+        DetailHost.Content = page;
+        DetailHost.Visibility = Visibility.Visible;
+    }
+
+    private void HideServerResourceDetail()
+    {
+        DetailHost.Visibility = Visibility.Collapsed;
+        DetailHost.Content = null;
+        PageTransitionBehavior.SetTransitionDirection(ServerResourcePanel, -1);
+        ListPanelsHost.Visibility = Visibility.Visible;
+        if (_detailReturnFocus is UIElement { IsVisible: true, IsEnabled: true } focus) Keyboard.Focus(focus);
+        _detailReturnFocus = null;
+    }
+
+    private static string ServerResourceProjectTypeSlug(ModrinthResourceType type) => type switch
+    {
+        ModrinthResourceType.ResourcePack => "resourcepack",
+        ModrinthResourceType.Shader => "shader",
+        ModrinthResourceType.DataPack => "mod",
+        ModrinthResourceType.Plugin => "plugin",
+        ModrinthResourceType.Mod => "mod",
+        _ => "mod"
+    };
+
+    /// <summary>拉取一个服务端资源条目的版本列表并分组，从原来 ToggleServerResourceExpandAsync
+    /// 里抽出来的共享逻辑，供整页详情复用，跟 DownloadCenterPage.LoadResourceVersionsAsync
+    /// 是同一个思路。</summary>
+    private async Task LoadServerResourceVersionsAsync(UnifiedResourceItem item, string? gameVersion,
+        ModrinthResourceType resourceType, ServerCoreType? targetCore)
+    {
+        item.IsLoadingVersions = true;
+        try
+        {
+            item.Versions.Clear();
+
+            if (item.Source == ModSource.Modrinth)
+            {
+                var versions = await _resourceModrinth.GetVersionsAsync(item.SourceId, string.IsNullOrEmpty(gameVersion) ? null : gameVersion);
+                foreach (var v in versions) item.Versions.Add(new InlineVersionEntry(v));
+            }
+            else if (item.Source == ModSource.CurseForge)
+            {
+                var modId = int.Parse(item.SourceId);
+                var files = await GetResourceCurseForge().GetFilesAsync(modId, string.IsNullOrEmpty(gameVersion) ? null : gameVersion);
+                foreach (var f in files) item.Versions.Add(new InlineVersionEntry(f));
+            }
+            var loader = targetCore.HasValue ? ServerResourceInstallPolicy.GetModLoader(targetCore.Value) : null;
+            if (resourceType == ModrinthResourceType.Mod && loader != null)
+            {
+                // 搜索匹配项目不等于项目内的每个文件都匹配加载器。
+                foreach (var entry in item.Versions.Where(entry => !ServerResourceInstallPolicy.MatchesLoader(entry.Loaders, loader)).ToList())
+                    item.Versions.Remove(entry);
+            }
+            item.HasNoResults = item.Versions.Count == 0;
+
+            item.Groups.Clear();
+            foreach (var g in ModVersionGrouping.Group(item.Versions)) item.Groups.Add(g);
+            if (item.Groups.Count > 0) item.Groups[0].IsExpanded = true;
+
+            item.VersionsLoaded = true;
+        }
+        catch (CurseForgeKeyMissingException ex)
+        {
+            MessageBoxDialog.ShowInfo(ex.Message, Loc.T("Str_Cs_No_Api_Key_Configured", "未配置 Key"));
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Couldn_T_Fetch_The_Version_List_This_Is_", "获取版本列表失败，可能是网络连接问题或下载源暂时不可用，请检查网络后重试。"), $"[获取版本列表失败] {ex}", "获取版本列表失败");
+        }
+        finally
+        {
+            item.IsLoadingVersions = false;
+        }
+    }
+
+    /// <summary>ModDetailPage 里点"下载"回调，目标目录是 OpenServerResourceDetailAsync 打开
+    /// 详情页那一刻就已经确定好的服务器实例（避免用户在详情页停留期间切换了 ServerTargetCombo
+    /// 导致下载目录和预期不一致）。</summary>
+    private async Task DownloadServerResourceInlineAsync(UnifiedResourceItem item, InlineVersionEntry entry,
+        ServerInstance? targetInstance, ModrinthResourceType resourceType)
+    {
+        if (targetInstance == null)
+        {
+            MessageBoxDialog.ShowInfo("请返回列表，在上方选择或创建一个目标服务器，再下载资源。", "选择服务器");
+            return;
+        }
+        if (resourceType == ModrinthResourceType.Mod)
+        {
+            var loader = ServerResourceInstallPolicy.GetModLoader(targetInstance.CoreType);
+            if (loader == null)
+            {
+                MessageBoxDialog.ShowInfo("当前服务器核心不支持安装模组。请返回列表，选择 Fabric、Forge、NeoForge 或 Quilt 等模组服务端，再下载。", "需要模组服务端");
+                return;
+            }
+            if (!ServerResourceInstallPolicy.MatchesLoader(entry.Loaders, loader))
+            {
+                MessageBoxDialog.ShowWarning("该文件的加载器与目标服务器不匹配，请选择对应的文件。", "加载器不匹配");
+                return;
+            }
+        }
+        if (item.IsDataPack && string.IsNullOrEmpty(item.SelectedSaveName))
+        {
+            MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Enter_Which_World_To_Install_Into_First_", "请先填写要安装到哪个存档（数据包必须放进具体存档才会生效）。"));
+            return;
+        }
+
+        var saveName = item.IsDataPack ? item.SelectedSaveName : null;
+        string destination;
+        try { destination = ServerResourceInstallPolicy.GetDestination(targetInstance.Directory, resourceType, saveName); }
+        catch (ArgumentException ex) { MessageBoxDialog.ShowWarning(ex.Message, "目标目录无效"); return; }
+
+        // 同 DownloadCenterPage 里的社区资源下载：接入全局下载队列，不再用独占的模态弹窗，
+        // 标题栏下载列表能看到、支持切页面继续操作、开始/完成的气泡提示也统一生效。
+        DownloadQueueService.Instance.StartNew($"下载 {entry.Name}", async (queueItem, ct) =>
+        {
+            var progress = new Progress<string>(msg => queueItem.StatusText = msg);
+            string path;
+            if (entry.Source == ModSource.Modrinth)
+            {
+                path = await _resourceModrinth.DownloadResourceAsync(destination, resourceType,
+                    (ModrinthVersion)entry.RawVersion, progress, saveName, ct: ct, appendCategorySubdir: false);
+            }
+            else if (resourceType == ModrinthResourceType.Mod)
+            {
+                path = await GetResourceCurseForge().DownloadModAsync(destination,
+                    (CurseForgeFile)entry.RawVersion, progress, ct: ct, appendCategorySubdir: false);
+            }
+            else
+            {
+                var kind = resourceType switch
+                {
+                    ModrinthResourceType.Plugin => CurseForgeResourceKind.Plugin,
+                    ModrinthResourceType.ResourcePack => CurseForgeResourceKind.ResourcePack,
+                    ModrinthResourceType.Shader => CurseForgeResourceKind.Shader,
+                    ModrinthResourceType.DataPack => CurseForgeResourceKind.DataPack,
+                    _ => throw new ArgumentOutOfRangeException()
+                };
+                path = await GetResourceCurseForge().DownloadResourceAsync(destination, kind,
+                    (CurseForgeFile)entry.RawVersion, progress, saveName, ct: ct, appendCategorySubdir: false);
+            }
+
+            await _owner.Dispatcher.InvokeAsync(() =>
+            {
+                _owner.EnsureVisibleForDialog();
+                MessageBoxDialog.ShowSuccess($"下载完成：\n{path}");
+            });
+        });
+    }
+}

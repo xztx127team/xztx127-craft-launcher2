@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/WindowsCompatibilityService.cs" Link="WindowsCompatibilityService.cs" />
+    <Compile Include="../../Models/AppConfig.WindowsCompatibility.cs" Link="AppConfig.WindowsCompatibility.cs" />
+    <Compile Include="../../Services/ToastService.cs" Link="Services/ToastService.cs" />
+    <Compile Include="../../Services/UiRenderScheduler.cs" Link="Services/UiRenderScheduler.cs" />
+  </ItemGroup>
+</Project>

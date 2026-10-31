@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/ExperimentalPasswordSession.cs" Link="ExperimentalPasswordSession.cs"/>
+    <Compile Include="../../Services/ExperimentalFeatureCatalog.cs" Link="ExperimentalFeatureCatalog.cs"/>
+    <Compile Include="../../Services/FeatureSearchLayoutPolicy.cs" Link="FeatureSearchLayoutPolicy.cs"/>
+    <Compile Include="../../Services/AprilFoolsMotionPolicy.cs" Link="AprilFoolsMotionPolicy.cs"/>
+    <Compile Include="../../Services/TerracottaArchitecture.cs" Link="TerracottaArchitecture.cs"/>
+    <Compile Include="../../Services/ErrorReport.cs" Link="ErrorReport.cs"/>
+    <Compile Include="../../Services/ErrorCatalog.cs" Link="ErrorCatalog.cs"/>
+    <Compile Include="../../Services/DiagnosticRedactionService.cs" Link="DiagnosticRedactionService.cs"/>
+      <Compile Include="../../Services/LogTextEncoding.cs" Link="LogTextEncoding.cs"/>
+  </ItemGroup>
+</Project>

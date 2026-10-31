@@ -1,0 +1,854 @@
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using Microsoft.Win32;
+using XCL2.App.Models;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+public partial class VersionSelectPage : UserControl
+{
+    private readonly MainWindow _owner;
+    private readonly FolderService _folderService = new();
+    private readonly ObservableCollection<GameFolder> _folders = new();
+    private List<GameVersion> _installed = new();
+
+    /// <summary>不完整实例仍保留在列表中，单独记录以显示修复提示。</summary>
+    private List<GameVersion> _incompleteVersions = new();
+    private readonly DispatcherTimer _watchDebounce;
+    private readonly DispatcherTimer _rescanTimer;
+    private FileSystemWatcher? _versionsWatcher;
+    private string? _watchedFolderPath;
+    private string? _pendingWatchFolderPath;
+    private long _watchGeneration;
+    private bool _refreshingItems;
+    private bool _automaticRefreshRunning;
+    private long _refreshGeneration;
+    private CancellationTokenSource? _scanCancellation;
+    private string? _scanningFolderPath;
+    private string? _displayedFolderPath;
+    private bool _loadingFolders;
+
+    public VersionSelectPage(MainWindow owner)
+    {
+        _owner = owner;
+        InitializeComponent();
+
+        _watchDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _watchDebounce.Tick += async (_, _) =>
+        {
+            _watchDebounce.Stop();
+            await RefreshVersionsAutomaticallyAsync();
+        };
+        // 文件监视可能在网络盘、目录刚创建或大量复制时漏通知，定期扫描作为补偿。
+        _rescanTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _rescanTimer.Tick += (_, _) =>
+        {
+            WatchSelectedFolder();
+            QueueAutomaticRefresh();
+        };
+        Loaded += (_, _) =>
+        {
+            WatchSelectedFolder();
+            _rescanTimer.Start();
+            RefreshInstalledVersions();
+        };
+        Unloaded += (_, _) =>
+        {
+            ++_refreshGeneration;
+            _scanCancellation?.Cancel();
+            _watchDebounce.Stop();
+            _rescanTimer.Stop();
+            StopWatchingVersions();
+        };
+
+        FolderListBox.ItemsSource = _folders;
+        InstalledListBox.ItemsSource = _installed;
+
+        LoadFolders();
+        InitializeInstanceUx();
+        // 首次扫描由 Loaded 发起。构造期间只创建控件，不能重复同步扫描版本目录。
+    }
+
+    private void LoadFolders()
+    {
+        _loadingFolders = true;
+        try
+        {
+            _folders.Clear();
+            foreach (var f in _owner.ConfigService.Config.Folders ?? new List<GameFolder>()) _folders.Add(f);
+            var selected = _folders.FirstOrDefault(f => f.Path == _owner.ConfigService.Config.SelectedFolderPath) ?? _folders.FirstOrDefault();
+            FolderListBox.SelectedItem = selected;
+            // 初始化抑制 SelectionChanged 时仍须同步逻辑选择；选择实例后再随配置一起保存。
+            _owner.ConfigService.Config.SelectedFolderPath = selected?.Path;
+        }
+        finally { _loadingFolders = false; }
+    }
+
+    private void RefreshInstalledVersions() => _ = RefreshInstalledVersionsAsync();
+
+    private async Task RefreshInstalledVersionsAsync(bool automatic = false)
+    {
+        if (!IsLoaded) return;
+        var folder = FolderListBox.SelectedItem as GameFolder;
+        if (automatic && _automaticRefreshRunning &&
+            string.Equals(_scanningFolderPath, folder?.Path, StringComparison.OrdinalIgnoreCase)) return;
+        var generation = ++_refreshGeneration;
+        _scanCancellation?.Cancel();
+        if (folder == null || string.IsNullOrEmpty(folder.Path))
+        {
+            _installed = new List<GameVersion>();
+            InstalledListBox.ItemsSource = _installed;
+            _incompleteVersions.Clear();
+            _displayedFolderPath = null;
+            VersionLoadingHost.Visibility = Visibility.Collapsed;
+            InstalledListBox.IsEnabled = true;
+            ShowHiddenInstancesBtn.Visibility = Visibility.Collapsed;
+            RefreshIncompleteVersionsButtonVisibility();
+            InstanceEmptyMessage.Text = "还没有游戏文件夹。请先在左侧添加已有文件夹。";
+            InstanceEmptyMessage.Visibility = Visibility.Visible;
+            return;
+        }
+        using var cancellation = new CancellationTokenSource();
+        _scanCancellation = cancellation;
+        _automaticRefreshRunning = true;
+        var folderPath = folder.Path;
+        _scanningFolderPath = folderPath;
+        // 后台自动复查保留现有列表；切换文件夹时不能让旧实例继续响应操作。
+        if (!string.Equals(_displayedFolderPath, folderPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _installed = new List<GameVersion>();
+            InstalledListBox.ItemsSource = _installed;
+            _incompleteVersions.Clear();
+            RefreshIncompleteVersionsButtonVisibility();
+            ShowHiddenInstancesBtn.Visibility = Visibility.Collapsed;
+            VersionLoadingHost.Content ??= LoadingPlaceholderFactory.Create();
+            VersionLoadingHost.Visibility = Visibility.Visible;
+            InstalledListBox.IsEnabled = false;
+        }
+        try
+        {
+            var versions = await Task.Run(() => _folderService.ScanVersions(folderPath, cancellation.Token), cancellation.Token);
+            // 应用列表结果排在输入/渲染之后；旧目录/已经卸载的页面绝不能刷回新页面。
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!IsLoaded || generation != _refreshGeneration || cancellation.IsCancellationRequested) return;
+                if (FolderListBox.SelectedItem is not GameFolder current ||
+                    !string.Equals(current.Path, folderPath, StringComparison.OrdinalIgnoreCase)) return;
+                ApplyScannedVersions(folderPath, versions);
+                _displayedFolderPath = folderPath;
+            }, DispatcherPriority.Background);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!automatic && IsLoaded && generation == _refreshGeneration)
+                MessageBoxDialog.ShowWarning("扫描已安装版本失败：\n" + ex.Message, Loc.T("Str_Cs_Error", "错误"));
+        }
+        finally
+        {
+            if (ReferenceEquals(_scanCancellation, cancellation))
+            {
+                _scanCancellation = null;
+                _automaticRefreshRunning = false;
+                if (generation == _refreshGeneration)
+                {
+                    VersionLoadingHost.Visibility = Visibility.Collapsed;
+                    InstalledListBox.IsEnabled = true;
+                }
+            }
+        }
+    }
+
+    private void ApplyScannedVersions(string folderPath, List<GameVersion> versions)
+    {
+        SwitchInstanceBrowseFolder(folderPath);
+        var cfg = _owner.ConfigService.Config;
+        var visible = versions.Where(v => !InstanceDeletionService.IsHidden(cfg, folderPath, v.Id)).ToList();
+        _incompleteVersions = visible.Where(v => !v.IsInstalled).ToList();
+        var selectedId = cfg.SelectedVersionId ?? (InstalledListBox.SelectedItem as GameVersion)?.Id;
+        var unchanged = _installed.Count == visible.Count && _installed.Zip(visible).All(pair =>
+            pair.First.Id == pair.Second.Id && pair.First.McVersion == pair.Second.McVersion &&
+            pair.First.ModLoader == pair.Second.ModLoader && pair.First.ModLoaderVersion == pair.Second.ModLoaderVersion &&
+            pair.First.FolderPath == pair.Second.FolderPath && pair.First.IsInstalled == pair.Second.IsInstalled);
+
+        _refreshingItems = true;
+        try
+        {
+            if (!unchanged)
+            {
+                _installed = visible;
+            }
+            ApplyInstanceFilter(restoreScroll: true, selectedId: selectedId);
+        }
+        finally { _refreshingItems = false; }
+
+        RefreshHiddenInstancesButtonVisibility(folderPath);
+        RefreshIncompleteVersionsButtonVisibility();
+    }
+
+    /// <summary>导入完成后就地刷新，保留页面和当前实例选择。</summary>
+    public void RefreshFromExternalChange()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(new Action(RefreshFromExternalChange));
+            return;
+        }
+        var cfg = _owner.ConfigService.Config;
+        if (!_folders.SequenceEqual(cfg.Folders)) LoadFolders();
+        var selected = _folders.FirstOrDefault(f =>
+            string.Equals(f.Path, cfg.SelectedFolderPath, StringComparison.OrdinalIgnoreCase)) ?? _folders.FirstOrDefault();
+        if (!ReferenceEquals(FolderListBox.SelectedItem, selected)) FolderListBox.SelectedItem = selected;
+        else RefreshInstalledVersions();
+    }
+
+    private void QueueAutomaticRefresh()
+    {
+        if (!IsLoaded) return;
+        _watchDebounce.Stop();
+        _watchDebounce.Start();
+    }
+
+    private Task RefreshVersionsAutomaticallyAsync() => RefreshInstalledVersionsAsync(automatic: true);
+
+    private async void WatchSelectedFolder()
+    {
+        var folderPath = (FolderListBox.SelectedItem as GameFolder)?.Path;
+        if (_versionsWatcher != null &&
+            string.Equals(folderPath, _watchedFolderPath, StringComparison.OrdinalIgnoreCase)) return;
+        if (_pendingWatchFolderPath != null &&
+            string.Equals(folderPath, _pendingWatchFolderPath, StringComparison.OrdinalIgnoreCase)) return;
+        StopWatchingVersions();
+        if (!IsLoaded || string.IsNullOrEmpty(folderPath)) return;
+        var generation = _watchGeneration;
+        _pendingWatchFolderPath = folderPath;
+
+        FileSystemWatcher? watcher = null;
+        try
+        {
+            // 监视根目录，使尚不存在的 versions 目录被创建后也能自动发现。
+            // 网络盘上的 Exists/路径验证也可能阻塞；在工作线程创建，回到 UI 后才接入生命周期。
+            watcher = await Task.Run(() => Directory.Exists(folderPath)
+                ? new FileSystemWatcher(folderPath)
+                {
+                    IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.DirectoryName | NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
+                }
+                : null);
+            if (!IsLoaded || generation != _watchGeneration)
+            {
+                watcher?.Dispose();
+                return;
+            }
+            if (watcher == null) return;
+            void OnChanged(string path)
+            {
+                var parts = Path.GetRelativePath(folderPath, path).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (parts.Length == 0 || !string.Equals(parts[0], "versions", StringComparison.OrdinalIgnoreCase)) return;
+                if (parts.Length > 2 && (parts.Length != 3 ||
+                    !(string.Equals(Path.GetExtension(path), ".json", StringComparison.OrdinalIgnoreCase) ||
+                      string.Equals(Path.GetExtension(path), ".jar", StringComparison.OrdinalIgnoreCase)))) return;
+                if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+                _ = Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (ReferenceEquals(_versionsWatcher, watcher)) QueueAutomaticRefresh();
+                }));
+            }
+            watcher.Created += (_, e) => OnChanged(e.FullPath);
+            watcher.Deleted += (_, e) => OnChanged(e.FullPath);
+            watcher.Changed += (_, e) => OnChanged(e.FullPath);
+            watcher.Renamed += (_, e) => { OnChanged(e.OldFullPath); OnChanged(e.FullPath); };
+            watcher.Error += (_, _) =>
+            {
+                if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+                _ = Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!ReferenceEquals(_versionsWatcher, watcher)) return;
+                    StopWatchingVersions();
+                    QueueAutomaticRefresh();
+                }));
+            };
+            _versionsWatcher = watcher;
+            _watchedFolderPath = folderPath;
+            watcher.EnableRaisingEvents = true;
+        }
+        catch
+        {
+            watcher?.Dispose();
+            if (generation == _watchGeneration) StopWatchingVersions();
+            // 监视不可用时仍由后台定时扫描自动刷新。
+        }
+        finally
+        {
+            if (generation == _watchGeneration) _pendingWatchFolderPath = null;
+        }
+    }
+
+    private void StopWatchingVersions()
+    {
+        ++_watchGeneration;
+        _pendingWatchFolderPath = null;
+        _versionsWatcher?.Dispose();
+        _versionsWatcher = null;
+        _watchedFolderPath = null;
+    }
+
+    /// <summary>刷新"未完成的安装 (N)"提示按钮的可见性/文字，逻辑跟旁边的
+    /// ShowHiddenInstancesBtn 是同一套模式：没有未完成的版本时整个按钮收起来，
+    /// 不占大多数正常用户的界面空间。</summary>
+    private void RefreshIncompleteVersionsButtonVisibility()
+    {
+        if (_incompleteVersions.Count == 0)
+        {
+            IncompleteVersionsBtn.Visibility = Visibility.Collapsed;
+            return;
+        }
+        IncompleteVersionsBtn.Visibility = Visibility.Visible;
+        IncompleteVersionsBtn.Content = $"未完成的安装 ({_incompleteVersions.Count})...";
+    }
+
+    /// <summary>列出需要修复的实例；它们已在主列表中显示。</summary>
+    private void IncompleteVersions_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = FolderListBox.SelectedItem as GameFolder;
+        if (folder == null || _incompleteVersions.Count == 0) return;
+
+        // 每个未完成的实例后面带一个"安装"按钮：只补全文件，不启动游戏。
+        var dlg = new IncompleteInstallsDialog(_incompleteVersions.ToList(),
+            versionId => _owner.EnqueueInstanceRepair(folder, versionId, RefreshInstalledVersions));
+        dlg.ShowDialog();
+        if (dlg.AnyInstalled) RefreshInstalledVersions();
+    }
+
+    /// <summary>当前文件夹下只要有一个隐藏实例，就显示"已隐藏的实例..."入口，否则收起来，
+    /// 避免大多数从没用过该功能的用户平时也要看到一个大概率用不上的按钮。</summary>
+    private void RefreshHiddenInstancesButtonVisibility(string folderPath)
+    {
+        var cfg = _owner.ConfigService.Config;
+        var prefix = InstanceDeletionService.BuildKey(folderPath, "");
+        var hasHidden = cfg.HiddenInstanceKeys.Any(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        ShowHiddenInstancesBtn.Visibility = hasHidden ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void FolderListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingFolders) return;
+        if (FolderListBox.SelectedItem is GameFolder folder)
+        {
+            SwitchInstanceBrowseFolder(folder.Path);
+            _owner.ConfigService.Config.SelectedFolderPath = folder.Path;
+            _owner.ConfigService.Save();
+            RefreshInstalledVersions();
+        }
+        else RefreshInstalledVersions();
+        WatchSelectedFolder();
+    }
+
+    private async void AddFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (ExistingFolderLayout.SelectedIndex == 1)
+        {
+            await ImportExternalInstancesAsync();
+            return;
+        }
+        var dialog = new CompatibleFolderDialog { Title = "选择 .minecraft 文件夹" };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            var folder = _folderService.AddFolder(_owner.ConfigService.Config, dialog.FolderName);
+            _owner.ConfigService.Save();
+            if (!_folders.Contains(folder)) _folders.Add(folder);
+            FolderListBox.SelectedItem = folder;
+        }
+        catch (Exception ex) { ErrorPresenter.ShowFriendlyError("添加游戏目录失败。", ex.ToString(), "添加失败"); }
+    }
+
+    /// <summary>"导入整合包..."按钮：跟拖拽整合包进窗口是同一条路，只是不用拖，直接弹文件选择框。
+    /// 复用 MainWindow.ImportDroppedModpackAsync——装成新实例还是装进已有实例、进度弹窗、
+    /// 失败提示，这些都跟拖拽安装完全一致，不用在这里再写一遍。</summary>
+    private async void ImportModpack_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "选择整合包文件",
+            Filter = "整合包文件 (*.zip;*.mrpack)|*.zip;*.mrpack|所有文件 (*.*)|*.*"
+        };
+        if (dialog.ShowDialog() != true) return;
+
+        await _owner.ImportDroppedModpackAsync(dialog.FileName);
+    }
+
+    private async void ImportInstanceFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (FolderListBox.SelectedItem is not GameFolder folder)
+        {
+            MessageBoxDialog.ShowInfo("请先在左侧选择/添加一个 .minecraft 文件夹，再导入实例。", "提示");
+            return;
+        }
+
+        var pickDialog = new OpenFolderDialog { Title = "选择要导入的版本文件夹" };
+        if (pickDialog.ShowDialog() != true) return;
+        var sourceFolder = pickDialog.FolderName;
+
+        if (Directory.GetFiles(sourceFolder, "*.json", SearchOption.TopDirectoryOnly).Length == 0)
+        {
+            MessageBoxDialog.ShowInfo("所选文件夹里没有找到版本 json 文件，这可能不是一个完整的版本文件夹。", "无法导入");
+            return;
+        }
+
+        var suggested = Path.GetFileName(sourceFolder.TrimEnd('\\', '/'));
+        var existingNames = new HashSet<string>(
+            Directory.Exists(Path.Combine(folder.Path, "versions"))
+                ? Directory.GetDirectories(Path.Combine(folder.Path, "versions")).Select(d => Path.GetFileName(d) ?? string.Empty)
+                : Array.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        var nameDialog = new RenameInstanceDialog(suggested, n => existingNames.Contains(n), "导入实例文件夹");
+        if (OverlayDialogService.ShowModal(nameDialog) != true) return;
+
+        try
+        {
+            if (!await ImportPreviewDialog.ConfirmAsync(sourceFolder, InstanceUxService.GetVersionDirectory(folder.Path, nameDialog.NewName), nameDialog.NewName, ImportPreviewKind.InstanceFolder)) return;
+            await _folderService.ImportVersionFolderAsync(folder.Path, sourceFolder, nameDialog.NewName);
+            _owner.NotifyInstanceImported(folder.Path, nameDialog.NewName);
+            ToastService.ShowSuccess($"已导入实例「{nameDialog.NewName}」");
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError("导入实例文件夹失败，请确认源文件夹完整且磁盘空间足够。",
+                ex.ToString(), "导入失败");
+        }
+    }
+
+    /// <summary>"导入实例文件..."（小号链接入口）：跟上面"导入实例文件夹"是同一件事，只是源头
+    /// 换成打包好的 .zip，不用用户先自己解压出来。</summary>
+    private async void ImportInstanceFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (FolderListBox.SelectedItem is not GameFolder folder)
+        {
+            MessageBoxDialog.ShowInfo("请先在左侧选择/添加一个 .minecraft 文件夹，再导入实例。", "提示");
+            return;
+        }
+
+        var pickDialog = new OpenFileDialog { Title = "选择要导入的实例文件", Filter = "实例压缩包 (*.zip)|*.zip|所有文件 (*.*)|*.*" };
+        if (pickDialog.ShowDialog() != true) return;
+
+        var suggested = Path.GetFileNameWithoutExtension(pickDialog.FileName);
+        var existingNames = new HashSet<string>(
+            Directory.Exists(Path.Combine(folder.Path, "versions"))
+                ? Directory.GetDirectories(Path.Combine(folder.Path, "versions")).Select(d => Path.GetFileName(d) ?? string.Empty)
+                : Array.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        var nameDialog = new RenameInstanceDialog(suggested, n => existingNames.Contains(n), "导入实例文件");
+        if (OverlayDialogService.ShowModal(nameDialog) != true) return;
+        if (!await ImportPreviewDialog.ConfirmAsync(pickDialog.FileName, InstanceUxService.GetVersionDirectory(folder.Path, nameDialog.NewName), nameDialog.NewName, ImportPreviewKind.InstanceZip)) return;
+
+        var pd = new ProgressDialog($"正在导入实例文件「{Path.GetFileName(pickDialog.FileName)}」...");
+        pd.Show();
+        try
+        {
+            await _folderService.ImportVersionZipAsync(folder.Path, pickDialog.FileName, nameDialog.NewName);
+            _owner.NotifyInstanceImported(folder.Path, nameDialog.NewName);
+            ToastService.ShowSuccess($"已导入实例「{nameDialog.NewName}」");
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError(
+                ex is InvalidOperationException ? ex.Message : "导入实例文件失败，可能是文件损坏或磁盘空间不足。",
+                ex.ToString(), "导入失败");
+        }
+        finally
+        {
+            pd.Close();
+        }
+    }
+
+    private async void InstallNewVersion_Click(object sender, RoutedEventArgs e)
+    {
+        if (FolderListBox.SelectedItem is not GameFolder folder)
+        {
+            MessageBoxDialog.ShowInfo("请先在左侧选择/添加一个 .minecraft 文件夹，再安装新版本。",
+                "提示");
+            return;
+        }
+
+        var folderPath = folder.Path;
+        var window = new InstallClientLoaderWindow(_owner);
+        if (window.ShowDialog() == true)
+        {
+            await RefreshInstalledVersionsAsync();
+            if (IsLoaded && window.InstalledVersionId != null &&
+                string.Equals(GetSelectedFolderPath(), folderPath, StringComparison.OrdinalIgnoreCase))
+            {
+                var installed = _installed.FirstOrDefault(v => v.Id == window.InstalledVersionId);
+                if (installed != null) InstalledListBox.SelectedItem = installed;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 右键菜单"在中文 Minecraft Wiki 中查看"：跳转到 zh.minecraft.wiki 对应版本号的搜索/条目页。
+    /// Wiki 站内条目路径不完全规律(比如 "Java版 1.20.1" 这种命名规则可能随版本命名规则变化)，
+    /// 这里统一走 Special:Search，命中时 MediaWiki 会自动跳到唯一匹配的条目，没命中也能看到
+    /// 搜索结果页而不是 404，比强行拼一个可能拼错的条目直链更稳妥。
+    /// </summary>
+    private void ViewOnWiki_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameVersion v }) return;
+        OpenMinecraftWiki(v.Id);
+    }
+
+    /// <summary>
+    /// 判断一个版本号是否是"正式版"命名格式（只由数字和点号组成，如 "1.20.4"、"26.3"）。
+    /// 中文 Minecraft Wiki 给正式版开的条目统一是 "Java版&lt;版本号&gt;" 该固定格式
+    /// （例如 https://zh.minecraft.wiki/w/Java%E7%89%8826.3 ，对应"Java版26.3"），
+    /// 可以直接拼直链；快照/预发布/候选版/愚人节版本命名不规律，没有该规律，仍然走搜索兜底。
+    /// </summary>
+    private static bool LooksLikeReleaseId(string id)
+    {
+        if (string.IsNullOrEmpty(id)) return false;
+        foreach (var c in id)
+        {
+            if (!char.IsDigit(c) && c != '.') return false;
+        }
+        return true;
+    }
+
+    /// <summary>打开系统默认浏览器访问中文 Minecraft Wiki 对给定版本号的页面：
+    /// 正式版（纯数字+点号，如 "26.3"）直接拼 "Java版&lt;版本号&gt;" 条目直链；
+    /// 其余命名不规律的版本（快照/预发布/候选版/愚人节版本等）退回 Special:Search，
+    /// 命中时 MediaWiki 会自动跳到唯一匹配的条目，没命中也能看到搜索结果页而不是 404，
+    /// 比强行拼一个可能拼错的条目直链更稳妥。
+    /// 用 Process.Start 的 UseShellExecute 方式打开 URL（不直接拼 Process.Start(url) 是因为
+    /// .NET 默认不会把 url 当可执行文件处理，需要显式声明走 Shell 关联程序）。</summary>
+    internal static void OpenMinecraftWiki(string keyword)
+    {
+        try
+        {
+            var url = LooksLikeReleaseId(keyword)
+                ? "https://zh.minecraft.wiki/w/" + Uri.EscapeDataString("Java版" + keyword)
+                : "https://zh.minecraft.wiki/?search=" + Uri.EscapeDataString(keyword);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowWarning("打开浏览器失败：\n" + ex.Message, Loc.T("Str_Cs_Error", "错误"));
+        }
+    }
+
+    /// <summary>拿到 .minecraft 根目录路径：优先用当前选中的 GameFolder（左侧列表选中项），
+    /// 是当前页面里唯一的"当前文件夹"来源。</summary>
+    private string? GetSelectedFolderPath() => (FolderListBox.SelectedItem as GameFolder)?.Path;
+
+    private void RenameInstance_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameVersion v }) return;
+        RenameInstance(v);
+    }
+
+    private async void RenameInstance(GameVersion v)
+    {
+        var folderPath = GetSelectedFolderPath();
+        if (string.IsNullOrEmpty(folderPath)) return;
+
+        var dlg = new RenameInstanceDialog(
+            v.Id,
+            isNameTaken: candidate => candidate != v.Id &&
+                _installed.Any(other => other.Id != v.Id && string.Equals(other.Id, candidate, StringComparison.OrdinalIgnoreCase)),
+            title: "重命名实例");
+
+        if (OverlayDialogService.ShowModal(dlg) != true) return;
+
+        try
+        {
+            if (_owner.ConfigService.Config.Ux50RenamePreview && !MessageBoxDialog.ShowConfirm(
+                $"原名称：{v.Id}\n新名称：{dlg.NewName}\n目标目录：{InstanceUxService.GetVersionDirectory(folderPath, dlg.NewName)}\n\n确认后才会重命名实例。", "重命名预览")) return;
+            EnsureInstanceMutationAllowed(folderPath, v.Id);
+            InstanceDeletionService.Rename(_owner.ConfigService.Config, folderPath, v.Id, dlg.NewName);
+            InstanceUxService.Rename(_owner.ConfigService.Config, folderPath, v.Id, dlg.NewName);
+            _owner.ConfigService.Save();
+            await RefreshInstalledVersionsAsync();
+            if (!IsLoaded || !string.Equals(GetSelectedFolderPath(), folderPath, StringComparison.OrdinalIgnoreCase)) return;
+            var renamed = _installed.FirstOrDefault(i => string.Equals(i.Id, dlg.NewName, StringComparison.OrdinalIgnoreCase));
+            if (renamed != null) InstalledListBox.SelectedItem = renamed;
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError("重命名失败：\n" + ex.Message);
+        }
+    }
+
+    /// <summary>⚙️ 菜单"补全文件"：只补全缺失文件，不启动游戏。仅对不完整的实例显示。</summary>
+    private void RepairInstance_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameVersion v }) return;
+        if (FolderListBox.SelectedItem is not GameFolder folder) return;
+
+        // 走统一下载队列（右上角下载抽屉），不再弹独占的模态进度框。
+        _owner.EnqueueInstanceRepair(folder, v.Id, RefreshInstalledVersions);
+    }
+
+    /// <summary>⚙️ 二级菜单 / 右键菜单"删除..."：先弹选择方式的弹窗(DeleteInstanceChoiceDialog)，
+    /// 用户选"从电脑中删除"时再追加一层 xztx127 确认，通过了才真正物理删除。</summary>
+    private void DeleteInstance_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameVersion v }) return;
+        DeleteInstance(v);
+    }
+
+    private async void DeleteInstance(GameVersion v)
+    {
+        var folderPath = GetSelectedFolderPath();
+        if (string.IsNullOrEmpty(folderPath)) return;
+
+        var choiceDlg = new DeleteInstanceChoiceDialog(v.Id);
+        if (OverlayDialogService.ShowModal(choiceDlg) != true || choiceDlg.Choice == null) return;
+
+        var cfg = _owner.ConfigService.Config;
+
+        if (choiceDlg.Choice == DeleteInstanceChoiceDialog.DeleteChoice.RemoveFromList)
+        {
+            InstanceDeletionService.HideFromList(cfg, folderPath, v.Id);
+            if (InstanceDeletionService.BuildKey(cfg.SelectedFolderPath ?? "", cfg.SelectedVersionId ?? "") ==
+                InstanceDeletionService.BuildKey(folderPath, v.Id)) cfg.SelectedVersionId = null;
+            _owner.ConfigService.Save();
+            _owner.RefreshSidebar();
+            RefreshInstalledVersions();
+            return;
+        }
+
+        if (choiceDlg.Choice == DeleteInstanceChoiceDialog.DeleteChoice.DeleteToRecycleBin)
+        {
+            // 回收站可撤销，不需要再追加 xztx127 确认这道门槛。
+            try
+            {
+                EnsureInstanceMutationAllowed(folderPath, v.Id);
+                using var mutation = ComponentsOperationLock.AcquireForMaintenance(folderPath, v.Id);
+                await InstanceDeletionService.DeleteToRecycleBinAsync(cfg, folderPath, v.Id);
+                _owner.ConfigService.Save();
+                _owner.RefreshSidebar();
+                RefreshInstalledVersions();
+            }
+            catch (Exception ex)
+            {
+                MessageBoxDialog.ShowError("删除失败：\n" + ex.Message);
+            }
+            return;
+        }
+
+        // 从电脑中删除：物理删除，需要再过一道 xztx127 确认码，不可撤销。
+        var confirmDlg = new DangerousConfirmDialog(
+            "从电脑中删除实例",
+            $"将彻底删除「{v.Id}」该实例目录下的所有文件（存档、mod、资源包、日志等），此操作不可撤销。");
+        if (OverlayDialogService.ShowModal(confirmDlg) != true || !confirmDlg.Confirmed) return;
+
+        try
+        {
+            EnsureInstanceMutationAllowed(folderPath, v.Id);
+            using var mutation = ComponentsOperationLock.AcquireForMaintenance(folderPath, v.Id);
+            await InstanceDeletionService.DeletePermanentlyAsync(cfg, folderPath, v.Id);
+            _owner.ConfigService.Save();
+            _owner.RefreshSidebar();
+            RefreshInstalledVersions();
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError("删除失败：\n" + ex.Message);
+        }
+    }
+
+    /// <summary>"已隐藏的实例..."入口：列出当前文件夹下所有被"从列表中删除"的实例 id，
+    /// 逐条支持"取消隐藏"重新出现在主列表。用最简单的方式实现——复用 MessageBoxDialog
+    /// 之外没有专门做一个列表弹窗的必要，这里手写一个轻量 Overlay 内容更直观。</summary>
+    private void ShowHiddenInstances_Click(object sender, RoutedEventArgs e)
+    {
+        var folderPath = GetSelectedFolderPath();
+        if (string.IsNullOrEmpty(folderPath)) return;
+
+        var cfg = _owner.ConfigService.Config;
+        var prefix = InstanceDeletionService.BuildKey(folderPath, "");
+        var hiddenIds = cfg.HiddenInstanceKeys
+            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(k => k.Substring(prefix.Length))
+            .ToList();
+
+        if (hiddenIds.Count == 0)
+        {
+            RefreshHiddenInstancesButtonVisibility(folderPath);
+            return;
+        }
+
+        var dlg = new HiddenInstancesDialog(hiddenIds);
+        if (OverlayDialogService.ShowModal(dlg) != true) return;
+
+        foreach (var id in dlg.UnhiddenIds)
+            InstanceDeletionService.UnhideFromList(cfg, folderPath, id);
+
+        if (dlg.UnhiddenIds.Count > 0)
+        {
+            _owner.ConfigService.Save();
+            RefreshInstalledVersions();
+        }
+    }
+
+    /// <summary>实例条目右侧⚙️图标：点击不再直接进设置，而是弹出它的二级菜单
+    /// （版本设置/重命名/删除），设置入口从菜单里进。</summary>
+    private void OpenInstanceSettingsMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.ContextMenu == null) return;
+        btn.ContextMenu.PlacementTarget = btn;
+        btn.ContextMenu.IsOpen = true;
+    }
+
+    /// <summary>⚙️ 二级菜单"版本设置..."：弹出该实例的独立设置弹窗(InstanceSettingsDialog)。</summary>
+    private void OpenInstanceSettings_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameVersion v }) return;
+        var folderPath = GetSelectedFolderPath();
+        if (string.IsNullOrEmpty(folderPath)) return;
+
+        var dlg = new InstanceSettingsDialog(_owner, folderPath, v);
+        if (OverlayDialogService.ShowModal(dlg) != true) return;
+
+        _owner.RefreshSidebar();
+    }
+
+    private async void ManageComponents_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameVersion version }) return;
+        var root = GetSelectedFolderPath();
+        if (string.IsNullOrWhiteSpace(root)) return;
+        var dialog = new InstalledVersionComponentsDialog(_owner, root, version);
+        dialog.ShowDialog();
+        if (!dialog.Changed) return;
+        await RefreshInstalledVersionsAsync();
+        _owner.RefreshSidebar();
+    }
+
+    private void InstalledListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingItems) return;
+        RefreshBackgroundTaskOwnership();
+        if (InstalledListBox.SelectedItem is GameVersion v)
+        {
+            _owner.ConfigService.Config.SelectedVersionId = v.Id;
+            _owner.ConfigService.Save();
+            _owner.RefreshSidebar();
+        }
+    }
+
+    // ============================================================
+    // 游戏文件夹：设置菜单（打开/重命名/设为默认/删除）
+    // ============================================================
+
+    /// <summary>文件夹条目右侧⚙️图标：点击弹出它的二级菜单。</summary>
+    private void FolderSettingsMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.ContextMenu == null) return;
+        btn.ContextMenu.PlacementTarget = btn;
+        btn.ContextMenu.IsOpen = true;
+    }
+
+    /// <summary>菜单"打开文件夹"：用资源管理器打开该 .minecraft 目录。</summary>
+    private void OpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameFolder f }) return;
+        if (string.IsNullOrEmpty(f.Path) || !Directory.Exists(f.Path))
+        {
+            MessageBoxDialog.ShowWarning("文件夹路径不存在：\n" + f.Path, Loc.T("Str_Cs_Error", "错误"));
+            return;
+        }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", f.Path) { UseShellExecute = true }); }
+        catch (Exception ex) { MessageBoxDialog.ShowError($"打开文件夹失败：{ex.Message}"); }
+    }
+
+    /// <summary>菜单"重命名文件夹..."：只改列表里的显示名（GameFolder.Name），不改磁盘目录名。</summary>
+    private void RenameFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameFolder f }) return;
+        var dlg = new RenameInstanceDialog(
+            f.Name,
+            candidate => _folders.Any(other => !ReferenceEquals(other, f) && string.Equals(other.Name, candidate, StringComparison.OrdinalIgnoreCase)),
+            title: "重命名文件夹");
+        if (OverlayDialogService.ShowModal(dlg) != true) return;
+        f.Name = dlg.NewName;
+        _owner.ConfigService.Save();
+        FolderListBox.Items.Refresh();   // GameFolder 没有属性变更通知，手动刷新让显示名跟上来
+    }
+
+    /// <summary>菜单"设为默认文件夹"：把目标文件夹的 IsDefault 置 true，其余全部置 false。</summary>
+    private void SetDefaultFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameFolder f }) return;
+        if (f.IsDefault) return;
+        foreach (var other in _folders) other.IsDefault = ReferenceEquals(other, f);
+        _owner.ConfigService.Save();
+        FolderListBox.Items.Refresh();   // 刷新"（默认）"角标
+    }
+
+    /// <summary>菜单"删除文件夹（从列表中移除）"：只从配置列表移除，不删磁盘文件。</summary>
+    private void RemoveFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameFolder f }) return;
+        if (!MessageBoxDialog.ShowConfirm(
+            $"确定要将文件夹「{f.Name}」从列表中移除吗？\n（不会删除磁盘上的任何文件，之后仍可通过「添加已有文件夹」重新加入。）",
+            "移除文件夹")) return;
+
+        RemoveFolderFromLists(f);
+        if (FolderListBox.SelectedItem == null)
+            FolderListBox.SelectedItem = _folders.FirstOrDefault();
+    }
+
+    /// <summary>菜单"直接删除文件夹（从电脑中删除）"：物理删除整个目录，必须输入 xztx127 确认。</summary>
+    private void DeleteFolderFromDisk_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: GameFolder f }) return;
+        if (!Directory.Exists(f.Path))
+        {
+            MessageBoxDialog.ShowWarning("文件夹路径不存在，无法从电脑中删除：\n" + f.Path, Loc.T("Str_Cs_Error", "错误"));
+            return;
+        }
+
+        var confirmDlg = new DangerousConfirmDialog(
+            "从电脑中删除文件夹",
+            $"将彻底删除「{f.Name}」文件夹下的所有内容（存档、mod、资源包、版本文件等）：\n{f.Path}\n\n此操作不可撤销！");
+        if (OverlayDialogService.ShowModal(confirmDlg) != true || !confirmDlg.Confirmed) return;
+
+        try
+        {
+            Directory.Delete(f.Path, recursive: true);
+            RemoveFolderFromLists(f);
+            if (FolderListBox.SelectedItem == null)
+                FolderListBox.SelectedItem = _folders.FirstOrDefault();
+            MessageBoxDialog.ShowInfo($"已从电脑中删除文件夹：\n{f.Path}", "删除完成");
+        }
+        catch (Exception ex)
+        {
+            MessageBoxDialog.ShowError("删除文件夹失败：\n" + ex.Message);
+        }
+    }
+
+    /// <summary>把文件夹从配置列表和当前列表里移除；如果移除的是当前选中的文件夹，
+    /// 顺便清掉 SelectedFolderPath/SelectedVersionId 并刷新侧边栏与版本列表。</summary>
+    private void RemoveFolderFromLists(GameFolder f)
+    {
+        var cfg = _owner.ConfigService.Config;
+        cfg.Folders.Remove(f);
+        _folders.Remove(f);
+        if (cfg.SelectedFolderPath == f.Path)
+        {
+            cfg.SelectedFolderPath = null;
+            cfg.SelectedVersionId = null;
+        }
+        _owner.ConfigService.Save();
+        _owner.RefreshSidebar();
+        RefreshInstalledVersions();
+    }
+
+}

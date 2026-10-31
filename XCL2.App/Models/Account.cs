@@ -1,0 +1,128 @@
+using System.Text.Json.Serialization;
+
+namespace XCL2.App.Models;
+
+public enum AccountType
+{
+    Offline,
+    Microsoft,
+
+    /// <summary>
+    /// 通过第三方认证服务器（Yggdrasil 协议兼容的"皮肤站"，例如基于 authlib-injector 的
+    /// 统一通行证/blessing-skin 类服务）登录的账户。跟 Offline/Microsoft 是完全独立的第三种
+    /// 类型，不复用/不影响原有两种账户类型的任何处理逻辑——LauncherService、SkinService、
+    /// LoginPage 里所有原来 "account.Type == AccountType.Offline" / "== AccountType.Microsoft"
+    /// 的判断分支保持原样不动，该新类型只在各自新增的 else/switch 分支里被处理。
+    /// </summary>
+    AuthServer
+}
+
+/// <summary>
+/// 单个账户记录。离线账户与微软账户共存于同一列表中，
+/// 通过 Type 区分。登录令牌只保留在本次运行的内存中，重启后需要重新登录。
+/// </summary>
+public class Account
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public AccountType Type { get; set; } = AccountType.Offline;
+
+    /// <summary>游戏内显示的用户名</summary>
+    public string Username { get; set; } = "Player";
+
+    /// <summary>
+    /// 玩家 UUID（离线账户由用户名哈希生成，微软账户由 Xbox/Minecraft 服务返回，
+    /// 例如用户提供的 b41a829c-4710-4954-a6de-814923dca264）
+    /// </summary>
+    public string Uuid { get; set; } = "";
+
+    /// <summary>微软账户：仅在当前进程内用于刷新会话，不参与账户序列化。</summary>
+    [JsonIgnore]
+    public string? MsRefreshToken { get; set; }
+
+    /// <summary>本次运行的游戏访问令牌；仅经用户两次确认后才允许主动导出。</summary>
+    [JsonIgnore]
+    public string? MinecraftAccessToken { get; set; }
+
+    /// <summary>access token 过期时间（UTC），到期前会自动用 refresh token 静默刷新</summary>
+    public DateTime? AccessTokenExpiresAtUtc { get; set; }
+
+    /// <summary>
+    /// 最近一次成功完成在线校验（登录成功，或 refresh token 静默刷新成功）的时间（UTC）。
+    /// 用于"令牌保留时效"降级判断：access token 过期后尝试刷新，若失败原因是网络/Mojang
+    /// 服务本身不可用（而非 refresh token 已失效这种明确的认证拒绝），且距该时间不超过
+    /// <see cref="AppConfig.AccountTokenGracePeriodDays"/> 天，则允许直接用本地缓存的
+    /// Uuid/Username 离线启动，不阻塞玩家。见 MicrosoftAuthService 调用处。
+    /// </summary>
+    public DateTime? LastVerifiedAtUtc { get; set; }
+
+    /// <summary>
+    /// 认证服务器（皮肤站）账户专用：登录时使用的 Yggdrasil API 根地址（例如
+    /// "https://example.com/api/yggdrasil"），游戏启动时会用该地址给
+    /// authlib-injector 挂 -javaagent，让客户端向该地址而不是 Mojang 官方服务器
+    /// 请求会话校验/皮肤，这样才能真正以该账户的身份、皮肤进入游戏。
+    /// 只对 Type=AuthServer 有意义。
+    /// </summary>
+    public string? AuthServerApiRoot { get; set; }
+
+    /// <summary>
+    /// 认证服务器（皮肤站）账户专用：登录时服务端生成/返回的 clientToken，
+    /// 用于以后调用 /refresh 静默刷新会话而不需要用户重新输入密码。
+    /// 只对 Type=AuthServer 有意义。
+    /// </summary>
+    [JsonIgnore]
+    public string? AuthServerClientToken { get; set; }
+
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>是否为当前选中使用的账户</summary>
+    public bool IsSelected { get; set; }
+
+    /// <summary>
+    /// 是否为"访客模式"临时账户：这类账户只存在于内存中，不会被
+    /// ConfigService.AddOrUpdateAccount/SaveAccounts 写入 accounts.json，
+    /// 启动器关闭后自动消失，不留下任何记录。见 GuestModeService。
+    /// </summary>
+    public bool IsGuest { get; set; }
+
+    /// <summary>
+    /// 离线皮肤类型：None(不设置/使用游戏默认)、Steve、Alex、Custom(自定义上传的皮肤文件)。
+    /// 只对离线账户有意义——微软账户的皮肤由 Mojang 服务器托管，启动器不需要也不应该干预。
+    /// </summary>
+    public OfflineSkinType SkinType { get; set; } = OfflineSkinType.None;
+
+    /// <summary>
+    /// 自定义皮肤文件在本地的存放路径（SkinType=Custom 时有效），指向
+    /// xcl2/skins/&lt;accountId&gt;.png。史蒂夫/艾利克斯是内置资源，不需要该字段。
+    /// </summary>
+    public string? CustomSkinPath { get; set; }
+
+    /// <summary>
+    /// 自定义皮肤是否为"纤细手臂"模型（Alex 骨架，对应 authlib-injector 的 slim 变体）。
+    /// 只在 SkinType=Custom 时有意义；上传时由用户选择。
+    /// </summary>
+    public bool CustomSkinSlim { get; set; }
+
+    /// <summary>
+    /// 用户自己导入的一张头像照片（跟 Minecraft 皮肤完全无关，可以是任意图片：自拍、
+    /// 头像图、表情包……），存放在 xcl2/avatars/&lt;accountId&gt;.&lt;ext&gt;。设置了该字段之后，
+    /// 「账户」页和「选择账户启动」弹窗里该账户前面显示的头像会优先用这张照片，
+    /// 而不是皮肤正脸渲染或史蒂夫默认头像——见 AccountAvatarConverter 的优先级说明。
+    /// </summary>
+    public string? AvatarPhotoPath { get; set; }
+
+    public string DisplayLabel => Type switch
+    {
+        AccountType.Microsoft => $"{Username} (微软账户)",
+        AccountType.AuthServer => $"{Username} (认证服务器账户)",
+        _ => IsGuest ? $"{Username} (访客)" : $"{Username} (离线账户)"
+    };
+}
+
+/// <summary>离线账户的皮肤来源：不设置、内置史蒂夫/艾利克斯、或用户自定义上传。</summary>
+public enum OfflineSkinType
+{
+    None,
+    Steve,
+    Alex,
+    Custom
+}

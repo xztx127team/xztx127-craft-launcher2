@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0-windows</TargetFramework><UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AppConfig.Sidebar.cs" Link="AppConfig.Sidebar.cs"/>
+    <Compile Include="../../Services/SidebarPreferences.cs" Link="SidebarPreferences.cs"/>
+    <Compile Include="../../Services/SidebarPlacementLayout.cs" Link="SidebarPlacementLayout.cs"/>
+  </ItemGroup>
+</Project>

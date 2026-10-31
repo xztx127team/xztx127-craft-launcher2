@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/AppConfig.PerformanceLayout.cs" Link="AppConfig.PerformanceLayout.cs" />
+    <Compile Include="../../Models/AppConfig.PerformanceHardwareDetails.cs" Link="AppConfig.PerformanceHardwareDetails.cs" />
+    <Compile Include="../../Models/PerformanceMetrics.cs" Link="PerformanceMetrics.cs" />
+    <Compile Include="../../Services/PerformanceHardwareDetails.cs" Link="PerformanceHardwareDetails.cs" />
+  </ItemGroup>
+</Project>

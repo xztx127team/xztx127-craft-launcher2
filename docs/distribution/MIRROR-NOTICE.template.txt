@@ -1,0 +1,28 @@
+UNOFFICIAL MIRROR / 非官方原样镜像
+
+Template: replace every <...> field before publishing.
+模板：发布前将所有 <...> 字段替换为真实信息。
+
+Mirror operator / 镜像提供者: <public name>
+Original project / 原项目: XCL2
+Original download source / 原始下载来源: <actual upstream release URL>
+Original package version / 原包版本: <version>
+Mirrored file SHA-256 / 镜像文件校验值: <actual hash>
+Matching source location / 对应源码位置: <actual source URL>
+Mirror date / 镜像日期: <YYYY-MM-DD>
+
+本下载渠道由上述镜像提供者独立维护，属于非官方镜像，与 XCL2 原项目
+维护者无隶属、代理或背书关系。本次镜像分发不是原项目官方发布渠道。
+镜像归档内容未经修改；原始包的制作、版权与许可归属保持不变。
+本声明不代表原项目对本下载渠道提供支持、担保或认证。
+
+This is an unofficial mirror independently operated by the provider above,
+not affiliated with, acting as an agent for, or endorsed by the original
+XCL2 maintainers. This mirror distribution is not an official upstream
+publishing channel. Archive contents are unchanged; authorship, copyright,
+and licensing of the original package remain unchanged. No upstream support,
+warranty, or verification of this download channel is claimed.
+
+Keep this notice beside the mirrored archive and on the download page.
+If you alter archive contents, use the modified-package notice instead.
+将本说明置于镜像文件旁及下载页面；若修改了归档内容，请改用修改包模板。

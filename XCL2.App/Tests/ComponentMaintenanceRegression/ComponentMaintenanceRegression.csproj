@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs"/>
+    <Compile Include="../../Services/ComponentProfileTransaction.cs" Link="ComponentProfileTransaction.cs"/>
+    <Compile Include="../../Services/ComponentProfileComposer.cs" Link="ComponentProfileComposer.cs"/>
+    <Compile Include="../../Services/ClientLoaderProfileEndpoints.cs" Link="ClientLoaderProfileEndpoints.cs"/>
+    <Compile Include="../../Services/ComponentProfileCustomization.cs" Link="ComponentProfileCustomization.cs"/>
+    <Compile Include="../../Services/InstalledComponentInventory.cs" Link="InstalledComponentInventory.cs"/>
+    <Compile Include="../../Services/ComponentsOperationLock.cs" Link="ComponentsOperationLock.cs"/>
+    <Compile Include="../../Services/VersionInfoResolver.cs" Link="VersionInfoResolver.cs"/>
+    <Compile Include="../../Models/VersionManifest.cs" Link="VersionManifest.cs"/>
+  </ItemGroup>
+</Project>

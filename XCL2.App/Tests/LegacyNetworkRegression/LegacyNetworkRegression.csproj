@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/ResourceDownloadPath.cs" Link="ResourceDownloadPath.cs" />
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs" />
+    <Compile Include="../../Models/AppConfig.WindowsCompatibility.cs" Link="AppConfig.WindowsCompatibility.cs" />
+    <Compile Include="../../Services/WindowsCompatibilityService.cs" Link="WindowsCompatibilityService.cs" />
+    <Compile Include="../../Services/LauncherHttpClientFactory.cs" Link="LauncherHttpClientFactory.cs" />
+    <Compile Include="../../Services/CurseForgeApiTransport.cs" Link="CurseForgeApiTransport.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/DiagnosticRedactionService.cs" Link="DiagnosticRedactionService.cs"/>
+    <Compile Include="../../Services/DiagnosticsExportService.cs" Link="DiagnosticsExportService.cs"/>
+    <Compile Include="../../Services/ScreenshotBrowserService.cs" Link="ScreenshotBrowserService.cs"/>
+    <Compile Include="../../Services/ServerConnectionCopyService.cs" Link="ServerConnectionCopyService.cs"/>
+    <Compile Include="../../Services/TaskResultHistoryService.cs" Link="TaskResultHistoryService.cs"/>
+      <Compile Include="../../Services/LogTextEncoding.cs" Link="LogTextEncoding.cs"/>
+  </ItemGroup>
+</Project>

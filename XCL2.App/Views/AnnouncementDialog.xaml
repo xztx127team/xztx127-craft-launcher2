@@ -1,0 +1,56 @@
+<local:OverlayDialogControl x:Class="XCL2.App.Views.AnnouncementDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:XCL2.App.Views"
+        Width="520">
+    
+    <DockPanel Margin="0" MaxHeight="560">
+        <TextBlock DockPanel.Dock="Top" Text="公告" FontSize="18" FontWeight="Bold" Margin="20,20,20,4"/>
+        <TextBlock DockPanel.Dock="Top" Text="请仔细阅读以下内容，点击「我知道了」后本次不再提示"
+                   FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="20,0,20,12"/>
+
+        <Button DockPanel.Dock="Bottom" x:Name="ConfirmBtn" Content="我知道了"
+                HorizontalAlignment="Right" Margin="0,0,20,20" Padding="20,8"
+                Background="{DynamicResource AccentBrush}" Foreground="White"
+                Click="Confirm_Click"/>
+
+        <ScrollViewer MaxHeight="440" VerticalScrollBarVisibility="Auto" Margin="20,0,20,0">
+            <ItemsControl x:Name="AnnouncementList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{DynamicResource PanelBrush}" CornerRadius="8"
+                                Padding="14,12" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="Bold"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" Margin="0,0,0,6"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Content}" FontSize="12.5" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource TextPrimaryBrush}" LineHeight="20"/>
+                                <!-- 极少数公告（目前只有简洁模式那一条）带一个可选的行内操作按钮：
+                                     ActionLabel 为空时 Visibility 转 Collapsed，不占地方；点击不会
+                                     关闭整个公告弹窗（可能还有别的公告没看完），只是把 ActionKey
+                                     通过 ActionInvoked 事件交给 MainWindow 处理，见 code-behind。 -->
+                                <Button Content="{Binding ActionLabel}" Tag="{Binding ActionKey}"
+                                        Click="AnnouncementAction_Click"
+                                        HorizontalAlignment="Left" Margin="0,10,0,0" Padding="14,6"
+                                        FontSize="11.5" Background="{DynamicResource AccentBrush}" Foreground="White">
+                                    <!-- ActionLabel 为空(绝大多数公告)时整个按钮 Collapsed，不占地方；
+                                         用 DataTrigger 比再写一个 IValueConverter 类更轻。 -->
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ActionLabel}" Value="{x:Null}">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</local:OverlayDialogControl>

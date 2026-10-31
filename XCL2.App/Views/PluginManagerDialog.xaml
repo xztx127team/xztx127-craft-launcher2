@@ -1,0 +1,61 @@
+<local:OverlayDialogControl x:Class="XCL2.App.Views.PluginManagerDialog"
+                            xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                            xmlns:local="clr-namespace:XCL2.App.Views"
+                            xmlns:services="clr-namespace:XCL2.App.Services"
+                            MinWidth="640" MaxWidth="640" MinHeight="560" MaxHeight="620">
+ 
+ <Grid Margin="20">
+  <Grid.RowDefinitions>
+   <RowDefinition Height="*"/>
+   <RowDefinition Height="Auto"/>
+  </Grid.RowDefinitions>
+
+  <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
+                services:ScrollWheelBehavior.EnableFastWheel="True">
+   <StackPanel>
+    <StackPanel Margin="0,0,0,10">
+     <TextBlock Text="插件管理" FontSize="18" FontWeight="Bold" Margin="0,0,0,4"/>
+     <TextBlock Text="拖入 XCL / DLL / EXE / .xclplugin 自动安装；也可使用下方按钮选择文件。导入前会提示确认来源。"
+                Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" TextWrapping="Wrap"/>
+    </StackPanel>
+
+    <!-- 开发命令工具条：都是这次新增的“开发命令”。 -->
+    <WrapPanel Margin="0,0,0,10">
+     <Button x:Name="RescanButton" Content="🔄 重新扫描 / 重新加载插件" Padding="10,6" Margin="0,0,8,8" Click="Rescan_Click"/>
+     <Button Content="导入插件" ToolTip="支持 XCL、DLL、EXE 和 .xclplugin" Padding="10,6" Margin="0,0,8,8" Click="Import_Click"/>
+     <Button x:Name="OpenDirButton" Content="📂 打开插件目录" Padding="10,6" Margin="0,0,8,8" Click="OpenDir_Click"/>
+     <Button x:Name="GenerateTemplateButton" Content="生成插件项目模板" Padding="10,6" Margin="0,0,8,8" Click="GenerateTemplate_Click"/>
+     <Button Content="API 设置" Padding="10,6" Margin="0,0,8,8" Click="ApiSettings_Click"/>
+     <Button Content="打开升级备份" Padding="10,6" Margin="0,0,8,8" Click="OpenBackups_Click"/>
+     <Button Content="恢复升级备份" Padding="10,6" Margin="0,0,8,8" Click="RestoreBackup_Click"/>
+     <Button x:Name="OpenGuideButton" Content="一键打开查看插件开发指南" Padding="10,6" Margin="0,0,8,8" Click="OpenGuide_Click"/>
+     <Button x:Name="OpenApiReferenceButton" Content="📘 查看 API 开发文件" Padding="10,6" Margin="0,0,8,8" Click="OpenApiReference_Click"/>
+     <Button x:Name="OpenExeProtocolButton" Content="EXE 插件协议" Padding="10,6" Margin="0,0,8,8" Click="OpenExeProtocol_Click"/>
+    </WrapPanel>
+
+    <WrapPanel Margin="0,0,0,8">
+     <CheckBox x:Name="SelectAllBox" Content="全选" IsThreeState="True" VerticalAlignment="Center" Margin="0,0,12,6" Click="SelectAll_Click"/>
+     <Button x:Name="EnableSelectedButton" Content="启用所选" Margin="0,0,8,6" Padding="10,6" Click="EnableSelected_Click"/>
+     <Button x:Name="DisableSelectedButton" Content="禁用所选" Margin="0,0,8,6" Padding="10,6" Click="DisableSelected_Click"/>
+     <Button x:Name="DeleteSelectedButton" Content="删除所选" Margin="0,0,8,6" Padding="10,6" Click="DeleteSelected_Click"/>
+     <TextBlock x:Name="SelectionText" VerticalAlignment="Center" Margin="0,0,0,6"/>
+    </WrapPanel>
+    <TextBlock Text="全选后可批量操作。启用/禁用点“保存”生效；删除经确认后立即生效。" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" Foreground="{DynamicResource TextSecondaryBrush}"/>
+    <StackPanel x:Name="PluginListPanel"/>
+   </StackPanel>
+  </ScrollViewer>
+
+  <Grid Grid.Row="1" Margin="0,14,0,0">
+   <Grid.ColumnDefinitions>
+    <ColumnDefinition Width="*"/>
+    <ColumnDefinition Width="Auto"/>
+    <ColumnDefinition Width="Auto"/>
+   </Grid.ColumnDefinitions>
+   <TextBlock x:Name="SummaryText" Grid.Column="0" Foreground="{DynamicResource TextSecondaryBrush}"
+              FontSize="11" VerticalAlignment="Center" TextWrapping="Wrap"/>
+   <Button Grid.Column="1" Content="保存" Margin="0,0,8,0" Style="{StaticResource PrimaryButton}" Click="Save_Click"/>
+   <Button Grid.Column="2" Content="取消" Click="Cancel_Click"/>
+  </Grid>
+ </Grid>
+</local:OverlayDialogControl>

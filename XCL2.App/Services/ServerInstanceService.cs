@@ -1,0 +1,235 @@
+using System.IO;
+using System.Text.Json;
+using XCL2.App.Models;
+
+namespace XCL2.App.Services;
+
+/// <summary>
+/// 服务器实例列表的持久化。风格与 ConfigService 保持一致：内存里维护一份列表，
+/// 每次增删改后立即整体写回 %APPDATA%\XCL2\servers.json，并镜像到启动器目录 json/servers.json
+/// （服务器实例数量级通常很小，几个到十几个，不需要为了性能做局部更新的复杂化处理）。
+/// </summary>
+public class ServerInstanceService
+{
+    private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = true };
+
+    /// <summary>主副本：%APPDATA%\XCL2\servers.json。</summary>
+    public string ServersJsonPath { get; }
+    /// <summary>便携镜像：启动器目录\json\servers.json。</summary>
+    public string MirrorServersJsonPath { get; }
+    /// <summary>旧版路径：启动器目录\xcl2\servers.json，仅用于迁移/兜底。</summary>
+    public string LegacyServersJsonPath { get; }
+    public List<ServerInstance> Instances { get; private set; } = new();
+
+    public ServerInstanceService()
+    {
+        var appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XCL2");
+        Directory.CreateDirectory(appDataDir);
+        ServersJsonPath = Path.Combine(appDataDir, "servers.json");
+        MirrorServersJsonPath = Path.Combine(AppContext.BaseDirectory, "json", "servers.json");
+        LegacyServersJsonPath = Path.Combine(App.DataDir, "servers.json");
+
+        try
+        {
+            if (!File.Exists(ServersJsonPath))
+            {
+                var seed = File.Exists(LegacyServersJsonPath) ? LegacyServersJsonPath
+                    : File.Exists(MirrorServersJsonPath) ? MirrorServersJsonPath
+                    : null;
+                if (seed != null) File.Copy(seed, ServersJsonPath, overwrite: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogFallback("迁移服务器列表到 AppData 失败，将继续尝试兜底副本", ex);
+        }
+    }
+
+    /// <summary>
+    /// 上一次 Load() 失败时的具体异常信息（null = 上次加载成功，或者还没加载过）。
+    /// 修复"检测不到以前创建的服务器"：之前 catch 块把任何异常都静默吞掉、回退成空列表，
+    /// 用户看到的现象就是"服务器列表突然空了"，且没有任何线索——分不清是真的没有服务器、
+    /// 还是 servers.json 读取失败被悄悄丢弃了。这里保留异常信息，调用方（MainWindow）可以据此
+    /// 提示用户"配置文件读取失败，已保留备份"，而不是让数据在用户毫无察觉的情况下消失。
+    /// </summary>
+    public Exception? LastLoadError { get; private set; }
+
+    public void Load()
+    {
+        LastLoadError = null;
+        Exception? firstError = null;
+
+        // 与 ConfigService 相同：AppData 是主副本，只有它不存在/损坏时才依次读取便携镜像和旧路径。
+        var candidates = new[] { ServersJsonPath, MirrorServersJsonPath, LegacyServersJsonPath }
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(File.Exists)
+            .ToArray();
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var json = File.ReadAllText(candidate);
+                Instances = JsonSerializer.Deserialize<List<ServerInstance>>(json) ?? new List<ServerInstance>();
+                if (!string.Equals(candidate, ServersJsonPath, StringComparison.OrdinalIgnoreCase) && !File.Exists(ServersJsonPath))
+                {
+                    try { Save(); } catch (Exception ex) { ErrorPresenter.LogFallback("恢复服务器列表后写回 AppData 主副本失败", ex); }
+                }
+                return;
+            }
+            catch (Exception ex)
+            {
+                firstError ??= ex;
+                ErrorPresenter.LogFallback($"读取服务器列表副本失败：{candidate}", ex);
+            }
+
+            // 每个候选都允许尝试自己的 .bak，避免主副本损坏时直接跳过一份仍可恢复的备份。
+            try
+            {
+                var backupPath = candidate + ".bak";
+                if (!File.Exists(backupPath)) continue;
+                var backupJson = File.ReadAllText(backupPath);
+                var restored = JsonSerializer.Deserialize<List<ServerInstance>>(backupJson);
+                if (restored == null) continue;
+                Instances = restored;
+                LastLoadError = firstError;
+                try { Save(); } catch (Exception ex) { ErrorPresenter.LogFallback("从服务器列表备份恢复后写回主副本失败", ex); }
+                return;
+            }
+            catch (Exception ex)
+            {
+                firstError ??= ex;
+            }
+        }
+
+        Instances = new List<ServerInstance>();
+        LastLoadError = firstError;
+    }
+
+    /// <summary>
+    /// 保存服务器实例列表。做两件事修复数据丢失/损坏风险：
+    /// 1) 写入前先把当前磁盘上的旧文件备份成 .bak（用于 Load() 在主文件损坏时的恢复来源）；
+    /// 2) 用"写临时文件 + 原子替换"代替直接 File.WriteAllText 覆盖原文件——直接覆盖在写入
+    ///    过程中被中断（进程崩溃/断电/强制结束）会让 servers.json 变成半截的非法 JSON，
+    ///    下次启动 Load() 就会解析失败，这正是"检测不到以前创建的服务器"的另一个常见根因。
+    /// </summary>
+    private void Save()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ServersJsonPath)!);
+
+        if (File.Exists(ServersJsonPath))
+        {
+            try { File.Copy(ServersJsonPath, ServersJsonPath + ".bak", overwrite: true); }
+            catch { /* 备份失败不阻塞本次保存 */ }
+        }
+
+        var json = JsonSerializer.Serialize(Instances, JsonOpts);
+        WriteAtomically(ServersJsonPath, json);
+
+        // 运行目录副本只是镜像；主副本已经成功后才写。镜像失败不回滚 AppData。
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(MirrorServersJsonPath)!);
+            WriteAtomically(MirrorServersJsonPath, json);
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.LogFallback($"更新服务器列表便携镜像失败：{MirrorServersJsonPath}", ex);
+        }
+    }
+
+    private static void WriteAtomically(string path, string content)
+    {
+        var tempPath = path + ".tmp";
+        File.WriteAllText(tempPath, content);
+        File.Move(tempPath, path, overwrite: true);
+    }
+
+    /// <summary>有新实例被登记时触发（后台下载任务完成后登记的实例，服务器列表页据此自动刷新）。</summary>
+    public event Action? InstanceAdded;
+
+    public ServerInstance Add(ServerInstance instance)
+    {
+        Instances.Add(instance);
+        Save();
+        InstanceAdded?.Invoke();
+        return instance;
+    }
+
+    public void Update(ServerInstance instance)
+    {
+        var idx = Instances.FindIndex(i => i.Id == instance.Id);
+        if (idx >= 0) Instances[idx] = instance;
+        Save();
+    }
+
+    /// <summary>
+    /// 设置默认服务器：把目标实例 IsDefault 置 true，同时把其余所有实例的 IsDefault 置 false，
+    /// 保证同一时间最多只有一个"默认"。传 null 表示清除默认（没有任何实例是默认）。
+    /// </summary>
+    public void SetDefault(string? instanceId)
+    {
+        foreach (var inst in Instances)
+            inst.IsDefault = inst.Id == instanceId;
+        Save();
+    }
+
+    /// <summary>
+    /// 保存自定义图标：把源文件复制进 xcl2/server-icons/{instanceId}{扩展名}，返回复制后的绝对路径。
+    /// 用 instanceId 命名（而不是保留原文件名）是为了避免重名覆盖，以及方便后续按实例清理。
+    /// 不直接引用用户原文件路径的原因：用户可能之后移动/删除那个原始文件，图标应该独立于它存在。
+    /// </summary>
+    public string SetIcon(string instanceId, string sourceImagePath)
+    {
+        if (!File.Exists(sourceImagePath))
+            throw new FileNotFoundException("找不到选择的图标文件。", sourceImagePath);
+
+        var iconsDir = Path.Combine(App.DataDir, "server-icons");
+        Directory.CreateDirectory(iconsDir);
+
+        // 换图标前先把该实例名下所有旧图标文件清掉（扩展名可能变化，例如从 .png 换成 .jpg），
+        // 避免 server-icons 目录里堆积用不到的旧文件。
+        foreach (var old in Directory.GetFiles(iconsDir, $"{instanceId}.*"))
+        {
+            try { File.Delete(old); } catch { /* 忽略清理失败，不影响本次设置新图标 */ }
+        }
+
+        var ext = Path.GetExtension(sourceImagePath);
+        if (string.IsNullOrEmpty(ext)) ext = ".png";
+        var destPath = Path.Combine(iconsDir, $"{instanceId}{ext}");
+        File.Copy(sourceImagePath, destPath, overwrite: true);
+        return destPath;
+    }
+
+    /// <summary>清除自定义图标：删除磁盘文件（若存在），调用方负责同时把 instance.IconPath 置 null 并 Update。</summary>
+    public void ClearIcon(string? iconPath)
+    {
+        if (string.IsNullOrEmpty(iconPath)) return;
+        try { if (File.Exists(iconPath)) File.Delete(iconPath); } catch { /* 忽略删除失败，不阻塞清除操作 */ }
+    }
+
+    /// <summary>
+    /// 从列表移除一个实例。deleteFiles=true 时同时删除磁盘上的服务端目录——
+    /// 这是破坏性操作，调用方（UI 层）必须在调用前自行完成用户确认，该方法本身
+    /// 不做任何二次确认或备份，专注做"删除"这一件事，保护性交互留给上层实现
+    /// （对应清单里"清除服务器数据"那一项，那是独立于这里的"移除实例记录"的更完整流程）。
+    /// </summary>
+    public void Remove(string instanceId, bool deleteFiles)
+    {
+        var instance = Instances.FirstOrDefault(i => i.Id == instanceId);
+        if (instance == null) return;
+
+        Instances.Remove(instance);
+        Save();
+        ClearIcon(instance.IconPath);
+
+        if (deleteFiles && Directory.Exists(instance.Directory))
+        {
+            try { Directory.Delete(instance.Directory, recursive: true); }
+            catch (Exception ex)
+            {
+                throw new IOException($"实例记录已移除，但删除文件夹失败：{ex.Message}\n目录：{instance.Directory}", ex);
+            }
+        }
+    }
+}

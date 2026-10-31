@@ -1,0 +1,563 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Text.RegularExpressions;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Media;
+using System.Windows.Navigation;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+/// <summary>
+/// 轻量 Markdown 查看器。专门用于 AI 回复，不引入额外 NuGet 包，支持标题、粗体、斜体、
+/// 删除线、行内代码、代码块、无序/有序列表、引用、分隔线与链接。
+///
+/// 渲染宿主是只读 <see cref="RichTextBox"/>（装载一个 <see cref="FlowDocument"/>），
+/// 不是 StackPanel + TextBlock。原因：TextBlock 没有 TextSelection 概念，鼠标在上面拖拽
+/// 不会出现选区，也就没法 Ctrl+C——那是"画出来的文字"，不是"可选中的文字"。RichTextBox/
+/// FlowDocument 这条链路和普通网页文本一样，天生支持鼠标左键拖动连续选中和复制，不需要
+/// 自己实现命中测试或选区绘制。代码块沿用原来的只读 TextBox（TextBoxBase 同样原生支持
+/// 拖选+复制），以 BlockUIContainer 形式嵌入文档流，与正文使用同一套鼠标手势，互不冲突。
+/// </summary>
+public sealed class MarkdownViewer : RichTextBox
+{
+    public static readonly DependencyProperty MarkdownProperty = DependencyProperty.Register(
+        nameof(Markdown), typeof(string), typeof(MarkdownViewer),
+        new FrameworkPropertyMetadata(string.Empty, FrameworkPropertyMetadataOptions.AffectsMeasure, OnMarkdownChanged));
+
+    private static readonly Regex InlineTokenRegex = new(
+        @"(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|~~[^~]+~~|\[[^\]]+\]\([^\)]+\)|\*[^*\r\n]+\*|_[^_\r\n]+_)",
+        RegexOptions.Compiled);
+
+    private static readonly Regex OrderedListRegex = new(@"^\s*(\d+)[\.)]\s+(.+)$", RegexOptions.Compiled);
+
+    public string Markdown
+    {
+        get => (string)GetValue(MarkdownProperty);
+        set => SetValue(MarkdownProperty, value);
+    }
+
+    public MarkdownViewer()
+    {
+        // 让它看起来（和摸起来）都不像一个输入框：无边框、透明背景、不显示光标、不接收 Tab、
+        // 内部滚动条关闭（外层聊天气泡的 ScrollViewer 负责滚动）。IsReadOnly 只挡编辑，不挡
+        // 选中/复制——这正是我们要的：能选、能拖、能 Ctrl+C，但用户改不了 AI 说的话。
+        IsReadOnly = true;
+        // 关键：RichTextBox 默认 IsDocumentEnabled=false，文档里嵌入的 UI 元素（代码块的“复制”按钮、
+        // 代码框、超链接）会整体被禁用、点不动。必须开启，复制按钮才能点击。
+        IsDocumentEnabled = true;
+        IsReadOnlyCaretVisible = false;
+        IsUndoEnabled = false;
+        AcceptsReturn = true;
+        AcceptsTab = false;
+        BorderThickness = new Thickness(0);
+        Background = Brushes.Transparent;
+        Padding = new Thickness(0);
+        Focusable = true;
+        VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        SnapsToDevicePixels = true;
+        SpellCheck.IsEnabled = false;
+        Document = new FlowDocument { PagePadding = new Thickness(0) };
+        SetResourceReference(ForegroundProperty, "TextPrimaryBrush");
+        AiTextSelectionMenu.Attach(this, () => Selection.Text, SelectAll);
+    }
+
+    private static void OnMarkdownChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is MarkdownViewer viewer)
+            viewer.RenderMarkdown(e.NewValue as string ?? string.Empty);
+    }
+
+    private void RenderMarkdown(string markdown)
+    {
+        var doc = new FlowDocument { PagePadding = new Thickness(0) };
+        Document = doc;
+        if (string.IsNullOrWhiteSpace(markdown))
+            return;
+
+        var sourceLines = AiMarkdownCodeText.SplitLines(markdown);
+        var lines = sourceLines.Select(line => line.Text).ToArray();
+        int i = 0;
+        while (i < lines.Length)
+        {
+            var raw = lines[i];
+            var trimmed = raw.Trim();
+
+            if (trimmed.Length == 0)
+            {
+                i++;
+                continue;
+            }
+
+            // Copy fenced code from source offsets: actual CR/LF, blank lines, indentation and
+            // trailing whitespace survive; viewport wrapping never becomes a source newline.
+            if (AiMarkdownCodeText.TryRead(markdown, sourceLines, i, out var code, out var language, out int next))
+            {
+                AddCodeBlock(doc, code, language);
+                i = next;
+                continue;
+            }
+
+            // # 标题
+            int headingLevel = GetHeadingLevel(trimmed, out var headingText);
+            if (headingLevel > 0)
+            {
+                var size = headingLevel switch
+                {
+                    1 => 20d,
+                    2 => 18d,
+                    3 => 16d,
+                    4 => 15d,
+                    _ => 14d
+                };
+                var block = CreateParagraph(size, FontWeights.SemiBold, new Thickness(0, 7, 0, 3));
+                AddInlineMarkdown(block, headingText);
+                doc.Blocks.Add(block);
+                i++;
+                continue;
+            }
+
+            // --- / *** 分隔线
+            if (trimmed is "---" or "***" or "___")
+            {
+                var line = new Border { Height = 1, Margin = new Thickness(0, 7, 0, 7) };
+                line.SetResourceReference(Border.BackgroundProperty, "DividerBrush");
+                doc.Blocks.Add(new BlockUIContainer(line));
+                i++;
+                continue;
+            }
+
+            // > 引用
+            if (trimmed.StartsWith(">", StringComparison.Ordinal))
+            {
+                var quoteText = trimmed[1..].TrimStart();
+                var quote = CreateParagraph(12.5, FontWeights.Normal, new Thickness(0, 4, 0, 4));
+                quote.FontStyle = FontStyles.Italic;
+                // Block 本身就有 BorderBrush/BorderThickness/Padding，直接当"左侧竖线引用条"用，
+                // 不需要再套一层 Border——这样引用文字依然是文档流里的真正段落，可以被拖选。
+                quote.BorderThickness = new Thickness(3, 0, 0, 0);
+                quote.Padding = new Thickness(8, 3, 4, 3);
+                quote.SetResourceReference(Paragraph.BorderBrushProperty, "AccentBrush");
+                quote.SetResourceReference(Paragraph.BackgroundProperty, "SideBrush");
+                AddInlineMarkdown(quote, quoteText);
+                doc.Blocks.Add(quote);
+                i++;
+                continue;
+            }
+
+            // - / * / + 无序列表
+            if (IsUnorderedListLine(raw))
+            {
+                var list = new List { MarkerStyle = TextMarkerStyle.Disc, Margin = new Thickness(3, 2, 0, 4) };
+                while (i < lines.Length && IsUnorderedListLine(lines[i]))
+                {
+                    var content = lines[i].TrimStart()[2..].TrimStart();
+                    AddListItem(list, content);
+                    i++;
+                }
+                doc.Blocks.Add(list);
+                continue;
+            }
+
+            // 1. / 1) 有序列表
+            var orderedMatch = OrderedListRegex.Match(raw);
+            if (orderedMatch.Success)
+            {
+                var list = new List { MarkerStyle = TextMarkerStyle.Decimal, Margin = new Thickness(3, 2, 0, 4) };
+                while (i < lines.Length)
+                {
+                    var match = OrderedListRegex.Match(lines[i]);
+                    if (!match.Success) break;
+                    AddListItem(list, match.Groups[2].Value);
+                    i++;
+                }
+                doc.Blocks.Add(list);
+                continue;
+            }
+
+            // | 表头 | ... |
+            // |------|-----|
+            // | 单元格 | ... |
+            // 修复"AI 助手回复里用 Markdown 表格格式时不会正常显示"：以前这里完全没有表格分支，
+            // 表格的每一行都会落进下面的"普通段落"分支，原样把 | 字符打印出来。
+            // GFM 表格的判定标准是"表头行 + 紧跟着的分隔行（只含 -/:/| 和空白）"，只看这两行就够，
+            // 不用管后面数据行是否对齐——对齐交给下面的 Table 布局自动处理。
+            if (IsTableRow(raw) && i + 1 < lines.Length && IsTableSeparatorRow(lines[i + 1]))
+            {
+                var headerCells = ParseTableRow(raw);
+                i += 2;
+                var dataRows = new List<string[]>();
+                while (i < lines.Length && IsTableRow(lines[i]))
+                {
+                    dataRows.Add(ParseTableRow(lines[i]));
+                    i++;
+                }
+                AddTable(doc, headerCells, dataRows);
+                continue;
+            }
+
+            // 普通段落：连续普通行保留软换行，但不显示 Markdown 标记本身。
+            var paragraphLines = new List<string>();
+            while (i < lines.Length && !IsBlockStart(lines[i]))
+                paragraphLines.Add(lines[i++]);
+            if (paragraphLines.Count == 0)
+            {
+                paragraphLines.Add(lines[i++]);
+            }
+
+            var paragraph = CreateParagraph(13, FontWeights.Normal, new Thickness(0, 2, 0, 5));
+            for (int lineIndex = 0; lineIndex < paragraphLines.Count; lineIndex++)
+            {
+                AddInlineMarkdown(paragraph, paragraphLines[lineIndex]);
+                if (lineIndex < paragraphLines.Count - 1)
+                    paragraph.Inlines.Add(new LineBreak());
+            }
+            doc.Blocks.Add(paragraph);
+        }
+    }
+
+    private static bool IsBlockStart(string line)
+    {
+        var t = line.Trim();
+        if (t.Length == 0 || AiMarkdownCodeText.IsOpeningFence(line) || t.StartsWith(">", StringComparison.Ordinal))
+            return true;
+        if (GetHeadingLevel(t, out _) > 0 || t is "---" or "***" or "___")
+            return true;
+        // 段落累积到表格行时也要停下，不然表格第一行会被前一段普通文字的软换行吞掉。
+        if (IsTableRow(line))
+            return true;
+        return IsUnorderedListLine(line) || OrderedListRegex.IsMatch(line);
+    }
+
+    /// <summary>是不是"看起来像表格行"：含至少一个未转义的 `|`。用来判断段落到哪里为止，
+    /// 以及表头/数据行的扫描范围；真正确认"这是表格"还要看下一行是不是分隔行，见调用处。</summary>
+    private static bool IsTableRow(string line) => CountUnescapedPipes(line.Trim()) >= 1;
+
+    /// <summary>分隔行：`|---|:---:|---:|` 这种只含 `-`、`:`、`|` 和空白的行（且至少有一个 `-`）。</summary>
+    private static bool IsTableSeparatorRow(string line)
+    {
+        var t = line.Trim();
+        return t.Length > 0 && t.Contains('-') && TableSeparatorRegex.IsMatch(t);
+    }
+
+    private static readonly Regex TableSeparatorRegex = new(
+        @"^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?$", RegexOptions.Compiled);
+
+    private static int CountUnescapedPipes(string t)
+    {
+        int count = 0;
+        for (int idx = 0; idx < t.Length; idx++)
+        {
+            if (t[idx] == '\\' && idx + 1 < t.Length && t[idx + 1] == '|') { idx++; continue; }
+            if (t[idx] == '|') count++;
+        }
+        return count;
+    }
+
+    /// <summary>把一行表格行拆成单元格：去掉首尾的 `|`，按未转义的 `|` 分割，`\|` 表示字面竖线。</summary>
+    private static string[] ParseTableRow(string line)
+    {
+        var t = line.Trim();
+        if (t.StartsWith("|", StringComparison.Ordinal)) t = t[1..];
+        if (t.EndsWith("|", StringComparison.Ordinal) && !t.EndsWith("\\|", StringComparison.Ordinal)) t = t[..^1];
+
+        var cells = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        for (int idx = 0; idx < t.Length; idx++)
+        {
+            if (t[idx] == '\\' && idx + 1 < t.Length && t[idx + 1] == '|')
+            {
+                sb.Append('|');
+                idx++;
+            }
+            else if (t[idx] == '|')
+            {
+                cells.Add(sb.ToString().Trim());
+                sb.Clear();
+            }
+            else sb.Append(t[idx]);
+        }
+        cells.Add(sb.ToString().Trim());
+        return cells.ToArray();
+    }
+
+    private static bool IsUnorderedListLine(string line)
+    {
+        var t = line.TrimStart();
+        return t.Length > 2 && (t.StartsWith("- ", StringComparison.Ordinal) ||
+                                t.StartsWith("* ", StringComparison.Ordinal) ||
+                                t.StartsWith("+ ", StringComparison.Ordinal));
+    }
+
+    private static int GetHeadingLevel(string trimmed, out string text)
+    {
+        int count = 0;
+        while (count < trimmed.Length && count < 6 && trimmed[count] == '#') count++;
+        if (count > 0 && count < trimmed.Length && char.IsWhiteSpace(trimmed[count]))
+        {
+            text = trimmed[(count + 1)..].Trim();
+            return count;
+        }
+        text = string.Empty;
+        return 0;
+    }
+
+    private Paragraph CreateParagraph(double fontSize, FontWeight weight, Thickness margin)
+    {
+        var p = new Paragraph
+        {
+            FontSize = fontSize,
+            FontWeight = weight,
+            LineHeight = Math.Max(fontSize * 1.45, 18),
+            Margin = margin
+        };
+        p.SetResourceReference(Paragraph.ForegroundProperty, "TextPrimaryBrush");
+        return p;
+    }
+
+    private void AddListItem(List list, string content)
+    {
+        // ListItem（TextElement）本身没有 Margin，条目间距放在内层 Paragraph 上控制。
+        var p = CreateParagraph(13, FontWeights.Normal, new Thickness(0, 1, 0, 2));
+        AddInlineMarkdown(p, content);
+        list.ListItems.Add(new ListItem(p));
+    }
+
+    /// <summary>用原生 Table 画一个简单的带边框表格：表头行加粗、浅底色，其余行只画分隔线。
+    /// 列数取表头和所有数据行里最宽的那一行，缺的单元格补空——AI 输出的表格经常某一行少写
+    /// 一两个 `|`，这里不因为某行列数不一致就整段放弃渲染。用 Documents.Table 而不是
+    /// Grid+TextBlock，是为了让表格文字也留在同一份 FlowDocument 里，可以被拖选和复制。</summary>
+    private void AddTable(FlowDocument doc, string[] headerCells, List<string[]> dataRows)
+    {
+        int colCount = headerCells.Length;
+        foreach (var row in dataRows) colCount = Math.Max(colCount, row.Length);
+        if (colCount == 0) return;
+
+        var table = new Table { Margin = new Thickness(0, 4, 0, 8), CellSpacing = 0 };
+        for (int c = 0; c < colCount; c++)
+            table.Columns.Add(new TableColumn());
+
+        var rowGroup = new TableRowGroup();
+        table.RowGroups.Add(rowGroup);
+
+        void AddRow(string[] cells, bool isHeader)
+        {
+            var row = new TableRow();
+            for (int c = 0; c < colCount; c++)
+            {
+                var text = c < cells.Length ? cells[c] : string.Empty;
+                var cellParagraph = CreateParagraph(12.5, isHeader ? FontWeights.SemiBold : FontWeights.Normal, new Thickness(0));
+                AddInlineMarkdown(cellParagraph, text);
+
+                var cell = new TableCell(cellParagraph)
+                {
+                    BorderThickness = new Thickness(0, 0, c == colCount - 1 ? 0 : 1, 1),
+                    Padding = new Thickness(9, 6, 9, 6)
+                };
+                cell.SetResourceReference(TableCell.BorderBrushProperty, "DividerBrush");
+                if (isHeader) cell.SetResourceReference(TableCell.BackgroundProperty, "SideBrush");
+                row.Cells.Add(cell);
+            }
+            rowGroup.Rows.Add(row);
+        }
+
+        AddRow(headerCells, true);
+        foreach (var row in dataRows) AddRow(row, false);
+
+        // 每个单元格已经画了右边框 + 下边框，这里给表格整体补左边框和顶边框，
+        // 拼起来就是一圈闭合的外框（Table 是 Block 不是 UIElement，不能塞进 Border.Child，
+        // 所以不像旧版那样再包一层 Border，直接在 Table 自身画边框即可）。
+        table.BorderThickness = new Thickness(1, 1, 0, 0);
+        table.SetResourceReference(Table.BorderBrushProperty, "DividerBrush");
+        doc.Blocks.Add(table);
+    }
+
+    private void AddCodeBlock(FlowDocument doc, string code, string language = "")
+    {
+        var box = new TextBox
+        {
+            Text = code,
+            IsReadOnly = true,
+            IsTabStop = false,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            BorderThickness = new Thickness(0),
+            Background = Brushes.Transparent,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 12,
+            Padding = new Thickness(8, 7, 8, 7)
+        };
+        box.SetResourceReference(TextBox.ForegroundProperty, "TextPrimaryBrush");
+        AiTextSelectionMenu.Attach(box, () => box.SelectedText, box.SelectAll, () => code);
+        // IsReadOnly 的 TextBox 本身就是可选中、可 Ctrl+C 的（跟网页上选中一段代码复制的手感
+        // 一致），这里不需要额外接线——用户可以直接拖选一部分代码复制，不是"只能整段复制"。
+        // 现在它以 BlockUIContainer 形式嵌在正文所在的同一个 FlowDocument 里：拖拽从正文
+        // 滑进代码块（或反过来）时，鼠标进入 TextBox 的那一刻由 TextBox 自己接管选区，
+        // 和外层 RichTextBox 的选区互不打架——这跟网页里"代码块用 <pre> 单独接管选区"的
+        // 观感是一致的。
+
+        // 顶部条：左边语言标签（没写语言就整块不显示，不留一个空标签占地方），
+        // 右边一个"复制"按钮，点一下把整段代码复制到剪贴板并给个 Toast 反馈——
+        // 对应"像网页上 AI 输出代码块那样，一键复制整段"的诉求；框内选中复制是另一条路径，
+        // 两者互不冲突，都要支持。
+        var header = new Grid { Margin = new Thickness(10, 5, 6, 5) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        if (!string.IsNullOrWhiteSpace(language))
+        {
+            var langText = new TextBlock
+            {
+                Text = language.Trim(),
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            langText.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondaryBrush");
+            Grid.SetColumn(langText, 0);
+            header.Children.Add(langText);
+        }
+
+        var copyBtn = new Button
+        {
+            Content = "复制",
+            Padding = new Thickness(8, 2, 8, 2),
+            FontSize = 11,
+            Cursor = System.Windows.Input.Cursors.Hand,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(1)
+        };
+        copyBtn.SetResourceReference(Button.ForegroundProperty, "TextSecondaryBrush");
+        copyBtn.SetResourceReference(Button.BorderBrushProperty, "BorderBrush2");
+        // Do not let right-click on actions inherit the parent RichTextBox text menu.
+        copyBtn.ContextMenu = null;
+        copyBtn.Click += (_, e) =>
+        {
+            e.Handled = true;
+            if (!AiTextClipboard.TryCopy(code)) return;
+            copyBtn.Content = "已复制";
+            var resetTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(1500)
+            };
+            resetTimer.Tick += (_, _) =>
+            {
+                copyBtn.Content = "复制";
+                resetTimer.Stop();
+            };
+            resetTimer.Start();
+        };
+        Grid.SetColumn(copyBtn, 1);
+        header.Children.Add(copyBtn);
+
+        var codeBorder = new Border { BorderThickness = new Thickness(0, 1, 0, 0), Child = box };
+        codeBorder.SetResourceReference(Border.BorderBrushProperty, "DividerBrush");
+
+        var outerStack = new StackPanel();
+        outerStack.Children.Add(header);
+        outerStack.Children.Add(codeBorder);
+
+        var border = new Border
+        {
+            CornerRadius = new CornerRadius(7),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 5, 0, 7),
+            Child = outerStack
+        };
+        border.SetResourceReference(Border.BackgroundProperty, "SideBrush");
+        border.SetResourceReference(Border.BorderBrushProperty, "BorderBrush2");
+        doc.Blocks.Add(new BlockUIContainer(border));
+    }
+
+    private static void AddInlineMarkdown(Paragraph target, string text)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+
+        int cursor = 0;
+        foreach (Match match in InlineTokenRegex.Matches(text))
+        {
+            if (match.Index > cursor)
+                target.Inlines.Add(new Run(UnescapeMarkdown(text[cursor..match.Index])));
+
+            var token = match.Value;
+            if (token.StartsWith("`", StringComparison.Ordinal) && token.EndsWith("`", StringComparison.Ordinal))
+            {
+                var run = new Run(token[1..^1]) { FontFamily = new FontFamily("Consolas") };
+                run.SetResourceReference(TextElement.BackgroundProperty, "SideBrush");
+                target.Inlines.Add(run);
+            }
+            else if ((token.StartsWith("**", StringComparison.Ordinal) && token.EndsWith("**", StringComparison.Ordinal)) ||
+                     (token.StartsWith("__", StringComparison.Ordinal) && token.EndsWith("__", StringComparison.Ordinal)))
+            {
+                target.Inlines.Add(new Bold(new Run(UnescapeMarkdown(token[2..^2]))));
+            }
+            else if (token.StartsWith("~~", StringComparison.Ordinal) && token.EndsWith("~~", StringComparison.Ordinal))
+            {
+                target.Inlines.Add(new Run(UnescapeMarkdown(token[2..^2])) { TextDecorations = TextDecorations.Strikethrough });
+            }
+            else if (token.StartsWith("[", StringComparison.Ordinal))
+            {
+                int split = token.IndexOf("](", StringComparison.Ordinal);
+                if (split > 1)
+                {
+                    var label = token[1..split];
+                    var url = token[(split + 2)..^1];
+                    if (Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+                        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                    {
+                        var link = new Hyperlink(new Run(label)) { NavigateUri = uri, ToolTip = url };
+                        link.SetResourceReference(TextElement.ForegroundProperty, "AccentBrush");
+                        link.RequestNavigate += OpenLink;
+                        target.Inlines.Add(link);
+                    }
+                    else
+                    {
+                        target.Inlines.Add(new Run(label));
+                    }
+                }
+                else target.Inlines.Add(new Run(token));
+            }
+            else if ((token.StartsWith("*", StringComparison.Ordinal) && token.EndsWith("*", StringComparison.Ordinal)) ||
+                     (token.StartsWith("_", StringComparison.Ordinal) && token.EndsWith("_", StringComparison.Ordinal)))
+            {
+                target.Inlines.Add(new Italic(new Run(UnescapeMarkdown(token[1..^1]))));
+            }
+            else
+            {
+                target.Inlines.Add(new Run(UnescapeMarkdown(token)));
+            }
+
+            cursor = match.Index + match.Length;
+        }
+
+        if (cursor < text.Length)
+            target.Inlines.Add(new Run(UnescapeMarkdown(text[cursor..])));
+    }
+
+    private static string UnescapeMarkdown(string text) => text
+        .Replace("\\*", "*")
+        .Replace("\\_", "_")
+        .Replace("\\#", "#")
+        .Replace("\\`", "`")
+        .Replace("\\[", "[")
+        .Replace("\\]", "]");
+
+    private static void OpenLink(object sender, RequestNavigateEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(e.Uri.AbsoluteUri) { UseShellExecute = true });
+            e.Handled = true;
+        }
+        catch
+        {
+            // 链接打不开不影响聊天渲染。
+        }
+    }
+}

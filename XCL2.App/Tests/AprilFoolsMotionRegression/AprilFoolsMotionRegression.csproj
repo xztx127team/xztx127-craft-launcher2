@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Services/AprilFoolsMotionPolicy.cs" Link="AprilFoolsMotionPolicy.cs"/>
+    <Compile Include="../../Services/AprilFoolsService.cs" Link="AprilFoolsService.cs"/>
+    <Compile Include="../../Services/AprilFoolsStateStore.cs" Link="AprilFoolsStateStore.cs"/>
+    <Compile Include="../../Models/AppConfig.AprilFools.cs" Link="AppConfig.AprilFools.cs"/>
+  </ItemGroup>
+</Project>

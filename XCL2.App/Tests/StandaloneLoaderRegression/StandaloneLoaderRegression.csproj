@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Models/VersionManifest.cs" Link="VersionManifest.cs" />
+    <Compile Include="../../Services/ResourceDownloadPath.cs" Link="ResourceDownloadPath.cs" />
+    <Compile Include="../../Services/ArchiveImportSafety.cs" Link="ArchiveImportSafety.cs" />
+    <Compile Include="../../Services/VersionInheritanceResolver.cs" Link="VersionInheritanceResolver.cs" />
+    <Compile Include="../../Services/VersionRepairPlan.cs" Link="VersionRepairPlan.cs" />
+    <Compile Include="../../Services/StandaloneLoaderProfile.cs" Link="StandaloneLoaderProfile.cs" />
+  </ItemGroup>
+</Project>

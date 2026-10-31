@@ -1,0 +1,509 @@
+<UserControl x:Class="XCL2.App.Views.AiAssistantSettingsPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:services="clr-namespace:XCL2.App.Services"
+             Background="{DynamicResource SideBrush}">
+    <UserControl.Resources>
+        <DataTemplate x:Key="AiProviderModelTemplate">
+            <StackPanel>
+                <TextBlock Text="{Binding DisplayName}"/>
+                <TextBlock Text="{Binding ProviderName}" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}"/>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Grid MaxHeight="740">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <StackPanel Margin="16,8">
+            <TextBlock Text="搜索 AI 助手设置" FontWeight="SemiBold"/>
+            <TextBox x:Name="SettingsSearchBox" Margin="0,5,0,0" TextChanged="SettingsSearch_TextChanged" ToolTip="例如：温度、思考、模型接口、请求文档"/>
+            <WrapPanel x:Name="SettingsSearchResults"/>
+        </StackPanel>
+    <ScrollViewer x:Name="SettingsScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="700"
+                  services:ScrollWheelBehavior.ContainWheel="True">
+        <StackPanel Margin="16">
+            <TextBlock Text="AI 助手设置" FontSize="20" FontWeight="SemiBold"/>
+            <TextBlock Text="普通/专家是路由档位；下面的模型才是真正提交给 API 的 model ID。"
+                       Margin="0,3,0,14" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+
+            <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
+                <StackPanel>
+                    <CheckBox x:Name="AutoSaveSettingsCheck" Content="自动保存 AI 助手配置" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="AutoSaveStatusText" Text="修改后自动保存；填写未完成时会保留当前草稿。" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <CheckBox x:Name="EnabledCheck" Content="启用 AI 助手" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="FloatingButtonCheck" Content="显示右下角常驻 AI 悬浮按钮"/>
+                    <TextBlock Text="默认工作模式" FontWeight="SemiBold" Margin="0,12,0,0"/>
+                    <ComboBox x:Name="WorkModeCombo" Margin="0,4,0,6" SelectionChanged="WorkModeCombo_SelectionChanged">
+                        <ComboBoxItem Content="Build · 执行" Tag="Build"/>
+                        <ComboBoxItem Content="Plan · 规划" Tag="Plan"/>
+                        <ComboBoxItem Content="Agent · 智能体" Tag="Agent"/>
+                        <ComboBoxItem Content="纯聊天模式" Tag="Chat"/>
+                    </ComboBox>
+                    <TextBlock Text="纯聊天：仅聊天，不使用工作目录或任何命令权限；本轮明确要求读取日志时，仍需开启日志分析并逐次确认。Plan：只读调查和规划。Build：在已有权限内执行。Agent：复杂任务建议保存计划，简单需求可直接处理。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <TextBlock Text="Agent 动画预设" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                    <ComboBox x:Name="AgentAnimationProfileCombo" Margin="0,4,0,6">
+                        <ComboBoxItem Content="保持当前强度" Tag="Balanced"/>
+                        <ComboBoxItem Content="低功耗 · 强度 20%" Tag="LowPower"/>
+                        <ComboBoxItem Content="高性能 · 强度 100%" Tag="HighPerformance"/>
+                    </ComboBox>
+                    <TextBlock Text="Agent 模式保存或切换预设后，同步各动画强度拉杆；现有动画开关保持当前选择。" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                    <TextBlock Text="聊天中也可切换模式。工作模式与推理等级独立；切换到 Build 不会新增文件或命令权限。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="API 与模型来源" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <Expander Header="高级 API 与执行设置" Margin="0,8" IsExpanded="False">
+                        <StackPanel Margin="0,8">
+                            <CheckBox x:Name="StreamResponsesCheck" Content="实时流式输出（SSE）"/>
+                            <CheckBox x:Name="RequestUsageMetadataCheck" Content="请求流式 token 用量（接口不支持 stream_options 时可关闭）" Margin="0,6,0,0"/>
+                            <CheckBox x:Name="SendTemperatureCheck" Content="发送 temperature 参数（不支持的模型可关闭）" Margin="0,6"/>
+                            <TextBlock Text="每轮最长运行（分钟）：1–1440"/><TextBox x:Name="MaxRunMinutesBox" ToolTip="限制整轮 AI 任务的总时间，包括模型请求、工具调用和等待审批；到时停止并保留已收到的内容。"/>
+                            <TextBlock Text="请求最长等待（秒）：0 = 不限时，15–86400（24 小时）"/><TextBox x:Name="RequestTimeoutBox"/>
+                            <TextBlock Text="长时间等待提示出现时间（0–86400 秒）"/><TextBox x:Name="LongWaitHintSecondsBox"/>
+                            <TextBlock Text="等待提示描述（可换行，最多 2000 字）"/><TextBox x:Name="LongWaitDescriptionBox" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="52" MaxHeight="150" MaxLength="2000" VerticalScrollBarVisibility="Auto"/>
+                            <TextBlock Text="Temperature（0–2）"/><TextBox x:Name="TemperatureBox"/>
+                            <TextBlock Text="最大输出 token（0 = 由接口决定，64–32768）"/><TextBox x:Name="MaxOutputTokensBox"/>
+                            <TextBlock Text="每轮工具 / 命令操作上限（0 = 不限次数，默认 0）"/><TextBox x:Name="MaxToolActionsBox"/>
+                            <TextBlock Text="每轮子智能体上限（0–4，0 = 关闭）"/><TextBox x:Name="MaxSubAgentsBox"/>
+                            <CheckBox x:Name="AllowShellCommandsCheck" Content="预先允许 Shell 命令（未开启时逐次申请本次权限）" Margin="0,8"/>
+                            <TextBlock Text="PowerShell / cmd / Python 以当前用户权限运行。普通命令显示实际命令并确认。工作目录为“无”时禁止任何命令，除非开启完全访问或默许全部 Shell。工作目录不是安全沙箱。" TextWrapping="Wrap" FontSize="11"/>
+                            <Expander x:Name="CommandPermissionsExpander" Header="Shell / 命令权限" Margin="0,10,0,0" IsExpanded="False">
+                                <StackPanel Margin="0,8">
+                                    <CheckBox x:Name="AllowAllShellCommandsCheck" Content="默许全部 Shell 指令（包括“其他”，免逐次确认）" Margin="0,4"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6">
+                                        <Button Content="全选 · 全部放行" Click="SelectAllCommandPermissions_Click" Padding="10,4"/>
+                                        <Button Content="全部关闭" Click="ClearCommandPermissions_Click" Padding="10,4" Margin="8,0,0,0"/>
+                                    </StackPanel>
+                                    <TextBlock Text="大类" FontWeight="SemiBold"/>
+                                    <WrapPanel x:Name="CommandCategoryPermissionsPanel" Margin="0,4"/>
+                                    <TextBlock Text="小类 / 操作" FontWeight="SemiBold" Margin="0,6,0,0"/>
+                                    <WrapPanel x:Name="CommandOperationPermissionsPanel" Margin="0,4"/>
+                                    <TextBlock Text="鼠标、键盘与窗口操作关闭时胖虎会建议去设置打开；分类在本地校验，未识别的复合命令归“其他”。默认已授权工作区内新建文件及受限 Python 计算。" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                    <TextBlock Text="逐命令覆盖（完整命令精确匹配；拒绝优先）" FontWeight="SemiBold" Margin="0,10,0,4"/>
+                                    <DataGrid x:Name="ExactCommandPermissionsGrid" AutoGenerateColumns="False" CanUserAddRows="True" CanUserDeleteRows="True" MinHeight="100" MaxHeight="220" HeadersVisibility="Column">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="解释器" Binding="{Binding Shell}" Width="100"
+                                                                ElementStyle="{StaticResource ThemedDataGridText}" EditingElementStyle="{StaticResource ThemedDataGridEditor}"/>
+                                            <DataGridTextColumn Header="完整命令" Binding="{Binding Command}" Width="*"
+                                                                ElementStyle="{StaticResource ThemedDataGridText}" EditingElementStyle="{StaticResource ThemedDataGridEditor}"/>
+                                            <DataGridCheckBoxColumn Header="允许" Binding="{Binding Allowed}" Width="60"
+                                                                    ElementStyle="{StaticResource ThemedDataGridCheck}" EditingElementStyle="{StaticResource ThemedDataGridCheckEditor}"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <TextBlock Text="解释器填写 powershell、cmd 或 python。精确允许不会打开关闭的电脑操作功能，也不会绕过 Plan。选中一行后按 Delete 可删除规则。" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4"/>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </Expander>
+                    <Expander Header="用量卡片 · 每个模型的上下文与估计单价" Margin="0,8" IsExpanded="False">
+                        <StackPanel Margin="0,8">
+                            <TextBlock Text="用量采用供应商返回的数据；未返回时明确显示估算。上下文容量与单价请按所用接口填写，不会自动猜测。" TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <Button Content="此模型的接口请求文档与参数规则" Click="EditModelRequest_Click" HorizontalAlignment="Left"/>
+                            <ComboBox x:Name="AccountingModelCombo" ItemTemplate="{StaticResource AiProviderModelTemplate}" SelectedValuePath="ModelKey" SelectionChanged="AccountingModelCombo_SelectionChanged" Margin="0,8"/>
+                            <TextBlock Text="上下文 token 上限（空白 / 0 = 未知，最多 10000000）"/><TextBox x:Name="ContextWindowBox"/>
+                            <TextBlock Text="本模型最大输出 token（空白 / 0 = 沿用全局设置）"/><TextBox x:Name="ModelOutputTokensBox"/>
+                            <TextBlock Text="本地累计 token 配额（空白 = 不限；0 = 停止使用）"/><TextBox x:Name="ModelTokenQuotaBox"/>
+                            <TextBlock Text="本地累计费用上限（USD，空白 = 不限；0 = 停止使用）"/><TextBox x:Name="ModelBudgetBox"/>
+                            <TextBlock x:Name="ModelUsageText" TextWrapping="Wrap" FontSize="11" Margin="0,6"/>
+                            <Button Content="重置本模型累计用量" HorizontalAlignment="Left" Padding="10,4" Click="ResetModelUsage_Click"/>
+                            <TextBlock Text="这里是启动器本地统计与上限，不是供应商余额。缺失价格时费用无法完整估算；修改单价不会重算已累计费用。" TextWrapping="Wrap" FontSize="10" Margin="0,6" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <CheckBox x:Name="ModelFastSupportedCheck" Content="已确认此接口的该模型支持极速（minimal 推理）" Checked="ModelFastSupported_Changed" Unchecked="ModelFastSupported_Changed" Margin="0,6"/>
+                            <TextBlock Text="仅在供应商文档明确支持时勾选；不会启用收费的优先服务层。" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBlock Text="输入单价（USD / 百万 token，空白 = 未知，0 = 免费）"/><TextBox x:Name="InputPriceBox"/>
+                            <TextBlock Text="缓存输入单价（USD / 百万 token，空白 = 沿用输入价）"/><TextBox x:Name="CachedInputPriceBox"/>
+                            <TextBlock Text="输出单价（USD / 百万 token，空白 = 未知，0 = 免费）"/><TextBox x:Name="OutputPriceBox"/>
+                            <TextBlock Text="每个模型分别保存；修改单价只影响后续请求。未提供缓存数据时按普通输入价格估算，最终账单以供应商为准。" TextWrapping="Wrap" Margin="0,6,0,0" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                    </Expander>
+                    <CheckBox x:Name="UseCustomKeyCheck" Content="使用自定义 API"
+                              Checked="UseCustomKeyCheck_CheckedChanged" Unchecked="UseCustomKeyCheck_CheckedChanged"/>
+                    <TextBlock Text="自定义接口可与内置接口同时使用。模型按“接口 + 模型 ID”区分，同名模型可同时保留。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,10"/>
+
+                    <CheckBox x:Name="MixBuiltInApiCheck" Content="混合模式：同时保留内置 API 与自定义 API" Margin="0,4" Checked="UseCustomKeyCheck_CheckedChanged" Unchecked="UseCustomKeyCheck_CheckedChanged"/>
+                    <CheckBox x:Name="ApiKeyFailoverCheck" Content="多密钥模式：密钥额度耗尽或鉴权失败时自动切换备用密钥" Margin="0,4"/>
+                    <CheckBox x:Name="EndpointFailoverCheck" Content="多接口模式：接口模型不可用时，切换其他接口的同模型或同档位模型" Margin="0,4"/>
+                    <TextBlock Text="公共接口格式" FontSize="11" Margin="0,8,0,0"/>
+                    <ComboBox x:Name="ApiProtocolCombo" SelectedValuePath="Tag" Margin="0,4,0,8">
+                        <ComboBoxItem Content="OpenAI 兼容" Tag="OpenAI"/><ComboBoxItem Content="Anthropic 兼容" Tag="Anthropic"/>
+                    </ComboBox>
+                    <TextBlock Text="公共自定义接口地址（Base URL）" FontSize="11" Margin="0,8,0,0"/>
+                    <TextBox x:Name="BaseUrlBox" Margin="0,4,0,8"/>
+                    <TextBlock Text="API Key" FontSize="11"/>
+                    <PasswordBox x:Name="ApiKeyBox" Margin="0,4,0,8"/>
+                    <Expander Header="公共接口的备用密钥（按顺序轮换）" Margin="0,0,0,8">
+                        <StackPanel Margin="0,6">
+                            <ListBox x:Name="DefaultKeysList" MaxHeight="100" DisplayMemberPath="Label"/>
+                            <PasswordBox x:Name="DefaultExtraKeyBox" Margin="0,5" ToolTip="输入备用密钥，添加后隐藏显示；拉取或保存时也会自动添加"/>
+                            <StackPanel Orientation="Horizontal"><Button Content="添加密钥" Click="AddDefaultKey_Click" Padding="10,4"/><Button Content="移除选中" Click="RemoveDefaultKey_Click" Padding="10,4" Margin="6,0,0,0"/></StackPanel>
+                        </StackPanel>
+                    </Expander>
+                    <Expander Header="命名接口 · 可添加第二个及更多 API 接口" IsExpanded="True" Margin="0,4,0,10">
+                        <StackPanel Margin="0,8">
+                            <ComboBox x:Name="EndpointsCombo" DisplayMemberPath="Name" SelectionChanged="EndpointsCombo_SelectionChanged"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,6"><Button Content="添加接口" Click="AddEndpoint_Click" Padding="10,4"/><Button Content="删除选中接口" Click="RemoveEndpoint_Click" Padding="10,4" Margin="6,0,0,0"/></StackPanel>
+                            <StackPanel x:Name="EndpointEditor" IsEnabled="False">
+                                <TextBlock Text="接口名称"/><TextBox x:Name="EndpointNameBox" TextChanged="EndpointFields_Changed" LostFocus="EndpointName_LostFocus"/>
+                                <TextBlock Text="接口格式"/><ComboBox x:Name="EndpointProtocolCombo" SelectedValuePath="Tag" SelectionChanged="EndpointProtocol_Changed" Margin="0,4,0,8">
+                                    <ComboBoxItem Content="OpenAI 兼容" Tag="OpenAI"/><ComboBoxItem Content="Anthropic 兼容" Tag="Anthropic"/>
+                                </ComboBox>
+                                <TextBlock Text="接口 Base URL"/><TextBox x:Name="EndpointUrlBox" TextChanged="EndpointFields_Changed"/>
+                                <CheckBox x:Name="EndpointEnabledCheck" Content="启用此接口" Margin="0,6" Checked="EndpointEnabled_Changed" Unchecked="EndpointEnabled_Changed"/>
+                                <TextBlock Text="密钥列表（按顺序使用，内容隐藏）" FontSize="11"/>
+                                <ListBox x:Name="EndpointKeysList" DisplayMemberPath="Label" MaxHeight="100"/>
+                                <PasswordBox x:Name="EndpointNewKeyBox" Margin="0,5" ToolTip="输入此接口的密钥；添加、切换接口、拉取或保存时会自动加入此接口"/>
+                                <StackPanel Orientation="Horizontal"><Button Content="添加密钥" Click="AddEndpointKey_Click" Padding="10,4"/><Button Content="移除选中密钥" Click="RemoveEndpointKey_Click" Padding="10,4" Margin="6,0,0,0"/></StackPanel>
+                                <Button x:Name="FetchEditedEndpointButton" Content="拉取此接口模型" Click="FetchEditedEndpoint_Click"
+                                        HorizontalAlignment="Left" Padding="12,5" Margin="0,8,0,0"
+                                        ToolTip="使用当前命名接口自己的地址和密钥拉取模型"/>
+                                <TextBlock Text="密钥只属于当前接口；未点击添加的密钥会在切换接口、拉取或保存时自动加入。"
+                                           TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,5,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Expander>
+
+                    <StackPanel x:Name="BuiltInModelsHintPanel">
+                        <TextBlock Text="内置模型（OpenRouter，均为免费额度）" FontSize="11" FontWeight="SemiBold" Margin="0,3,0,4"/>
+                        <TextBlock Text="普通档：Nemotron 3.5 Lightning · LFM2.5-2.6B · Gemma 4 26B A4B · Nex-N2.5-Mini · Ling 3.0 Flash Sante · Ling 3.0 Flash Fin"
+                                   TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        <TextBlock Text="专家档：Nemotron 3 Ultra · Nemotron 3 Super · Nemotron 3 Nano Omni · Gemma 4 31B · Inkling Small · Inkling · Laguna S 2.1 · Nex-N2.5-Pro · North Mini Code"
+                                   TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,0"/>
+                        <TextBlock Text="其中 Inkling / Inkling Small 及 Nemotron 系列模型有各自独立的使用条款（见上方提示条），使用前请留意。"
+                                   TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource WarningTextBrush}" Margin="0,4,0,0"/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="CustomModelsEditor" Visibility="Collapsed" Margin="0,4,0,0">
+                        <TextBlock Text="自定义模型列表（支持多供应商）" FontSize="11" FontWeight="SemiBold" Margin="0,2,0,6"/>
+                        <TextBlock Text="先选择该模型所属接口。同一模型可添加到不同接口；命名接口选择与下方来源同步。"
+                                   TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,6"/>
+
+                        <TextBlock Text="添加 / 拉取模型使用的接口" FontSize="11"/>
+                        <ComboBox x:Name="ModelEndpointCombo" DisplayMemberPath="Name" SelectedValuePath="Id" Margin="0,4,0,8"
+                                  SelectionChanged="ModelEndpointCombo_SelectionChanged"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                            <Button x:Name="FetchModelsButton" Content="拉取所选接口模型" Padding="12,5"
+                                    Click="FetchModels_Click"
+                                    ToolTip="请求 {接口地址}/models 获取该供应商当前提供的全部模型，并合并进下方列表（已有条目不会被覆盖）"/>
+                            <Button x:Name="FetchAllModelsButton" Content="拉取全部已启用接口" Padding="10,5" Margin="6,0,0,0" Click="FetchAllModels_Click"/>
+                        </StackPanel>
+                        <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto" Margin="0,5,0,6">
+                            <TextBlock x:Name="FetchModelsStatusText" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        </ScrollViewer>
+                        <TextBlock Text="所选接口拉取只使用该接口的地址和密钥；下方独立地址不会覆盖它。拉取只添加缺少的模型。开启自动保存时会自动保存，否则请点击右下角保存。"
+                                   TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CustomModelIdBox" Grid.Column="0" Margin="0,0,6,0" ToolTip="例如：openai/gpt-4.1-mini"/>
+                            <TextBox x:Name="CustomModelNameBox" Grid.Column="1" Margin="0,0,6,0" ToolTip="例如：GPT-4.1 Mini"/>
+                            <Button Grid.Column="2" Content="添加 / 更新" Padding="12,5" Click="AddCustomModel_Click"/>
+                        </Grid>
+                        <Grid Margin="0,3,0,2">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="模型 ID（请求用）" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="1" Text="显示名称（界面用）" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        </Grid>
+
+                        <CheckBox x:Name="CustomModelUseStandaloneCheck" Content="此模型使用独立 OpenAI 兼容接口地址和密钥" Margin="0,6,0,4"/>
+                        <Grid Margin="0,0,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CustomModelProviderBaseUrlBox" Grid.Column="0" Margin="0,0,6,0"
+                                     ToolTip="独立接口沿用 OpenAI 格式；Anthropic 请在上方命名接口中设置，再为模型选择该接口。"/>
+                            <PasswordBox x:Name="CustomModelProviderApiKeyBox" Grid.Column="1"
+                                         ToolTip="独立地址自己的 API Key；不会用于上方所选接口的拉取"/>
+                        </Grid>
+                        <Grid Margin="0,3,0,2">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <TextBlock Text="独立地址（旧配置兼容，可留空）" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="1" Text="独立 API Key（可留空）" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                        </Grid>
+                        <Button x:Name="FetchStandaloneModelsButton" Content="拉取此独立地址模型" HorizontalAlignment="Left"
+                                Padding="10,4" Margin="0,4,0,0" Click="FetchStandaloneModels_Click"
+                                ToolTip="只使用上面两个独立地址与密钥字段，兼容旧配置"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,4">
+                            <TextBlock Text="分组：" FontSize="10" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <RadioButton x:Name="CustomModelTierNormalRadio" Content="普通" GroupName="CustomModelTier" IsChecked="True" Margin="0,0,12,0"/>
+                            <RadioButton x:Name="CustomModelTierExpertRadio" Content="专家" GroupName="CustomModelTier"/>
+                        </StackPanel>
+
+                        <TextBlock Text="注意：模型 ID 必须与 API 文档中的 model 值完全一致，不能填显示名称；填错时接口通常会返回 HTTP 400/404。"
+                                   TextWrapping="Wrap" FontSize="9" Margin="0,0,0,5" Foreground="{DynamicResource WarningTextBrush}"/>
+                        <ListBox x:Name="CustomModelsList" MaxHeight="200" BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="5,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock FontWeight="SemiBold" FontSize="11">
+                                                <Run Text="{Binding DisplayName, Mode=OneWay}"/>
+                                                <Run Text=" · " Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                                <Run Text="{Binding TierLabel, Mode=OneWay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9"/>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Id}" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBlock Text="{Binding ProviderName}" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <TextBlock Text="{Binding ProviderSummary}" FontSize="9"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <Button Content="{Binding TierSwitchLabel, Mode=OneWay}" FontSize="10" Padding="8,3" Margin="8,0,0,0"
+                                                    Click="ToggleModelTier_Click" Tag="{Binding}" Style="{StaticResource SecondaryButton}"/>
+                                            <Button Content="编辑" FontSize="10" Padding="8,3" Margin="6,0,0,0" Click="EditCustomModel_Click" Tag="{Binding}" Style="{StaticResource SecondaryButton}"/>
+                                            <Button Content="测试" FontSize="10" Padding="8,3" Margin="6,0,0,0"
+                                                    Click="TestCustomModel_Click" Tag="{Binding}" Style="{StaticResource SecondaryButton}"/>
+                                            <Button Content="删除" FontSize="10" Padding="8,3" Margin="6,0,0,0"
+                                                    Click="RemoveCustomModel_Click" Tag="{Binding}" Style="{StaticResource SecondaryButton}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="工作目录与轻量编程（纯聊天模式下不生效）" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <TextBlock Text="设置后，AI 可在你逐次确认的前提下列出、读取和写入该目录里的文本文件，也可继续使用白名单设置工具调整 XCL2。留空即完全关闭文件访问。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="WorkingDirectoryBox" Padding="7" ToolTip="AI 只能访问此目录及子目录，不能越过该边界。"/>
+                        <Button x:Name="BrowseWorkingDirectoryButton" Grid.Column="1" Content="选择目录" Margin="8,0,0,0" Padding="10,5" Click="BrowseWorkingDirectory_Click"/>
+                        <Button x:Name="ClearWorkingDirectoryButton" Grid.Column="2" Content="清空" Margin="8,0,0,0" Padding="10,5" Click="ClearWorkingDirectory_Click"/>
+                    </Grid>
+
+                    <TextBlock Text="额外目录（可添加多个；AI 也可以向你申请新的目录）" FontWeight="SemiBold" Margin="0,12,0,0"/>
+                    <ListBox x:Name="ExtraDirectoriesList" Margin="0,4,0,0" MinHeight="40" MaxHeight="130"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <Button x:Name="AddExtraDirectoryButton" Content="添加目录" Padding="10,5" Click="AddExtraDirectory_Click"/>
+                        <Button x:Name="RemoveExtraDirectoryButton" Content="移除选中" Padding="10,5" Margin="8,0,0,0" Click="RemoveExtraDirectory_Click"/>
+                    </StackPanel>
+
+                    <CheckBox x:Name="FullAccessCheck" Margin="0,14,0,0"
+                              Content="完全访问：允许 AI 访问这台电脑上的所有文件（高风险）"
+                              Checked="FullAccessCheck_Checked" Unchecked="FullAccessCheck_Unchecked"/>
+                    <TextBlock Text="开启时会连续弹出两次系统提示，两次都确认才生效。开启后 AI 读取/列出文件不再逐次询问，每次写入仍会单独询问你；Windows、Program Files、ProgramData 等系统目录禁止写入（除非开启下方的「完全绝对访问」）。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource DangerBrush}" Margin="0,4,0,0"/>
+
+                    <CheckBox x:Name="AbsoluteAccessCheck" Margin="24,12,0,0" IsEnabled="False"
+                              Content="绝对访问：AI 读写文件时不再弹窗确认，静默执行（极高风险）"
+                              Checked="AbsoluteAccessCheck_Checked" Unchecked="AbsoluteAccessCheck_Unchecked"/>
+                    <TextBlock Text="仅在「完全访问」开启时可用。AI 的每次列出/读取/写入都会直接执行，并记录到启动器日志（前缀「[AI 绝对访问]」）。启动器自己的配置/账户目录和系统目录仍受保护。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource DangerBrush}" Margin="24,4,0,0"/>
+
+                    <CheckBox x:Name="UnrestrictedAccessCheck" Margin="48,12,0,0" IsEnabled="False"
+                              Content="完全绝对访问：取消所有路径保护，包括应用安装文件和 Windows 系统文件（最高风险）"
+                              Checked="UnrestrictedAccessCheck_Checked" Unchecked="UnrestrictedAccessCheck_Unchecked"/>
+                    <TextBlock Text="仅在「绝对访问」开启时可用。AI 可以静默读取、修改甚至覆盖任何文件：应用安装目录、Windows 系统目录、Program Files、ProgramData，以及启动器自己的配置/账户目录（含 API 密钥、登录令牌）。若已允许 Shell 命令，也将不再逐次弹出 Shell 确认窗口。开启时会连续弹出两次红色警告，任何一次取消都不会生效；每次操作都会记录到启动器日志。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource DangerBrush}" Margin="48,4,0,0"/>
+
+                    <CheckBox x:Name="SystemControlAccessCheck" Margin="72,12,0,0" IsEnabled="False"
+                              Content="彻底完全访问：允许 AI 修改注册表、执行各种高危系统命令（最高危）"
+                              Checked="SystemControlAccessCheck_Checked"/>
+                    <TextBlock Text="仅在「完全绝对访问」开启时可用。AI 可以直接读写注册表，并通过 PowerShell / cmd 执行任意命令（删除文件、结束进程、改系统设置、安装/卸载软件等），没有任何弹窗确认。开启时会连续弹出三次红色警告，任何一次取消都不会生效；每次操作都会记录到启动器日志。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource DangerBrush}" Margin="72,4,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="模型路由" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock Text="默认回答模式" FontSize="11"/>
+                    <ComboBox x:Name="DefaultModeCombo" Margin="0,4,0,9" SelectionChanged="DefaultModeCombo_SelectionChanged">
+                        <ComboBoxItem Content="自动 · 普通问题/专家问题自动切换" Tag="Auto"/>
+                        <ComboBoxItem Content="普通 · 始终使用普通模型" Tag="Normal"/>
+                        <ComboBoxItem Content="专家 · 始终使用专家模型" Tag="Expert"/>
+                        <ComboBoxItem Content="指定模型 · 始终使用手动模型" Tag="SpecificModel"/>
+                    </ComboBox>
+
+                    <TextBlock Text="模型分组（普通 / 专家）" FontSize="11" FontWeight="SemiBold"/>
+                    <TextBlock Text="可把任意已有模型（内置或自定义）调到“普通”或“专家”分组；下面的普通/专家下拉框会优先列出对应分组的模型。"
+                               TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,2,0,4"/>
+                    <ListBox x:Name="ModelTierList" MaxHeight="190" Margin="0,0,0,10"
+                             BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="5,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock FontWeight="SemiBold" FontSize="11" TextTrimming="CharacterEllipsis">
+                                            <Run Text="{Binding DisplayName, Mode=OneWay}"/>
+                                            <Run Text=" · " Foreground="{DynamicResource TextSecondaryBrush}"/>
+                                            <Run Text="{Binding TierLabel, Mode=OneWay}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="9"/>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding Id}" FontSize="9" Foreground="{DynamicResource TextSecondaryBrush}" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Content="{Binding TierSwitchLabel, Mode=OneWay}" FontSize="10" Padding="8,3" Margin="8,0,0,0"
+                                            VerticalAlignment="Center" Click="ToggleModelTier_Click" Tag="{Binding}"
+                                            Style="{StaticResource SecondaryButton}"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <TextBlock Text="普通模型（功能入口、使用说明、常规问题）" FontSize="11"/>
+                    <Grid Margin="0,4,0,9">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <ComboBox x:Name="NormalModelCombo" Grid.Column="0" ItemTemplate="{StaticResource AiProviderModelTemplate}" SelectedValuePath="ModelKey" SelectionChanged="ModelCombo_SelectionChanged"/>
+                        <Button x:Name="TestNormalModelButton" Grid.Column="1" Content="测试" Padding="10,4" Margin="6,0,0,0" Click="TestNormalModel_Click"/>
+                    </Grid>
+
+                    <TextBlock Text="专家模型（日志/崩溃/注入/复杂排障）" FontSize="11"/>
+                    <Grid Margin="0,4,0,9">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <ComboBox x:Name="ExpertModelCombo" Grid.Column="0" ItemTemplate="{StaticResource AiProviderModelTemplate}" SelectedValuePath="ModelKey" SelectionChanged="ModelCombo_SelectionChanged"/>
+                        <Button x:Name="TestExpertModelButton" Grid.Column="1" Content="测试" Padding="10,4" Margin="6,0,0,0" Click="TestExpertModel_Click"/>
+                    </Grid>
+
+                    <TextBlock Text="指定模型模式的默认模型" FontSize="11"/>
+                    <Grid Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <ComboBox x:Name="ManualModelCombo" Grid.Column="0" ItemTemplate="{StaticResource AiProviderModelTemplate}" SelectedValuePath="ModelKey" SelectionChanged="ModelCombo_SelectionChanged"/>
+                        <Button x:Name="TestManualModelButton" Grid.Column="1" Content="测试" Padding="10,4" Margin="6,0,0,0" Click="TestManualModel_Click"/>
+                    </Grid>
+
+                    <Border x:Name="SpecialTermsNoticeBox" Visibility="Collapsed" Margin="0,10,0,0" Padding="8"
+                            Background="{DynamicResource PanelBrush}" CornerRadius="6"
+                            BorderBrush="{DynamicResource WarningTextBrush}" BorderThickness="1">
+                        <TextBlock x:Name="SpecialTermsNoticeText" TextWrapping="Wrap" FontSize="10"
+                                   Foreground="{DynamicResource WarningTextBrush}"/>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
+                <StackPanel>
+                    <CheckBox x:Name="ShowTaskSelectionBarCheck" Content="在模型下方显示任务选择栏" Margin="0,0,0,10"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="执行记录保留时间：" VerticalAlignment="Center"/>
+                        <TextBox x:Name="ActivityRetentionBox" Width="80" Margin="6,0,6,0" VerticalContentAlignment="Center"
+                                 ToolTip="留空、0、∞ 或 A 表示不限制（默认）。已结束的执行记录超过该时间后不再显示并被清除。"
+                                 AutomationProperties.Name="执行记录保留时间"/>
+                        <ComboBox x:Name="ActivityRetentionUnitCombo" Width="80" SelectedIndex="3" AutomationProperties.Name="执行记录保留时间单位">
+                            <ComboBoxItem Content="秒"/><ComboBoxItem Content="分钟"/><ComboBoxItem Content="小时"/><ComboBoxItem Content="天"/>
+                        </ComboBox>
+                    </StackPanel>
+                    <TextBlock Text="输入 A 表示无限时间（不限制）；也可以输入数字指定保留时间。随意调整造成的数据丢失，作者不承担任何责任！" FontSize="11" FontWeight="SemiBold" TextWrapping="Wrap" Opacity="0.8" Margin="0,0,0,8"/>
+                    <TextBlock Text="执行过程显示" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="ShowSubAgentsCheck" Content="显示 AI 调用的子智能体" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="ShowCodeChangesCheck" Content="显示修改的代码" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="ShowEditingFilesCheck" Content="显示正在修改的文件" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="ShowCommandsCheck" Content="显示执行的命令" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="ShowReasoningSummaryCheck" Content="显示思考过程摘要" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="ShowReasoningCheck" Content="显示思考过程"/>
+                    <TextBlock Text="思考过程摘要和思考过程仅展示模型接口明确返回的可公开内容。接口未提供时不会补写或推测内部思考。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,8,0,0"/>
+                    <TextBlock Text="这些开关只控制聊天中的显示，不会授予文件或命令权限，也不会自动开启深度思考。保存后生效。"
+                               TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <Border Padding="12" CornerRadius="10" Background="{DynamicResource PanelBrush}"
+                    BorderBrush="{DynamicResource BorderBrush2}" BorderThickness="1" Margin="0,0,0,10">
+                <StackPanel>
+                    <TextBlock Text="能力与上下文" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <TextBlock Text="默认推理等级" FontSize="11"/>
+                    <ComboBox x:Name="ReasoningLevelCombo" Margin="0,4,0,6">
+                        <ComboBoxItem Content="off · 关闭" Tag="Off"/>
+                        <ComboBoxItem Content="low · 低" Tag="Low"/>
+                        <ComboBoxItem Content="中" Tag="Medium"/>
+                        <ComboBoxItem Content="高" Tag="High"/>
+                        <ComboBoxItem Content="极高" Tag="VeryHigh"/>
+                        <ComboBoxItem Content="最高（超高）" Tag="Max"/>
+                        <ComboBoxItem x:Name="FastReasoningItem" Content="极速（仅明确支持的模型）" Tag="Fast" IsEnabled="False"/>
+                    </ComboBox>
+                    <TextBlock x:Name="FastReasoningHintText" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,0,0,8"/>
+                    <TextBlock Text="参数按模型独立适配；省略推理参数不等于关闭服务端思考。可在“接口请求文档与参数规则”中指定协议。" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8"/>
+                    <CheckBox x:Name="EnableWebSearchCheck" Content="默认启用联网搜索" Margin="0,0,0,9" Click="EnableWebSearchCheck_Click"/>
+                    <TextBlock Text="上下文压缩阈值（估算 token）" FontSize="11"/>
+                    <TextBox x:Name="ThresholdBox" Margin="0,4,0,9"/>
+                    <CheckBox x:Name="AllowCrashLogCheck" Content="允许把用户主动提交的崩溃/日志内容发给 AI 分析" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="ClearGuestHistoryCheck" Content="访客会话结束时清空访客 AI 历史" Margin="0,0,0,6"/>
+                    <CheckBox x:Name="PrewarmOnOpenCheck"
+                              Content="打开 AI 助手页面时预热系统提示词（不展示回复，可加快首次回答速度）"
+                              Margin="0,0,0,6"/>
+                    <CheckBox x:Name="TokenSaverCheck" Content="省 Token 模式" Checked="TokenSaverCheck_CheckedChanged" Unchecked="TokenSaverCheck_CheckedChanged"/>
+                    <TextBlock x:Name="TokenSaverHintText" TextWrapping="Wrap" FontSize="11"
+                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+
+                    <TextBlock Text="AI 人格" FontWeight="SemiBold" Margin="0,14,0,0"/>
+                    <ComboBox x:Name="PersonaCombo" Margin="0,4,0,0"
+                              DisplayMemberPath="DisplayName" SelectedValuePath="Id"
+                              SelectionChanged="PersonaCombo_SelectionChanged"/>
+                    <TextBlock x:Name="PersonaHintText" TextWrapping="Wrap" FontSize="11"
+                               Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                    <StackPanel x:Name="CustomPromptPanel" Visibility="Collapsed">
+                        <TextBlock Text="我的提示词（「其他」专用）" FontWeight="SemiBold" Margin="0,12,0,0"/>
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="146"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="CustomSystemPromptBox" Grid.Column="0" MinHeight="150" MaxHeight="260"
+                                     AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                            <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                <TextBlock Text="点击预设填入" FontSize="11" FontWeight="SemiBold"/>
+                                <TextBlock Text="填入后可自由修改" FontSize="10" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,1,0,6"/>
+                                <ItemsControl x:Name="PersonaPresetList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding DisplayName}" ToolTip="{Binding Description}" Tag="{Binding Id}"
+                                                    Click="PersonaPreset_Click" Margin="0,0,0,5" Padding="8,4" FontSize="11"
+                                                    HorizontalContentAlignment="Left"
+                                                    Style="{StaticResource SecondaryButton}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Grid>
+                        <TextBlock Text="例如：回答时多举例子；称呼我为「船长」。也可以先点右侧的预设，再在它的基础上修改。提示词不能覆盖助手的能力边界与安全规则。" TextWrapping="Wrap"
+                                   FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Button Content="拒绝 AI 助手的用户协议与条款 · 关闭 AI 助手" Click="RejectTerms_Click" HorizontalAlignment="Left" Margin="0,14,0,16" Padding="12,8"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="导入配置 JSON" Width="110" Margin="0,0,8,0" Click="ImportConfig_Click" Style="{StaticResource SecondaryButton}"/>
+                <Button Content="导出配置 JSON" Width="110" Margin="0,0,8,0" Click="ExportConfig_Click" Style="{StaticResource SecondaryButton}"/>
+                <Button Content="恢复默认" Width="86" Margin="0,0,8,0" Click="ResetDefaults_Click" Style="{StaticResource SecondaryButton}"/>
+                <Button Content="取消" Width="80" Margin="0,0,8,0" Click="Cancel_Click"/>
+                <Button x:Name="SaveButton" Content="保存" Width="80" Click="Save_Click" IsDefault="True"/>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+        <Border x:Name="SearchHintBubble" Grid.RowSpan="2" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="16" Padding="14" CornerRadius="10" MaxWidth="340" Background="{DynamicResource PanelBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="设置不好找？试试搜索 AI 助手设置，无需上下翻找。" TextWrapping="Wrap"/>
+                <WrapPanel Margin="0,8,0,0">
+                    <Button Content="去搜索" Click="SearchHint_Search" Margin="0,0,6,0"/>
+                    <Button Content="关闭" Click="SearchHint_Close" Margin="0,0,6,0"/>
+                    <Button Content="不再提醒" Click="SearchHint_Disable"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

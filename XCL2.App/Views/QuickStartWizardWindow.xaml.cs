@@ -1,0 +1,1516 @@
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using XCL2.App.Models;
+using XCL2.App.Services;
+
+namespace XCL2.App.Views;
+
+public partial class QuickStartWizardWindow : OverlayDialogControl
+{
+    private readonly MainWindow _owner;
+    private readonly JavaService _javaService = new();
+    private readonly ModrinthService _modrinth = new();
+    private readonly CurseForgeKeyService _curseForgeKeyService = new();
+    private CurseForgeService? _curseForge;
+    private ClientLoaderInstallService? _loaderService;
+    private readonly ModpackService _modpackService = new();
+
+    private ModSearchService? _modSearch;
+    private ModSearchService GetModSearch() => _modSearch ??= new ModSearchService(_modrinth, GetCurseForge());
+    private CurseForgeService GetCurseForge() => _curseForge ??= new CurseForgeService(_curseForgeKeyService);
+
+    /// <summary>0 = 选择来源页；1-5 = 原有下载向导五步。0 不计入步骤指示条（那条只表示 1-5）。</summary>
+    private int _step = 0;
+    private const int TotalSteps = 5;
+
+    private readonly FolderService _folderService = new();
+    private CancellationTokenSource? _sourceFoldersScan;
+    private CancellationTokenSource? _sourceVersionsScan;
+    private int _sourceFoldersGeneration;
+    private int _sourceVersionsGeneration;
+    private bool _updatingSourceFolders;
+    private bool _existingFolderWasBrowsed;
+    private List<GameFolder> _simpleFolders = new();
+
+    /// <summary>"使用现有实例"模式下选中的 GameFolder + 版本，直接跳到 Java 检测+启动。</summary>
+    private bool _useExistingInstance;
+    private string? _existingInstanceFolderPath;
+    private string? _existingInstanceVersionId;
+
+    /// <summary>是否已经跑完构造函数里的 InitializeComponent()，跟 InstallClientLoaderWindow 同样的
+    /// 时序陷阱：XAML 里 AccountModeOffline/LoaderVanilla/ResTypeResourcePack 都写了
+    /// IsChecked="True"，会在 InitializeComponent() 阶段提前触发 Checked 事件，此时自动生成的
+    /// 字段还没连接完，直接读会 NullReferenceException。所有相关事件处理器开头都要
+    /// "if (!_initialized) return;"。</summary>
+    private bool _initialized;
+
+    private ServerCoreType _selectedLoaderType = ServerCoreType.Vanilla;
+    private readonly ObservableCollection<string> _mcVersions = new();
+    private readonly ObservableCollection<ServerCoreBuild> _buildVersions = new();
+
+    private ModrinthResourceType _selectedResourceType = ModrinthResourceType.ResourcePack;
+
+    private readonly ObservableCollection<SelectableModItem> _modResults = new();
+    private readonly ObservableCollection<SelectableResourceItem> _resourceResults = new();
+
+    /// <summary>步骤3"已选清单"：点进 ModDetailPage（AddToWizardList 模式）选中具体版本后加入这里，
+    /// 步骤5下载时按这里锁定的 InlineVersionEntry 下载，不再自动匹配"最新版"。</summary>
+    private readonly ObservableCollection<WizardModSelection> _modSelections = new();
+    private IInputElement? _detailReturnFocus;
+    private double _detailReturnScrollOffset;
+
+    /// <summary>整页详情显示/收起，同 DownloadCenterPage.ShowDetail/HideDetail 的写法。</summary>
+    private void ShowDetail(ModDetailPage page)
+    {
+        if (DetailHost.Visibility != Visibility.Visible)
+        {
+            _detailReturnFocus = Keyboard.FocusedElement;
+            _detailReturnScrollOffset = StepContentScroll.VerticalOffset;
+        }
+        Step3Panel.Visibility = Visibility.Hidden;
+        page.UseHostPageTransition();
+        PageTransitionBehavior.SetTransitionDirection(DetailHost, 1);
+        DetailHost.Content = page;
+        DetailHost.Visibility = Visibility.Visible;
+        StepContentScroll.ScrollToTop();
+    }
+
+    private void HideDetail() => HideDetail(animateReturn: true);
+
+    private void HideDetail(bool animateReturn)
+    {
+        var wasVisible = DetailHost.Visibility == Visibility.Visible;
+        DetailHost.Visibility = Visibility.Collapsed;
+        DetailHost.Content = null;
+        if (_step == 3) Step3Panel.Visibility = Visibility.Visible;
+        if (wasVisible && animateReturn && _step == 3)
+        {
+            PageTransitionBehavior.Replay(Step3Panel, depth: 2, direction: -1);
+            StepContentScroll.ScrollToVerticalOffset(_detailReturnScrollOffset);
+            if (_detailReturnFocus is UIElement { IsVisible: true, IsEnabled: true } focus) Keyboard.Focus(focus);
+        }
+        _detailReturnFocus = null;
+    }
+
+    /// <summary>导入整合包成功后会跳过"选版本/选Mod/选资源包"，标记该状态，步骤 5 的下载编排
+    /// 需要区分"走正常流程装的版本/Mod/资源包"和"整合包已经把这些都装好了，只需要装 Java + 启动"。</summary>
+    private bool _importedModpack;
+    private string? _importedVersionId;
+
+    public QuickStartWizardWindow(MainWindow owner)
+    {
+        _owner = owner;
+        InitializeComponent();
+
+        var cfg = _owner.ConfigService.Config;
+        var existingDefault = cfg.Folders.FirstOrDefault(f => f.Path == cfg.SelectedFolderPath)
+            ?? cfg.Folders.FirstOrDefault(f => f.IsDefault) ?? cfg.Folders.FirstOrDefault();
+        FolderPathBox.Text = existingDefault?.Path ?? Path.Combine(AppContext.BaseDirectory, ".minecraft");
+
+        McVersionCombo.ItemsSource = _mcVersions;
+        BuildVersionCombo.ItemsSource = _buildVersions;
+        BuildVersionCombo.DisplayMemberPath = nameof(ServerCoreBuild.DisplayVersion);
+        ModResultsList.ItemsSource = _modResults;
+        ResourceResultsList.ItemsSource = _resourceResults;
+        ModSelectedList.ItemsSource = _modSelections;
+
+        UpdateAccountStatusText();
+        RefreshExistingAccountCombo();
+        _initialized = true;
+        // 首先把向导与加载提示交给 WPF；目录/JSON 扫描只在工作线程执行。
+        Loaded += (_, _) =>
+        {
+            if (_step == 0) _ = RefreshSourceFoldersAsync();
+        };
+        Unloaded += (_, _) => CancelSourceScans();
+        OverlayClosed += (_, _) => CancelSourceScans();
+        SourceModeSimple.IsEnabled = false;
+        SimpleModeHintText.Text = "正在加载已导入的安装文件夹…";
+        _ = LoadMcVersionsAsync();
+    }
+
+    // ========== 步骤 0：选择来源 ==========
+
+    /// <summary>
+    /// "傻瓜式启动游戏"要求用户已经导入过至少一个安装文件夹（cfg.Folders 里至少一个文件夹
+    /// 底下能扫到已装好的版本），否则该选项禁用并提示原因，避免用户选了之后卡在"文件夹是空的"
+    /// 这种更困惑的状态。
+    /// </summary>
+    private async Task RefreshSourceFoldersAsync()
+    {
+        if (!IsLoaded || _step != 0) return;
+        _sourceFoldersScan?.Cancel();
+        var cancellation = new CancellationTokenSource();
+        _sourceFoldersScan = cancellation;
+        var generation = ++_sourceFoldersGeneration;
+        var token = cancellation.Token;
+        // 工作线程只读取该快照，不枚举可能正被导入流程更新的配置集合。
+        var folders = _owner.ConfigService.Config.Folders.Select(folder => new GameFolder
+        {
+            Name = folder.Name, Path = folder.Path, IsDefault = folder.IsDefault
+        }).ToArray();
+        SourceFoldersLoadingPanel.Visibility = Visibility.Visible;
+        SourceModeSimple.IsEnabled = false;
+        SimpleModeHintText.Text = "正在加载已导入的安装文件夹…";
+        UpdateSourceNavigationState();
+        try
+        {
+            var available = await Task.Run(() =>
+            {
+                var result = new List<(GameFolder Folder, bool HasInstalledVersions)>();
+                foreach (var folder in folders)
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (!Directory.Exists(folder.Path)) continue;
+                    var hasVersions = _folderService.ScanVersions(folder.Path, token).Any(version => version.IsInstalled);
+                    result.Add((folder, hasVersions));
+                }
+                return result;
+            }, token);
+            if (token.IsCancellationRequested || generation != _sourceFoldersGeneration || !IsLoaded || _step != 0) return;
+
+            var selectedExistingPath = (ExistingFolderCombo.SelectedItem as GameFolder)?.Path
+                ?? _existingInstanceFolderPath ?? _owner.ConfigService.Config.SelectedFolderPath;
+            var selectedSimplePath = (SimpleFolderCombo.SelectedItem as GameFolder)?.Path
+                ?? _owner.ConfigService.Config.SelectedFolderPath;
+            _updatingSourceFolders = true;
+            try
+            {
+                var existingFolders = available.Select(item => item.Folder).ToList();
+                ExistingFolderCombo.ItemsSource = existingFolders;
+                ExistingFolderCombo.SelectedItem = _existingFolderWasBrowsed ? null
+                    : existingFolders.FirstOrDefault(folder => SameFolder(folder.Path, selectedExistingPath))
+                        ?? existingFolders.FirstOrDefault(folder => SameFolder(folder.Path, _owner.ConfigService.Config.SelectedFolderPath))
+                        ?? existingFolders.FirstOrDefault(folder => folder.IsDefault) ?? existingFolders.FirstOrDefault();
+                _simpleFolders = available.Where(item => item.HasInstalledVersions).Select(item => item.Folder).ToList();
+                SimpleFolderCombo.ItemsSource = _simpleFolders;
+                SimpleFolderCombo.SelectedItem = _simpleFolders.FirstOrDefault(folder => SameFolder(folder.Path, selectedSimplePath))
+                    ?? _simpleFolders.FirstOrDefault(folder => SameFolder(folder.Path, _owner.ConfigService.Config.SelectedFolderPath))
+                    ?? _simpleFolders.FirstOrDefault(folder => folder.IsDefault) ?? _simpleFolders.FirstOrDefault();
+            }
+            finally { _updatingSourceFolders = false; }
+
+            var hasImportedFolder = _simpleFolders.Count > 0;
+            SourceModeSimple.IsEnabled = hasImportedFolder;
+            SimpleModeHintText.Text = hasImportedFolder
+                ? "已经导入过安装文件夹，可以直接选一个装好的版本快速启动，不用再走一遍下载流程。"
+                : "需要先导入一个安装文件夹（用「一键下载游戏」装过版本，或者在下面选「使用现有实例」导入一次）才能使用该选项。";
+            RefreshSelectedSourceVersions();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (generation == _sourceFoldersGeneration && IsLoaded && _step == 0)
+            {
+                SimpleModeHintText.Text = "加载安装文件夹失败：" + ex.Message;
+                SimpleVersionCombo.ItemsSource = null;
+                ExistingVersionCombo.ItemsSource = null;
+            }
+        }
+        finally
+        {
+            if (generation == _sourceFoldersGeneration)
+            {
+                _sourceFoldersScan = null;
+                SourceFoldersLoadingPanel.Visibility = Visibility.Collapsed;
+                UpdateSourceNavigationState();
+            }
+            cancellation.Dispose();
+        }
+    }
+
+    private static bool SameFolder(string? first, string? second)
+        => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// "傻瓜式启动"专用：只列出 cfg.Folders 里已经导入过、且能扫到已装好版本的文件夹——
+    /// 跟"使用现有实例"不同，这里不提供"浏览其它位置"，因为该选项的前提就是
+    /// "用户之前已经用该启动器导入过安装文件夹"，不是"随便指一个 .minecraft"。
+    /// </summary>
+    private void RefreshSimpleFolderCombo()
+    {
+        if (SimpleFolderCombo.SelectedItem is GameFolder folder)
+            _ = RefreshSourceVersionsAsync(folder.Path, simple: true);
+        else
+        {
+            SimpleVersionCombo.ItemsSource = null;
+            SimpleModeStatusText.Text = "还没有任何已导入的安装文件夹，请先用「一键下载游戏」装一个版本，或者用「使用现有实例」导入一次。";
+        }
+    }
+
+    private void SimpleFolderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized || _updatingSourceFolders || _step != 0 || SourceModeSimple.IsChecked != true) return;
+        if (SimpleFolderCombo.SelectedItem is not GameFolder folder) return;
+        _ = RefreshSourceVersionsAsync(folder.Path, simple: true);
+    }
+
+    private void RefreshExistingAccountCombo()
+    {
+        var accounts = _owner.ConfigService.Accounts;
+        ExistingAccountCombo.ItemsSource = accounts;
+        var selected = _owner.ConfigService.GetSelectedAccount();
+        ExistingAccountPanel.Visibility = accounts.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NewAccountPanel.Visibility = accounts.Count > 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (selected != null) ExistingAccountCombo.SelectedItem = selected;
+        else if (ExistingAccountCombo.Items.Count > 0) ExistingAccountCombo.SelectedIndex = 0;
+    }
+
+    private void ExistingAccountCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized) return;
+        if (ExistingAccountCombo.SelectedItem is Account acc) _owner.ConfigService.SelectAccount(acc.Id);
+        UpdateAccountStatusText();
+    }
+
+    private void ShowNewAccountPanel_Click(object sender, RoutedEventArgs e)
+    {
+        ExistingAccountPanel.Visibility = Visibility.Collapsed;
+        NewAccountPanel.Visibility = Visibility.Visible;
+    }
+
+    private void SourceMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return;
+        CancelSourceVersionScan();
+        SimpleModePanel.Visibility = SourceModeSimple.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        ExistingInstancePanel.Visibility = SourceModeExisting.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        ModpackImportPanel.Visibility = SourceModeModpack.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        RefreshSelectedSourceVersions();
+    }
+
+    private void RefreshSelectedSourceVersions()
+    {
+        if (!IsLoaded || _step != 0) return;
+        if (SourceModeSimple.IsChecked == true) RefreshSimpleFolderCombo();
+        else if (SourceModeExisting.IsChecked == true)
+        {
+            var path = _existingFolderWasBrowsed ? _existingInstanceFolderPath
+                : (ExistingFolderCombo.SelectedItem as GameFolder)?.Path;
+            if (!string.IsNullOrWhiteSpace(path)) _ = RefreshSourceVersionsAsync(path, simple: false);
+            else
+            {
+                ExistingVersionCombo.ItemsSource = null;
+                ExistingInstanceStatusText.Text = "请选择一个安装文件夹，或者点「浏览其它位置...」。";
+            }
+        }
+    }
+
+    private void BrowseExistingFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog { Title = "选择 .minecraft 文件夹位置" };
+
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+
+        _existingFolderWasBrowsed = true;
+        _existingInstanceFolderPath = dialog.FolderName;
+        _updatingSourceFolders = true;
+        try { ExistingFolderCombo.SelectedItem = null; }
+        finally { _updatingSourceFolders = false; }
+        _ = RefreshSourceVersionsAsync(dialog.FolderName, simple: false);
+    }
+
+    private void ExistingFolderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized || _updatingSourceFolders || _step != 0 || SourceModeExisting.IsChecked != true) return;
+        if (ExistingFolderCombo.SelectedItem is not GameFolder folder) return;
+        _existingFolderWasBrowsed = false;
+        _ = RefreshSourceVersionsAsync(folder.Path, simple: false);
+    }
+
+    private async Task RefreshSourceVersionsAsync(string path, bool simple)
+    {
+        if (!IsLoaded || _step != 0
+            || (simple ? SourceModeSimple.IsChecked != true : SourceModeExisting.IsChecked != true)) return;
+        CancelSourceVersionScan();
+        var cancellation = new CancellationTokenSource();
+        _sourceVersionsScan = cancellation;
+        var generation = _sourceVersionsGeneration;
+        var token = cancellation.Token;
+        var combo = simple ? SimpleVersionCombo : ExistingVersionCombo;
+        var status = simple ? SimpleModeStatusText : ExistingInstanceStatusText;
+        var loading = simple ? SimpleVersionsLoadingPanel : ExistingVersionsLoadingPanel;
+        var selectedId = (combo.SelectedItem as GameVersion)?.Id ?? _existingInstanceVersionId
+            ?? _owner.ConfigService.Config.SelectedVersionId;
+        var configuredId = _owner.ConfigService.Config.SelectedVersionId;
+        combo.ItemsSource = null;
+        combo.IsEnabled = false;
+        status.Text = "正在加载已安装版本…";
+        loading.Visibility = Visibility.Visible;
+        NextBtn.IsEnabled = false;
+        if (!simple) _existingInstanceFolderPath = path;
+        try
+        {
+            var versions = await Task.Run(() => _folderService.ScanVersions(path, token)
+                .Where(version => version.IsInstalled).ToList(), token);
+            if (!IsCurrentSourceScan(generation, simple, token)) return;
+
+            combo.DisplayMemberPath = nameof(GameVersion.SubTitle);
+            combo.ItemsSource = versions;
+            combo.SelectedItem = versions.FirstOrDefault(version => string.Equals(version.Id, selectedId, StringComparison.OrdinalIgnoreCase))
+                ?? versions.FirstOrDefault(version => string.Equals(version.Id, configuredId, StringComparison.OrdinalIgnoreCase))
+                ?? versions.FirstOrDefault();
+            status.Text = versions.Count > 0
+                ? simple
+                    ? $"找到 {versions.Count} 个已装好的版本，选一个然后点「下一步」，选好账户就能直接启动。"
+                    : $"找到 {versions.Count} 个已装好的版本，选一个然后点「下一步」即可自动匹配 Java 并启动。"
+                : simple ? "该文件夹里暂时没有已装好的版本。"
+                    : "该文件夹里没有找到任何已装好的版本，可以点「浏览其它位置...」换一个文件夹。";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (IsCurrentSourceScan(generation, simple, token)) status.Text = "加载已安装版本失败：" + ex.Message;
+        }
+        finally
+        {
+            if (generation == _sourceVersionsGeneration)
+            {
+                _sourceVersionsScan = null;
+                loading.Visibility = Visibility.Collapsed;
+                combo.IsEnabled = true;
+                UpdateSourceNavigationState();
+            }
+            cancellation.Dispose();
+        }
+    }
+
+    private bool IsCurrentSourceScan(int generation, bool simple, CancellationToken token)
+        => !token.IsCancellationRequested && generation == _sourceVersionsGeneration && IsLoaded && _step == 0
+            && (simple ? SourceModeSimple.IsChecked == true : SourceModeExisting.IsChecked == true);
+
+    private void CancelSourceVersionScan()
+    {
+        ++_sourceVersionsGeneration;
+        _sourceVersionsScan?.Cancel();
+        _sourceVersionsScan = null;
+        SimpleVersionsLoadingPanel.Visibility = Visibility.Collapsed;
+        ExistingVersionsLoadingPanel.Visibility = Visibility.Collapsed;
+        SimpleVersionCombo.IsEnabled = true;
+        ExistingVersionCombo.IsEnabled = true;
+        UpdateSourceNavigationState();
+    }
+
+    private void CancelSourceScans()
+    {
+        ++_sourceFoldersGeneration;
+        _sourceFoldersScan?.Cancel();
+        _sourceFoldersScan = null;
+        SourceFoldersLoadingPanel.Visibility = Visibility.Collapsed;
+        CancelSourceVersionScan();
+    }
+
+    private void UpdateSourceNavigationState()
+        => NextBtn.IsEnabled = _step != 0
+            || (SourceModeSimple.IsChecked != true && SourceModeExisting.IsChecked != true)
+            || (_sourceFoldersScan == null && _sourceVersionsScan == null);
+
+    // ========== 步骤 1：账户 ==========
+
+    private void UpdateAccountStatusText()
+    {
+        var existing = _owner.ConfigService.GetSelectedAccount();
+        AccountStatusText.Text = existing == null
+            ? "当前还没有任何账户，请先创建离线账户或登录微软账户。"
+            : $"当前已选中账户：{existing.DisplayLabel}，可以直接点「下一步」，或者切换成另一种账户类型重新登录/创建。";
+    }
+
+    private void AccountMode_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return;
+        var useMicrosoft = AccountModeMicrosoft.IsChecked == true;
+        OfflineAccountPanel.Visibility = useMicrosoft ? Visibility.Collapsed : Visibility.Visible;
+        MicrosoftAccountPanel.Visibility = useMicrosoft ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void CreateOffline_Click(object sender, RoutedEventArgs e)
+    {
+        var name = string.IsNullOrWhiteSpace(OfflineNameBox.Text) ? "Player" : OfflineNameBox.Text.Trim();
+        var account = OfflineAuthService.CreateOfflineAccount(name);
+        _owner.ConfigService.AddOrUpdateAccount(account);
+        
+        RefreshExistingAccountCombo();
+        UpdateAccountStatusText();
+        MessageBoxDialog.ShowInfo($"离线账户「{name}」创建成功，请在上方选择要使用的账户。", "完成");
+    }
+
+    /// <summary>
+    /// 直接在向导内完成微软登录，不跳转到账户管理页——照抄 LoginPage.AddMicrosoft_Click 的写法
+    /// （设备码弹窗 + 轮询），登录成功后同样调用 ConfigService.AddOrUpdateAccount/SelectAccount，
+    /// 账户管理页读的是同一份 ConfigService.Accounts，自然也能看到该新账户。
+    /// </summary>
+    private async void MicrosoftLogin_Click(object sender, RoutedEventArgs e)
+    {
+        MicrosoftLoginBtn.IsEnabled = false;
+        AccountStatusText.Text = Loc.T("Str_Cs_Preparing_To_Sign_In_Please_Wait", "正在准备登录，请稍候...");
+
+        MicrosoftAuthService auth;
+        try
+        {
+            auth = new MicrosoftAuthService();
+        }
+        catch (AuthStepException ex)
+        {
+            AccountStatusText.Text = $"登录在「{ex.Step}」这一步失败：{ex.Message}";
+            MicrosoftLoginBtn.IsEnabled = true;
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        DeviceCodeWindow? popup = null;
+
+        auth.UserCodeReady += (uri, code) =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                popup = new DeviceCodeWindow(uri, code, cts) ;
+                popup.Show();
+            });
+        };
+        auth.StatusChanged += status => Dispatcher.Invoke(() => popup?.SetStatus(status));
+
+        try
+        {
+            var account = await auth.LoginInteractiveAsync(cts.Token);
+            popup?.Dispatcher.Invoke(() => popup.Close());
+
+            if (account == null)
+            {
+                AccountStatusText.Text = Loc.T("Str_Cs_Microsoft_Sign_In_Failed_Or_Was_Cancelle", "微软账户登录失败或已取消，请重试。");
+                return;
+            }
+            _owner.ConfigService.AddOrUpdateAccount(account);
+            
+            RefreshExistingAccountCombo();
+            UpdateAccountStatusText();
+        }
+        catch (OperationCanceledException)
+        {
+            popup?.Dispatcher.Invoke(() => popup.Close());
+            AccountStatusText.Text = Loc.T("Str_Cs_Sign_In_Cancelled", "登录已取消。");
+        }
+        catch (AuthStepException ex)
+        {
+            popup?.Dispatcher.Invoke(() => popup.Close());
+            AccountStatusText.Text = $"登录在「{ex.Step}」这一步失败：{ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            popup?.Dispatcher.Invoke(() => popup.Close());
+            AccountStatusText.Text = "登录出错：" + ex.Message;
+        }
+        finally
+        {
+            MicrosoftLoginBtn.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// 导入整合包：复用 ModpackService.Import（照抄 ModManagerPage.ImportModpack_Click 的调用方式）。
+    /// 现在挂在步骤 0（选择来源页），此时还没走到账户步骤，所以不再要求"先有账户"；导入成功后
+    /// 自动跳到步骤 1 去选账户，账户选完直接到步骤 5（GoToStep 逻辑里 _importedModpack 会跳过 2/3/4）。
+    /// 支持 .xclpack / .mrpack（Modrinth）/ .zip 三种格式，具体解析交给 ModpackService.Import。
+    /// </summary>
+    private async void ImportModpackShortcut_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择整合包文件",
+            Filter = "整合包 (*.xclpack;*.mrpack;*.zip)|*.xclpack;*.mrpack;*.zip|所有文件 (*.*)|*.*"
+        };
+
+        if (dialog.ShowDialog(Window.GetWindow(this)) != true) return;
+
+        var cfgFolders = _owner.ConfigService.Config.Folders;
+        var defaultFolder = cfgFolders.FirstOrDefault(f => f.IsDefault) ?? cfgFolders.FirstOrDefault();
+        var folderPath = defaultFolder?.Path ?? Path.Combine(AppContext.BaseDirectory, ".minecraft");
+
+        // 目标版本目录：整合包内部固定版本名的场景在 ModManagerPage 里也是这么处理的，
+        // 由 Import/ImportMrpackAsync 自己在 targetVersionDir 下展开。
+        var tempVersionId = ModpackInstallService.MakeUniqueInstanceName(folderPath, "modpack-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        var targetVersionDir = Path.Combine(folderPath, "versions", tempVersionId);
+        if (!await ImportPreviewDialog.ConfirmAsync(dialog.FileName, targetVersionDir, tempVersionId, ImportPreviewKind.ModpackArchive)) return;
+
+        ImportModpackBtn.IsEnabled = false;
+        try
+        {
+            var installer = new ModpackInstallService(_owner.ConfigService.Config);
+            var requirements = await Task.Run(() => installer.ReadRequirements(dialog.FileName));
+            if (string.IsNullOrWhiteSpace(requirements.McVersion))
+                throw new InvalidDataException("整合包未声明 Minecraft 版本，无法新建可启动实例。请先创建对应游戏版本，再从模组管理中导入内容。");
+            string? javaForInstaller = null;
+            if (requirements.Loader is "Forge" or "NeoForge")
+                javaForInstaller = await EnsureJavaReadyAsync(requirements.McVersion, 0, 10);
+            var installed = await RunInDownloadQueueAsync("安装整合包 " + (requirements.Name ?? tempVersionId), async (item, ct) =>
+            {
+                var taskProgress = item.CreateProgress();
+                var progress = new Progress<ProgressInfo>(info =>
+                {
+                    taskProgress.Report(info);
+                    ModpackImportStatusText.Text = info.Stage + (string.IsNullOrWhiteSpace(info.CurrentFile) ? "" : " · " + info.CurrentFile);
+                });
+                return await Task.Run(() => installer.InstallToNewInstanceAsync(dialog.FileName, folderPath, tempVersionId, javaForInstaller, progress, ct), ct);
+            }, tempVersionId, folderPath);
+            var packName = requirements.Name ?? installed.InstanceId;
+            _importedVersionId = installed.InstanceId;
+            _owner.ConfigService.Config.VersionIsolationOverrides[installed.InstanceId] = true;
+
+            var existing = _owner.ConfigService.Config.Folders.FirstOrDefault(f => f.Path == folderPath);
+            if (existing == null)
+            {
+                existing = new GameFolder { Name = "整合包文件夹", Path = folderPath, IsDefault = _owner.ConfigService.Config.Folders.Count == 0 };
+                _owner.ConfigService.Config.Folders.Add(existing);
+            }
+            _owner.ConfigService.Config.SelectedFolderPath = existing.Path;
+            _owner.ConfigService.Save();
+            FolderPathBox.Text = existing.Path;
+            if (installed.FailedFiles.Count > 0)
+            {
+                MessageBoxDialog.ShowWarning($"游戏本体与加载器已安装，但 {installed.FailedFiles.Count} 个整合包文件未完成：\n" + string.Join("\n", installed.FailedFiles.Take(10)) + "\n实例已保留，可在模组管理中补全；向导不会继续启动。", "整合包部分安装失败");
+                _owner.RefreshSidebar(); CloseWith(null); return;
+            }
+            _importedModpack = true;
+
+            var label = string.IsNullOrWhiteSpace(packName) ? "整合包" : $"整合包「{packName}」";
+            MessageBoxDialog.ShowInfo($"{label}导入成功！接下来选一个账户就能启动游戏了。", "完成");
+            GoToStep(1);
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError("整合包安装未完成。请检查清单版本、网络、Java 和磁盘空间；尚未将失败的实例标为可启动。",
+                $"[导入整合包] 导入异常，文件：{dialog.FileName}\n{ex}", "出了点问题");
+        }
+        finally
+        {
+            ImportModpackBtn.IsEnabled = true;
+        }
+    }
+
+    // ========== 步骤 2：文件夹 + 版本 + 加载器 ==========
+
+    private void BrowseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new XCL2.App.Services.CompatibleFolderDialog
+        {
+            Title = "选择游戏文件夹",
+            InitialDirectory = Directory.Exists(FolderPathBox.Text) ? FolderPathBox.Text : AppContext.BaseDirectory
+        };
+
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true) FolderPathBox.Text = dialog.FolderName;
+    }
+
+    /// <summary>加速版：一键启动里装的原版底座/加载器统一走镜像 + 多线程，见
+    /// DownloadService.CreateAccelerated 的说明。查版本列表那几个方法不受影响
+    /// （它们打的是 Fabric/Forge 自己的 meta 接口，跟下载源无关）。</summary>
+    private ClientLoaderInstallService GetLoaderService()
+        => _loaderService ??= new ClientLoaderInstallService(_owner.ConfigService.Config, accelerate: true);
+
+    private async void LoaderType_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return;
+        if (sender is not RadioButton rb || rb.Tag is not string tag) return;
+        if (!Enum.TryParse<ServerCoreType>(tag, out var loaderType)) return;
+        _selectedLoaderType = loaderType;
+
+        BuildVersionPanel.Visibility = loaderType is ServerCoreType.Vanilla or ServerCoreType.NeoForge
+            ? Visibility.Collapsed : Visibility.Visible;
+        BuildVersionLabel.Text = loaderType switch
+        {
+            ServerCoreType.Fabric => "Loader 版本",
+            ServerCoreType.Forge => "安装器版本",
+            _ => "构建版本"
+        };
+        InstallFabricApiCheck.Visibility = loaderType == ServerCoreType.Fabric ? Visibility.Visible : Visibility.Collapsed;
+
+        await LoadMcVersionsAsync();
+    }
+
+    /// <summary>
+    /// 拉取当前选中加载器对应的 MC 版本列表。原版走 DownloadService.CreateFromConfig(...).
+    /// GetVersionManifestAsync() 拿完整版本清单（这是 InstallClientLoaderWindow 里原来没有的分支，
+    /// 因为那个窗口只处理加载器，不处理"原版"该选项）；只保留 release 类型，新手向导不需要
+    /// 展示快照版本，避免选到不稳定版本导致后续 Mod 兼容性问题。
+    /// </summary>
+    private async Task LoadMcVersionsAsync()
+    {
+        _mcVersions.Clear();
+        _buildVersions.Clear();
+        McVersionCombo.IsEnabled = false;
+        Step2StatusText.Text = Loc.T("Str_Ui_Fetching_Versions", "正在获取版本列表...");
+
+        try
+        {
+            if (_selectedLoaderType == ServerCoreType.Vanilla)
+            {
+                using var downloader = DownloadService.CreateFromConfig(_owner.ConfigService.Config);
+                var manifest = await downloader.GetVersionManifestAsync();
+                foreach (var v in manifest.Versions.Where(v => v.Type == "release")) _mcVersions.Add(v.Id);
+            }
+            else
+            {
+                List<string> versions = _selectedLoaderType switch
+                {
+                    ServerCoreType.Fabric => await GetLoaderService().GetFabricMcVersionsAsync(),
+                    ServerCoreType.Forge => await GetLoaderService().GetForgeVersionsAsync(),
+                    ServerCoreType.NeoForge => await GetLoaderService().GetNeoForgeVersionsAsync(),
+                    _ => new List<string>()
+                };
+                foreach (var v in versions) _mcVersions.Add(v);
+            }
+
+            if (_mcVersions.Count > 0) McVersionCombo.SelectedIndex = 0;
+            Step2StatusText.Text = "";
+        }
+        catch (Exception ex)
+        {
+            Step2StatusText.Text = $"获取版本列表失败：{ex.Message}";
+        }
+        finally
+        {
+            McVersionCombo.IsEnabled = true;
+        }
+    }
+
+    private void ShowAdvancedOptions_Changed(object sender, RoutedEventArgs e)
+    {
+        AdvancedOptionsPanel.Visibility = ShowAdvancedOptionsCheck.IsChecked == true
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void McVersionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _buildVersions.Clear();
+        if (McVersionCombo.SelectedItem is not string mcVersion) return;
+        if (_selectedLoaderType is ServerCoreType.Vanilla or ServerCoreType.NeoForge) return;
+
+        try
+        {
+            List<ServerCoreBuild> builds = _selectedLoaderType switch
+            {
+                ServerCoreType.Fabric => await GetLoaderService().GetFabricLoaderVersionsAsync(mcVersion),
+                ServerCoreType.Forge => await GetLoaderService().GetForgeInstallerVersionsAsync(mcVersion),
+                _ => new List<ServerCoreBuild>()
+            };
+            foreach (var b in builds) _buildVersions.Add(b);
+            BuildVersionCombo.SelectedItem = builds.FirstOrDefault(b => b.IsRecommended) ?? builds.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            Step2StatusText.Text = $"获取构建版本列表失败：{ex.Message}";
+        }
+    }
+
+    // ========== 步骤 3：Mod ==========
+
+    private void ModSearchBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) _ = RunModSearchAsync();
+    }
+
+    private async void ModSearch_Click(object sender, RoutedEventArgs e) => await RunModSearchAsync();
+
+    private async Task RunModSearchAsync()
+    {
+        if (McVersionCombo.SelectedItem is not string mcVersion) return;
+        var loaderTag = _selectedLoaderType == ServerCoreType.Vanilla ? null : _selectedLoaderType.ToString().ToLowerInvariant();
+
+        try
+        {
+            var outcome = await GetModSearch().SearchAsync(ModSource.Combined, ModSearchBox.Text ?? "", mcVersion, loaderTag);
+            _modResults.Clear();
+            foreach (var item in outcome.Items) _modResults.Add(new SelectableModItem(item));
+            UpdateModSelectedCount();
+            if (outcome.Warnings.Count > 0) Step3HintText.Text = string.Join("；", outcome.Warnings);
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError("搜索 Mod 失败，可能是网络连接问题，请检查网络后重试。",
+                $"[一键启动向导 - 搜索Mod失败] {ex}", "搜索失败");
+        }
+    }
+
+    private void UpdateModSelectedCount()
+    {
+        var count = _modSelections.Count;
+        ModSelectedCountText.Text = count > 0 ? $"已选 {count} 个 Mod" : "";
+    }
+
+    /// <summary>点击搜索结果里的一个 Mod 条目：跳转整页详情（AddToWizardList 模式），
+    /// 选具体版本后加入"已选清单"，不在这里下载任何东西——跟 DownloadCenterPage.OpenModDetailAsync
+    /// 是同一个"构造详情页 + 异步拉版本 + ShowGroups"套路，只是模式换成 AddToWizardList。</summary>
+    private async void ModResultItem_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is not Grid grid || grid.Tag is not SelectableModItem selectable) return;
+        var item = selectable.Item;
+
+        var sourceUrl = item.RawItem switch
+        {
+            ModrinthSearchHit h => $"https://modrinth.com/mod/{h.Slug}",
+            CurseForgeMod m => m.Links?.WebsiteUrl,
+            _ => null
+        };
+
+        var detail = new ModDetailPage(
+            ModDetailPage.DetailMode.AddToWizardList,
+            item.Title, item.Description, item.IconUrl, item.Author, item.Downloads,
+            item.SourceLabel, sourceUrl, item, isFavorite: false,
+            onFavoriteToggle: null,
+            onBack: HideDetail,
+            onAddToList: (entry, _) =>
+            {
+                AddOrReplaceModSelection(item, entry);
+                HideDetail();
+            });
+
+        ShowDetail(detail);
+
+        detail.ShowLoading();
+        var groups = await LoadModVersionGroupsAsync(item);
+        detail.ShowGroups(groups);
+    }
+
+    /// <summary>拉取一个 Mod 条目的版本列表并按"加载器+游戏版本"分组——跟
+    /// DownloadCenterPage.LoadModVersionsAsync 是同一套逻辑，这里独立实现一份而不是共享那个方法，
+    /// 因为那个方法直接写回 UnifiedModItem.Versions/Groups（下载中心自己的展示状态），
+    /// 向导这边不需要长期持有这份状态，选完版本就丢弃，直接返回分组列表即可。</summary>
+    private async Task<List<VersionGroup>> LoadModVersionGroupsAsync(UnifiedModItem item)
+    {
+        var mcVersion = McVersionCombo.SelectedItem as string;
+        var entries = new List<InlineVersionEntry>();
+        try
+        {
+            if (item.Source == ModSource.Modrinth)
+            {
+                var versions = await _modrinth.GetVersionsAsync(item.SourceId, mcVersion);
+                foreach (var v in versions) entries.Add(new InlineVersionEntry(v));
+            }
+            else if (item.Source == ModSource.CurseForge)
+            {
+                var modId = int.Parse(item.SourceId);
+                var files = await GetCurseForge().GetFilesAsync(modId, mcVersion);
+                foreach (var f in files) entries.Add(new InlineVersionEntry(f));
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Couldn_T_Fetch_The_Version_List_This_Is_", "获取版本列表失败，可能是网络连接问题或下载源暂时不可用，请检查网络后重试。"),
+                $"[一键启动向导 - 获取Mod版本列表失败] {ex}", "获取版本列表失败");
+            return new List<VersionGroup>();
+        }
+
+        var groups = ModVersionGrouping.Group(entries);
+        if (groups.Count > 0) groups[0].IsExpanded = true;
+        return groups;
+    }
+
+    /// <summary>加入"已选清单"：同一个 Mod（按 Source+SourceId 判断）重复选择会替换掉旧的选择，
+    /// 而不是重复添加两条——用户在详情页里换了个版本重新点"加入清单"，应该理解成"改选该版本"。</summary>
+    private void AddOrReplaceModSelection(UnifiedModItem item, InlineVersionEntry entry)
+    {
+        var existing = _modSelections.FirstOrDefault(s => s.Source == item.Source && s.SourceId == item.SourceId);
+        if (existing != null) _modSelections.Remove(existing);
+        _modSelections.Add(new WizardModSelection(item, entry));
+        UpdateModSelectedCount();
+    }
+
+    private void RemoveModSelection_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not WizardModSelection selection) return;
+        _modSelections.Remove(selection);
+        UpdateModSelectedCount();
+    }
+
+    // ========== 步骤 4：资源包/光影包 ==========
+
+    private void ResourceType_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_initialized) return;
+        _selectedResourceType = ResTypeShader.IsChecked == true ? ModrinthResourceType.Shader : ModrinthResourceType.ResourcePack;
+    }
+
+    private void ResourceSearchBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) _ = RunResourceSearchAsync();
+    }
+
+    private async void ResourceSearch_Click(object sender, RoutedEventArgs e) => await RunResourceSearchAsync();
+
+    private async Task RunResourceSearchAsync()
+    {
+        if (McVersionCombo.SelectedItem is not string mcVersion) return;
+        try
+        {
+            var outcome = await GetModSearch().SearchResourcesAsync(ModSource.Combined, _selectedResourceType,
+                ResourceSearchBox.Text ?? "", mcVersion);
+            _resourceResults.Clear();
+            foreach (var item in outcome.Items) _resourceResults.Add(new SelectableResourceItem(item));
+            UpdateResourceSelectedCount();
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError(Loc.T("Str_Cs_Search_Failed_Most_Likely_A_Network_Prob", "搜索失败，可能是网络连接问题，请检查网络后重试。"), $"[搜索失败] {ex}", "搜索失败");
+        }
+    }
+
+    private void UpdateResourceSelectedCount()
+    {
+        var count = _resourceResults.Count(r => r.IsSelected);
+        ResourceSelectedCountText.Text = count > 0 ? $"已选 {count} 个" : "";
+    }
+
+    // ========== 通用：步骤切换 ==========
+
+    private void Next_Click(object sender, RoutedEventArgs e)
+    {
+        if (!NextBtn.IsEnabled) return;
+        if (_step == 0)
+        {
+            if (SourceModeSimple.IsChecked == true)
+            {
+                if (SimpleFolderCombo.SelectedItem is not GameFolder || SimpleVersionCombo.SelectedItem is not GameVersion simpleVersion)
+                {
+                    ErrorPresenter.ShowFriendlyError("请先选择一个已导入的文件夹，并选中里面一个已装好的版本。",
+                        "[一键启动向导] 傻瓜式启动：未选择文件夹或版本", "提示");
+                    return;
+                }
+                _useExistingInstance = true;
+                _existingInstanceFolderPath = (SimpleFolderCombo.SelectedItem as GameFolder)!.Path;
+                _existingInstanceVersionId = simpleVersion.Id;
+                GoToStep(1);
+                return;
+            }
+
+            if (SourceModeExisting.IsChecked == true)
+            {
+                if (_existingInstanceFolderPath == null || ExistingVersionCombo.SelectedItem is not GameVersion version)
+                {
+                    ErrorPresenter.ShowFriendlyError("请先选择一个 .minecraft 文件夹，并选中里面一个已装好的版本。",
+                        "[一键启动向导] 使用现有实例：未选择文件夹或版本", "提示");
+                    return;
+                }
+                _useExistingInstance = true;
+                _existingInstanceVersionId = version.Id;
+                GoToStep(1);
+                return;
+            }
+
+            if (SourceModeModpack.IsChecked == true)
+            {
+                // 导入整合包走独立按钮（ImportModpackShortcut_Click），这里只提示用户点那个按钮。
+                ErrorPresenter.ShowFriendlyError("请先点击「选择整合包文件...」完成导入，导入成功后会自动跳到下一步。",
+                    "[一键启动向导] 导入整合包模式：未点击导入按钮", "提示");
+                return;
+            }
+
+            _useExistingInstance = false;
+            GoToStep(1);
+            return;
+        }
+
+        if (_step == 1)
+        {
+            if (_owner.ConfigService.GetSelectedAccount() == null)
+            {
+                ErrorPresenter.ShowFriendlyError("请先创建离线账户或登录微软账户，才能继续下一步。",
+                    "[一键启动向导] 步骤1：未选择账户", "提示");
+                return;
+            }
+            // 使用现有实例/已导入整合包：跳过选版本/选Mod/选资源包，直接到第 5 步确认+启动。
+            if (_useExistingInstance || _importedModpack)
+            {
+                GoToStep(5);
+                return;
+            }
+            GoToStep(2);
+            return;
+        }
+
+        if (_step == 2)
+        {
+            if (McVersionCombo.SelectedItem is not string)
+            {
+                MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Please_Choose_A_Minecraft_Version", "请选择 Minecraft 版本。"), Loc.T("Str_Status_Tip", "提示"));
+                return;
+            }
+            if (_selectedLoaderType != ServerCoreType.Vanilla && _selectedLoaderType != ServerCoreType.NeoForge
+                && BuildVersionCombo.SelectedItem == null)
+            {
+                MessageBoxDialog.ShowInfo(Loc.T("Str_Cs_Please_Choose_A_Build_Or_Loader_Version", "请选择构建/加载器版本。"), Loc.T("Str_Status_Tip", "提示"));
+                return;
+            }
+            // 原版不能装 Mod，从步骤 2 直接跳到步骤 4（跳过步骤 3）。
+            GoToStep(_selectedLoaderType == ServerCoreType.Vanilla ? 4 : 3);
+            return;
+        }
+
+        if (_step == TotalSteps) return; // 步骤 5 没有"下一步"，靠 StartAll_Click 收尾
+        GoToStep(_step + 1);
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e)
+    {
+        if (DetailHost.Visibility == Visibility.Visible) { HideDetail(); return; }
+        if (_step <= 0) return;
+        // 使用现有实例/已导入整合包：第 5 步往回退，跳过 2/3/4，直接回到第 1 步（账户）。
+        if (_step == 5 && (_useExistingInstance || _importedModpack))
+        {
+            GoToStep(1);
+            return;
+        }
+        // 步骤 4 往回退：原版跳过了步骤 3，回退时同样要跳过，直接回到步骤 2。
+        if (_step == 4 && _selectedLoaderType == ServerCoreType.Vanilla)
+        {
+            GoToStep(2);
+            return;
+        }
+        if (_step == 1)
+        {
+            GoToStep(0);
+            return;
+        }
+        GoToStep(_step - 1);
+    }
+
+    private void GoToStep(int step)
+    {
+        CancelSourceScans();
+        HideDetail(animateReturn: false);
+        var previousStep = _step;
+        UiAnimationHelper.Reset(GetStepPanel(previousStep));
+        _step = Math.Clamp(step, 0, TotalSteps);
+
+        Step0Panel.Visibility = _step == 0 ? Visibility.Visible : Visibility.Collapsed;
+        Step1Panel.Visibility = _step == 1 ? Visibility.Visible : Visibility.Collapsed;
+        Step2Panel.Visibility = _step == 2 ? Visibility.Visible : Visibility.Collapsed;
+        Step3Panel.Visibility = _step == 3 ? Visibility.Visible : Visibility.Collapsed;
+        Step4Panel.Visibility = _step == 4 ? Visibility.Visible : Visibility.Collapsed;
+        Step5Panel.Visibility = _step == 5 ? Visibility.Visible : Visibility.Collapsed;
+        if (_step != previousStep)
+        {
+            StepContentScroll.ScrollToTop();
+            PageTransitionBehavior.Replay(GetStepPanel(_step), depth: 2, direction: _step < previousStep ? -1 : 1);
+        }
+
+        var accent = (System.Windows.Media.Brush)FindResource("AccentBrush");
+        var gray = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDD, 0xDD, 0xDD));
+        StepDot1.Background = _step >= 1 ? accent : gray;
+        StepDot2.Background = _step >= 2 ? accent : gray;
+        StepDot3.Background = _step >= 3 ? accent : gray;
+        StepDot4.Background = _step >= 4 ? accent : gray;
+        StepDot5.Background = _step >= 5 ? accent : gray;
+
+        BackBtn.IsEnabled = _step > 0;
+        NextBtn.Visibility = _step < TotalSteps ? Visibility.Visible : Visibility.Collapsed;
+
+        if (_step == 0) _ = RefreshSourceFoldersAsync();
+        if (_step == 1) { UpdateAccountStatusText(); RefreshExistingAccountCombo(); }
+        if (_step == 3 && _modResults.Count == 0) _ = RunModSearchAsync();
+        if (_step == 4 && _resourceResults.Count == 0) _ = RunResourceSearchAsync();
+        if (_step == 5) UpdateSummary();
+    }
+
+    private FrameworkElement GetStepPanel(int step) => step switch
+    {
+        0 => Step0Panel,
+        1 => Step1Panel,
+        2 => Step2Panel,
+        3 => Step3Panel,
+        4 => Step4Panel,
+        _ => Step5Panel
+    };
+
+    private void UpdateSummary()
+    {
+        if (_useExistingInstance)
+        {
+            SummaryText.Text = $"账户：{_owner.ConfigService.GetSelectedAccount()?.DisplayLabel}\n" +
+                $"使用现有实例：{_existingInstanceFolderPath}\n" +
+                $"版本：{_existingInstanceVersionId}\n\n" +
+                "不会重新下载任何文件，接下来只会自动检测/安装匹配的 Java，然后直接启动游戏。";
+            return;
+        }
+
+        if (_importedModpack)
+        {
+            SummaryText.Text = $"账户：{_owner.ConfigService.GetSelectedAccount()?.DisplayLabel}\n" +
+                "已通过整合包导入版本/Mod/资源包，接下来会自动检测/安装 Java 并直接启动游戏。";
+            return;
+        }
+
+        var acc = _owner.ConfigService.GetSelectedAccount();
+        var loaderDesc = _selectedLoaderType == ServerCoreType.Vanilla ? "原版" : _selectedLoaderType.ToString();
+        var mcVersion = McVersionCombo.SelectedItem as string ?? "(未选择)";
+        var modCount = _modSelections.Count;
+        var resCount = _resourceResults.Count(r => r.IsSelected);
+
+        SummaryText.Text =
+            $"账户：{acc?.DisplayLabel}\n" +
+            $"游戏文件夹：{FolderPathBox.Text}\n" +
+            $"版本：{mcVersion}（{loaderDesc}）\n" +
+            $"Mod：{(modCount > 0 ? $"{modCount} 个" : "不安装")}\n" +
+            $"资源包/光影包：{(resCount > 0 ? $"{resCount} 个" : "不安装")}\n\n" +
+            "点击下面的按钮开始下载并启动游戏。核心步骤（版本/加载器/Java）失败会中止流程并提示；" +
+            "Mod/资源包这类次要步骤某一项失败只会跳过，不影响其它内容继续安装。";
+    }
+
+    private void Close_Click(object sender, RoutedEventArgs e) => CloseWith(null);
+
+    // ========== 步骤 5：下载编排 + 启动 ==========
+
+    /// <summary>核心步骤（文件夹/版本/加载器/Java）执行失败时抛出，携带用户可读的阶段名，
+    /// 用于在 catch 里统一弹窗提醒并中止整个流程——对应跟用户确认过的失败策略第 1 条。</summary>
+    private class CriticalStepFailedException : Exception
+    {
+        public string StageName { get; }
+        public CriticalStepFailedException(string stage, Exception inner)
+            : base($"「{stage}」失败：{inner.Message}", inner) => StageName = stage;
+    }
+
+    private async void StartAll_Click(object sender, RoutedEventArgs e)
+    {
+        StartAllBtn.IsEnabled = false;
+        BackBtn.IsEnabled = false;
+        RunPanel.Visibility = Visibility.Visible;
+        RunBar.Value = 0;
+
+        try
+        {
+            var cfg = _owner.ConfigService.Config;
+            string versionId;
+
+            if (_useExistingInstance)
+            {
+                // 使用现有实例：文件夹/版本都已经确定好了，不下载任何东西，只需要确保文件夹记录在
+                // ConfigService.Folders 里（方便下次在「文件夹」页也能看到），然后直接走 Java 检测。
+                versionId = _existingInstanceVersionId!;
+                var existingFolder = cfg.Folders.FirstOrDefault(f => f.Path == _existingInstanceFolderPath);
+                if (existingFolder == null)
+                {
+                    existingFolder = new GameFolder
+                    {
+                        Name = "现有实例",
+                        Path = _existingInstanceFolderPath!,
+                        IsDefault = cfg.Folders.Count == 0
+                    };
+                    cfg.Folders.Add(existingFolder);
+                }
+                cfg.SelectedFolderPath = existingFolder.Path;
+                cfg.SelectedVersionId = versionId;
+                _owner.ConfigService.Save();
+                ReportRun("使用现有实例", "跳过下载，直接进入 Java 检测。", 30);
+            }
+            else if (_importedModpack)
+            {
+                // 整合包已经把版本/Mod/资源包都装好了，这里只需要确认文件夹配置已经写回
+                // （ImportModpackShortcut_Click 里已经写过一次，这里是防御性兜底）。
+                versionId = _importedVersionId!;
+                ReportRun("整合包已导入", "跳过版本/Mod/资源包下载，直接进入 Java 检测。", 30);
+            }
+            else
+            {
+                // 1) 文件夹：确定/新建
+                ReportRun("准备游戏文件夹", FolderPathBox.Text, 5);
+                var folderPath = string.IsNullOrWhiteSpace(FolderPathBox.Text)
+                    ? Path.Combine(AppContext.BaseDirectory, ".minecraft")
+                    : FolderPathBox.Text.Trim();
+                try { Directory.CreateDirectory(folderPath); }
+                catch (Exception ex) { throw new CriticalStepFailedException("准备游戏文件夹", ex); }
+
+                var folder = cfg.Folders.FirstOrDefault(f => f.Path == folderPath);
+                if (folder == null)
+                {
+                    folder = new GameFolder { Name = "默认文件夹", Path = folderPath, IsDefault = cfg.Folders.Count == 0 };
+                    cfg.Folders.Add(folder);
+                }
+                cfg.SelectedFolderPath = folder.Path;
+                _owner.ConfigService.Save();
+
+                if (McVersionCombo.SelectedItem is not string mcVersion)
+                    throw new CriticalStepFailedException("选择版本", new InvalidOperationException("没有选中 Minecraft 版本。"));
+
+                var customInstanceName = string.IsNullOrWhiteSpace(QuickStartInstanceNameBox.Text)
+                    ? null : QuickStartInstanceNameBox.Text.Trim();
+
+                // 2) 装版本/加载器。Forge/NeoForge 安装器需要本地 Java 才能跑，必须先确保 Java 就绪，
+                //    不能像原计划那样等到"启动前"才检测——这是 Round 11 交接文档里明确指出的顺序依赖问题。
+                string? javaPath = null;
+                if (_selectedLoaderType is ServerCoreType.Forge or ServerCoreType.NeoForge)
+                {
+                    javaPath = await EnsureJavaReadyAsync(mcVersion, stageOffset: 5, stageWeight: 15);
+                }
+
+                // 下载进度改走标题栏的下载列表（DownloadQueueService），不再自己在向导里
+                // 一格一格推进度条。三个理由：
+                // 1) 这是本项目里所有其它下载（下载中心的游戏版本、整合包、基岩版客户端）
+                //    早就统一在用的那条路，一键启动之前是唯一的例外，用户点开下载列表看到
+                //    "暂无下载任务"会以为根本没在下；
+                // 2) 下载列表那套 UI 本来就带暂停/继续/取消、速度与剩余时间，比向导里
+                //    一个光秃秃的进度条信息量大得多；
+                // 3) 向导原来的 ReportRun 每收到一次进度回调就同步改三个控件并触发布局，
+                //    而 libraries/assets 阶段的回调是按文件个数来的、非常密集，这部分
+                //    UI 开销直接压在下载线程的回调路径上。交给下载列表之后，向导这边只在
+                //    阶段切换时更新一次文字，实测体感"快得多"主要就来自这里。
+                var installStageName = $"安装 {mcVersion}"
+                    + (_selectedLoaderType == ServerCoreType.Vanilla ? "" : $"（{_selectedLoaderType}）");
+                ReportRun("下载游戏", $"「{installStageName}」已加入标题栏下载列表，可在那里查看进度、速度或取消。", 20);
+
+                try
+                {
+                    if (_selectedLoaderType == ServerCoreType.Vanilla)
+                    {
+                        versionId = await RunInDownloadQueueAsync(installStageName, async (item, ct) =>
+                        {
+                            // 一键启动强制镜像源 + 多线程，理由见 DownloadService.CreateAccelerated。
+                            using var downloader = DownloadService.CreateAccelerated(cfg);
+                            var manifest = await downloader.GetVersionManifestAsync(ct);
+                            var entry = manifest.Versions.FirstOrDefault(v => v.Id == mcVersion)
+                                ?? throw new InvalidOperationException($"在版本清单中找不到 {mcVersion}。");
+                            await downloader.InstallVersionAsync(folderPath, entry, item.CreateProgress(), ct);
+                            var installedId = mcVersion;
+                            if (!string.IsNullOrWhiteSpace(customInstanceName))
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                var renamed = ClientLoaderInstallService.TryRenameInstalledInstance(
+                                    folderPath, Path.Combine(folderPath, "versions", installedId), customInstanceName);
+                                if (renamed != null) installedId = renamed;
+                            }
+                            item.RegisterInstallationTarget(installedId);
+                            return installedId;
+                        }, targetVersionId: mcVersion, targetFolderPath: folderPath);
+                    }
+                    else if (_selectedLoaderType == ServerCoreType.Fabric)
+                    {
+                        var buildVersion = (BuildVersionCombo.SelectedItem as ServerCoreBuild)?.DisplayVersion
+                            ?? throw new InvalidOperationException("没有选中 Fabric Loader 版本。");
+                        var installFabricApi = InstallFabricApiCheck.IsChecked == true;
+                        versionId = await InstallLoaderInQueueAsync(installStageName, folderPath,
+                            (service, progress, ct) => service.InstallFabricClientAsync(
+                                folderPath, mcVersion, buildVersion, progress, ct,
+                                installFabricApi: installFabricApi, customInstanceName: customInstanceName));
+                    }
+                    else
+                    {
+                        javaPath ??= await EnsureJavaReadyAsync(mcVersion, stageOffset: 20, stageWeight: 0);
+                        var fullVersion = _selectedLoaderType == ServerCoreType.NeoForge
+                            ? mcVersion
+                            : (BuildVersionCombo.SelectedItem as ServerCoreBuild)?.DisplayVersion
+                                ?? throw new InvalidOperationException("没有选中安装器版本。");
+                        var javaForInstaller = javaPath!;
+                        var loaderType = _selectedLoaderType;
+                        versionId = await InstallLoaderInQueueAsync(installStageName, folderPath,
+                            (service, progress, ct) => service.InstallForgeOrNeoForgeClientAsync(
+                                folderPath, loaderType, fullVersion, javaForInstaller, progress,
+                                ct, customInstanceName: customInstanceName));
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // 用户主动在下载列表里暂停/取消，不是"安装失败"，原样往上抛给
+                    // StartAll_Click 里专门的 OperationCanceledException 分支处理，
+                    // 不要被下面那条包装成"安装版本/加载器 失败"弹个错误框吓唬用户。
+                    throw;
+                }
+                catch (Exception ex) when (ex is not CriticalStepFailedException)
+                {
+                    throw new CriticalStepFailedException("安装版本/加载器", ex);
+                }
+
+                // 3) 下载"已选清单"里锁定的具体版本：次要步骤，单条失败跳过、不中止整个流程。
+                //    不再自动匹配"最新版"——清单里的 InlineVersionEntry 就是用户在 ModDetailPage
+                //    里明确选中的那个文件。
+                for (var i = 0; i < _modSelections.Count; i++)
+                {
+                    var selection = _modSelections[i];
+                    var pct = 50 + (_modSelections.Count > 0 ? (double)i / _modSelections.Count * 20 : 0);
+                    ReportRun("下载 Mod", selection.Title, pct);
+                    await DownloadModSelectionSafeAsync(folderPath, selection);
+                }
+
+                // 4) 下载选中的资源包/光影包：同样次要步骤，单条失败跳过。
+                var selectedRes = _resourceResults.Where(r => r.IsSelected).ToList();
+                for (var i = 0; i < selectedRes.Count; i++)
+                {
+                    var res = selectedRes[i];
+                    var pct = 70 + (selectedRes.Count > 0 ? (double)i / selectedRes.Count * 15 : 0);
+                    ReportRun("下载资源包/光影包", res.Title, pct);
+                    await DownloadResourceSafeAsync(folderPath, mcVersion, res);
+                }
+            }
+
+            // 5) Java 检测/下载（Fabric/原版走到这里才第一次确保 Java；Forge/NeoForge 之前已经确保过）。
+            ReportRun("检查 Java 环境", "", 88);
+            var finalMinecraftDir = cfg.Folders.FirstOrDefault(f => f.Path == cfg.SelectedFolderPath)?.Path
+                ?? FolderPathBox.Text;
+            string javaFinal;
+            try
+            {
+                javaFinal = await EnsureJavaReadyAsync(_importedModpack ? null : McVersionCombo.SelectedItem as string,
+                    stageOffset: 88, stageWeight: 8, minecraftDirForVersion: finalMinecraftDir, versionIdForJava: versionId);
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // 同上：下载列表里的暂停/取消不算安装失败
+            }
+            catch (Exception ex)
+            {
+                throw new CriticalStepFailedException("安装 Java", ex);
+            }
+            if (string.IsNullOrEmpty(cfg.JavaPath)) cfg.JavaPath = javaFinal;
+
+            // 6) 写回配置：注意 Fabric/Forge/NeoForge 装完后返回的 versionId 跟用户在下拉框选的
+            //    MC 版本号不是同一个字符串，必须用安装方法的返回值。
+            cfg.SelectedVersionId = versionId;
+
+            // 高级选项只在走了正常下载流程（经过步骤 2）时才有意义——使用现有实例/导入整合包
+            // 都跳过了步骤 2，AdvancedOptionsPanel 里的控件在这两种模式下没有被用户碰过，
+            // 不应该拿默认值覆盖用户之前已经保存的设置。
+            if (!_useExistingInstance && !_importedModpack && ShowAdvancedOptionsCheck.IsChecked == true)
+            {
+                cfg.CustomJvmArgs = string.IsNullOrWhiteSpace(CustomJvmArgsBox.Text) ? null : CustomJvmArgsBox.Text.Trim();
+                cfg.PreLaunchCommand = string.IsNullOrWhiteSpace(PreLaunchCommandBox.Text) ? null : PreLaunchCommandBox.Text.Trim();
+                if (int.TryParse(WindowWidthBox.Text, out var w) && w > 0) cfg.WindowWidth = w;
+                if (int.TryParse(WindowHeightBox.Text, out var h) && h > 0) cfg.WindowHeight = h;
+                cfg.VersionIsolationOverrides[versionId] = IsolateVersionCheck.IsChecked == true;
+
+                // 自定义 JVM 参数在 MainWindow.LaunchInternalAsync 里只在 AdvancedMode=true 时生效，
+                // 用户在向导里主动填了自定义参数，说明明确想要用该设置，这里一并打开开关，
+                // 否则填了却在启动时被静默忽略，会让用户困惑"为什么设置了没生效"。
+                if (!string.IsNullOrWhiteSpace(cfg.CustomJvmArgs)) cfg.AdvancedMode = true;
+            }
+
+            _owner.ConfigService.Save();
+
+            ReportRun("全部就绪", "", 100);
+            await Task.Delay(200);
+
+            _owner.RefreshSidebar();
+            CloseWith(null);
+
+            var launchNow = MessageBoxDialog.ShowConfirm(
+                $"你选择了一键启动游戏，是否立刻启动刚才下载的游戏？\n\n版本：{versionId}",
+                "下载完成");
+            if (!launchNow)
+            {
+                ToastService.ShowSuccess($"「{versionId}」已经装好并设为当前版本，随时可以从主界面点「启动游戏」进入。");
+                return;
+            }
+
+            _owner.Launch_Click(this, new RoutedEventArgs(), skipAccountConfirm: true);
+        }
+        catch (OperationCanceledException)
+        {
+            ToastService.ShowInfo("一键启动已取消。已下载并校验通过的文件会保留，重新运行向导即可继续补全。");
+        }
+        catch (CriticalStepFailedException ex)
+        {
+            ErrorPresenter.ShowFriendlyError(
+                $"「{ex.StageName}」这一步失败了，一键启动没能完成，可能是网络连接问题或下载源暂时不可用，建议稍后重试。",
+                $"[一键启动失败 - {ex.StageName}] {ex.InnerException}",
+                "一键开始游戏失败");
+        }
+        catch (Exception ex)
+        {
+            ErrorPresenter.ShowFriendlyError(
+                "一键启动过程中出现了意外错误，建议检查网络连接后重试。",
+                $"[一键启动失败 - 未分类异常] {ex}",
+                "一键开始游戏失败");
+        }
+        finally
+        {
+            StartAllBtn.IsEnabled = true;
+            BackBtn.IsEnabled = _step > 1;
+        }
+    }
+
+    private void ReportRun(string stage, string detail, double percent)
+    {
+        RunStageText.Text = stage;
+        RunDetailText.Text = detail;
+        RunBar.Value = Math.Clamp(percent, 0, 100);
+    }
+
+    /// <summary>
+    /// 确保有一个可用的 Java：先按目标 MC 版本（或已装好的版本 json，如果有）估算/读取所需的
+    /// Java 主版本号去匹配本机已有安装，找不到就自动下载推荐 LTS 版本。复用
+    /// JavaService.FindJava/DownloadJavaAsync，不重新发明一遍"自动匹配 + 找不到就下载"逻辑，
+    /// 参照 MainWindow.LaunchInternalAsync/FirstRunWizardWindow.OneClickComplete_Click 里已有的写法。
+    /// </summary>
+    private async Task<string> EnsureJavaReadyAsync(string? mcVersionForEstimate, double stageOffset, double stageWeight,
+        string? minecraftDirForVersion = null, string? versionIdForJava = null)
+    {
+        var cfg = _owner.ConfigService.Config;
+
+        int? preferMajor = null;
+        if (minecraftDirForVersion != null && versionIdForJava != null)
+        {
+            try { preferMajor = LauncherService.GetRequiredJavaMajorVersion(minecraftDirForVersion, versionIdForJava); }
+            catch { /* 读取失败就退回按 MC 版本号估算 */ }
+        }
+        preferMajor ??= mcVersionForEstimate != null
+            ? ServerJavaRequirement.EstimateMajorVersionForMcVersion(mcVersionForEstimate)
+            : (int?)null;
+
+        var found = _javaService.FindJava(cfg.JavaPath, preferMajor, _owner.ConfigService);
+        if (found != null)
+        {
+            ReportRun("检查 Java 环境", $"已找到可用 Java：{found}", stageOffset + stageWeight);
+            return found;
+        }
+
+        var targetMajor = JavaService.GetDownloadTargetMajorVersion(preferMajor ?? 21);
+        ReportRun("下载 Java 运行时", $"本机没有匹配的 Java，已把「Java {targetMajor}」加入标题栏下载列表。", stageOffset);
+
+        var request = new JavaDownloadRequest(
+            targetMajor,
+            Environment.Is64BitOperatingSystem ? "x64" : "x86",
+            JavaInstallMode.Portable);
+
+        // 跟上面装游戏版本同样的处理：Java 运行时也登记进标题栏下载列表，不再自己推进度条。
+        // 之前这里是向导独占地把进度画在自己那条 RunBar 上，用户既看不到速度，也没法暂停，
+        // 更不知道"卡住的是网络还是程序死了"。
+        return await JavaDownloadQueueService.DownloadAsync(_javaService, request);
+    }
+
+    /// <summary>
+    /// 把一次下载交给标题栏的下载列表（<see cref="DownloadQueueService"/>）去跑，并等它跑完、
+    /// 把结果值带回来。
+    ///
+    /// 一键启动依赖真实安装结果，因此使用队列统一的等待接口；取消或失败就结束本次向导，
+    /// 不在调用方退出后提供后台重试并意外继续启动。
+    /// </summary>
+    private Task<string> InstallLoaderInQueueAsync(string name, string folderPath,
+        Func<ClientLoaderInstallService, IProgress<ProgressInfo>, CancellationToken, Task<string>> install)
+        => RunInDownloadQueueAsync(name, async (item, ct) =>
+        {
+            var service = GetLoaderService();
+            void RegisterTarget(string id) => item.RegisterInstallationTarget(id);
+            service.InstallationTargetResolved += RegisterTarget;
+            try
+            {
+                var installedId = await install(service, item.CreateProgress(), ct);
+                item.RegisterInstallationTarget(installedId);
+                return installedId;
+            }
+            finally { service.InstallationTargetResolved -= RegisterTarget; }
+        }, targetFolderPath: folderPath);
+
+    private static async Task<T> RunInDownloadQueueAsync<T>(string name,
+        Func<DownloadQueueItem, CancellationToken, Task<T>> work,
+        string? targetVersionId = null, string? targetFolderPath = null)
+    {
+        return await DownloadQueueService.Instance.RunAndWaitAsync(name, work,
+            targetVersionId: targetVersionId, targetFolderPath: targetFolderPath);
+    }
+
+    /// <summary>
+    /// 按"已选清单"里锁定的具体版本（WizardModSelection.Entry）下载，不再重新查询/匹配"最新版"——
+    /// 用户在 ModDetailPage 里选的是哪个文件，这里就下载哪个文件。下载失败/次要步骤异常不阻断整体
+    /// 流程，只记录到运行详情文本里，原则跟 ClientLoaderInstallService 里 Fabric API 那部分一致。
+    /// </summary>
+    private async Task DownloadModSelectionSafeAsync(string minecraftDir, WizardModSelection selection)
+    {
+        try
+        {
+            if (selection.Source == ModSource.Modrinth && selection.Entry.RawVersion is ModrinthVersion version)
+            {
+                await _modrinth.DownloadResourceAsync(minecraftDir, ModrinthResourceType.Mod, version, null, saveName: null);
+            }
+            else if (selection.Source == ModSource.CurseForge && selection.Entry.RawVersion is CurseForgeFile file)
+            {
+                await GetCurseForge().DownloadModAsync(minecraftDir, file, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 次要步骤失败不中止整体流程，只记录到运行详情文本里（用户在步骤 5 界面能看到这行
+            // 一闪而过；更完整的记录可以在后续版本里接入 LogsPage，这里先保证不阻断主流程）。
+            ReportRun("下载 Mod", $"{selection.Title}：下载失败（{ex.Message}），已跳过", RunBar.Value);
+        }
+    }
+
+    private async Task DownloadResourceSafeAsync(string minecraftDir, string mcVersion, SelectableResourceItem res)
+    {
+        try
+        {
+            if (res.Source == ModSource.Modrinth)
+            {
+                var versions = await _modrinth.GetVersionsAsync(res.SourceId, mcVersion);
+                var pick = versions.FirstOrDefault();
+                if (pick == null)
+                {
+                    ReportRun("下载资源包/光影包", $"{res.Title}：没有匹配 {mcVersion} 的版本，已跳过", RunBar.Value);
+                    return;
+                }
+                await _modrinth.DownloadResourceAsync(minecraftDir, _selectedResourceType, pick, null, saveName: null);
+            }
+            else if (res.Source == ModSource.CurseForge)
+            {
+                var modId = int.Parse(res.SourceId);
+                var files = await GetCurseForge().GetFilesAsync(modId, mcVersion);
+                var pick = files.FirstOrDefault();
+                if (pick == null)
+                {
+                    ReportRun("下载资源包/光影包", $"{res.Title}：没有匹配 {mcVersion} 的文件，已跳过", RunBar.Value);
+                    return;
+                }
+                var kind = _selectedResourceType == ModrinthResourceType.Shader
+                    ? CurseForgeResourceKind.Shader : CurseForgeResourceKind.ResourcePack;
+                await GetCurseForge().DownloadResourceAsync(minecraftDir, kind, pick, null);
+            }
+        }
+        catch (Exception ex)
+        {
+            ReportRun("下载资源包/光影包", $"{res.Title}：下载失败（{ex.Message}），已跳过", RunBar.Value);
+        }
+    }
+}
+
+/// <summary>
+/// Mod 搜索结果的可勾选包装类。没有直接给 UnifiedModItem 加 IsSelected 属性——那是
+/// Models/ModSearchModels.cs 里的公共模型，被 DownloadCenterPage 等其它页面复用，加属性
+/// 会影响那些地方的绑定行为，改用包装类更安全，参照 ModManagerPage 底部的
+/// LocalModDisplayItem 包装类写法。
+/// </summary>
+public class SelectableModItem
+{
+    public UnifiedModItem Item { get; }
+    public bool IsSelected { get; set; }
+    public string Title => Item.Title;
+    public string Description => Item.Description;
+    public ModSource Source => Item.Source;
+    public string SourceId => Item.SourceId;
+
+    public SelectableModItem(UnifiedModItem item) => Item = item;
+}
+
+public class WizardModSelection
+{
+    public UnifiedModItem Item { get; }
+    public InlineVersionEntry Entry { get; }
+    public string Title => Item.Title;
+    public ModSource Source => Item.Source;
+    public string SourceId => Item.SourceId;
+    public string VersionLabel => $"{Entry.Name}（{Entry.GameVersionsText}）";
+
+    public WizardModSelection(UnifiedModItem item, InlineVersionEntry entry)
+    {
+        Item = item;
+        Entry = entry;
+    }
+}
+
+/// <summary>同上，资源包/光影包搜索结果的可勾选包装类。</summary>
+public class SelectableResourceItem
+{
+    public UnifiedResourceItem Item { get; }
+    public bool IsSelected { get; set; }
+    public string Title => Item.Title;
+    public string Description => Item.Description;
+    public ModSource Source => Item.Source;
+    public string SourceId => Item.SourceId;
+
+    public SelectableResourceItem(UnifiedResourceItem item) => Item = item;
+}

@@ -1,0 +1,22 @@
+# Build products and IDE-local files
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+/artifacts/
+/dist/
+
+# Local credentials and signing material; never use these patterns as a secret audit.
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+*.snk
+set-xcl2-keys.bat
+set-xcl2-keys.ps1
